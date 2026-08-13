@@ -85,6 +85,14 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
   `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
 
+## ✅ Etap 10 — Pobierany launcher
+- ✅ `husarz-app` (serwer + auto-otwarcie konsoli; deleguje do `husarz up --open`);
+  frozen → config/prompts z bundla PyInstaller.
+- ✅ Pakowanie PyInstaller (`packaging/husarz.spec`), extra `[package]`.
+- ✅ CI `release.yml` — binarki Windows/Linux/macOS jako artefakty + GitHub Release (tag v*).
+- ✅ Testy: opener, --open, delegacja. Docs: LAUNCHER.md, ADR-0012.
+- ⬜ Podpis kodu/notaryzacja (operator); desktop Tauri (auto-update, tray).
+
 ## ✅ Etap 9 — Integracje Git (GitHub/GitLab) + tworzenie PR
 - ✅ `husarz.git`: klienci GitHub/GitLab nad wstrzykiwalnym transportem (lista repo,
   utworzenie PR/MR); magazyn połączeń (File/mem); token jako referencja do sekretu.

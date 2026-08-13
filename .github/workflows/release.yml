@@ -1,0 +1,56 @@
+# Buduje pobieralny launcher (husarz-app) dla Windows/Linux/macOS.
+# Artefakty dostępne w zakładce Actions; dla tagu v* dołączane do GitHub Release.
+name: Release launcher
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # potrzebne do utworzenia/aktualizacji Release przy tagu
+
+jobs:
+  build:
+    name: Launcher (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: husarz-app-windows
+            binary: dist/husarz-app.exe
+          - os: ubuntu-latest
+            artifact: husarz-app-linux
+            binary: dist/husarz-app
+          - os: macos-latest
+            artifact: husarz-app-macos
+            binary: dist/husarz-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Instalacja pakietu + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[package]"
+
+      - name: Budowa binarki
+        run: pyinstaller packaging/husarz.spec --noconfirm
+
+      - name: Publikacja artefaktu
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+      - name: Dołącz do Release (tylko dla tagu v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.binary }}

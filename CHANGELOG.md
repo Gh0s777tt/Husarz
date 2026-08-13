@@ -5,6 +5,20 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 10 — pobierany launcher)
+- Launcher desktopowy `husarz-app` (`husarz.launcher.app`): bez argumentów startuje
+  serwer na loopbacku i **otwiera konsolę w przeglądarce**; deleguje do `husarz up
+  --open` (reużywa logiki i bramek bezpieczeństwa). Frozen (PyInstaller) → domyślne
+  `config`/`prompts` z `sys._MEIPASS`.
+- CLI: flaga `husarz up --open` + `_open_browser_async` (wątek daemon, opener
+  wstrzykiwalny, błąd otwarcia nie wywraca serwera; tylko loopback).
+- Pakowanie: `packaging/husarz.spec` (PyInstaller onefile: rdzeń + konsola + domyślne
+  config/prompts), `packaging/husarz_app.py`, `packaging/README.md`; extra `[package]`.
+- CI: `.github/workflows/release.yml` — buduje binarki Windows/Linux/macOS i publikuje
+  jako artefakty (dla tagu `v*` dołącza do GitHub Release).
+- Testy: +6 (otwieranie przeglądarki, flaga --open, delegacja husarz-app, parser).
+  Docs: `docs/LAUNCHER.md`, ADR-0012.
+
 ### Dodane (Etap 9 — integracje Git: GitHub/GitLab + tworzenie PR)
 - Pakiet `husarz.git`: klienci `GitHubProvider`/`GitLabProvider` nad WSTRZYKIWALNYM
   transportem (testy bez sieci): lista repozytoriów + utworzenie PR/MR. Magazyn

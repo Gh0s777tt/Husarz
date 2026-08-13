@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from husarz import __version__
@@ -58,6 +58,30 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 def _is_loopback(host: str) -> bool:
     return host in _LOOPBACK_HOSTS
+
+
+def _open_browser_async(
+    url: str, *, opener: Callable[[str], Any] | None = None, delay: float = 1.5
+) -> None:
+    """Otwiera przeglądarkę na konsoli po krótkiej zwłoce, w wątku w tle (UX launchera).
+
+    Zwłoka daje serwerowi czas na nasłuch. Błąd otwarcia przeglądarki NIE może
+    wywrócić serwera (headless/brak DISPLAY) — jest cicho ignorowany.
+    """
+    import contextlib  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    import webbrowser  # noqa: PLC0415
+
+    open_fn = opener if opener is not None else webbrowser.open
+
+    def _run() -> None:
+        time.sleep(delay)
+        # Otwarcie przeglądarki jest best-effort (headless/brak DISPLAY) — nie wywraca serwera.
+        with contextlib.suppress(Exception):
+            open_fn(url)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _resolve_api_token(config: HusarzConfig) -> str | None:
@@ -199,10 +223,13 @@ def _cmd_up(args: argparse.Namespace) -> int:
         auth_note = "auth: token maszynowy"
     else:
         auth_note = "auth: brak (loopback)"
+    url = f"http://{args.host}:{args.port}/"
     print(
-        f"Husarz API — profil {config.platform.profile.value} — "
-        f"http://{args.host}:{args.port} (konsola: /) — {auth_note}"
+        f"Husarz API — profil {config.platform.profile.value} — " f"{url} (konsola) — {auth_note}"
     )
+    # Launcher: otwórz konsolę w przeglądarce (tylko loopback — sensowne lokalnie).
+    if getattr(args, "open", False) and _is_loopback(args.host):
+        _open_browser_async(url)
     uvicorn.run(app, host=args.host, port=args.port)  # pragma: no cover - serwer blokujący
     return 0
 
@@ -277,6 +304,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Zezwól na nasłuch poza loopbackiem BEZ tokenu API (świadomie; zabezpiecz "
         "dostęp na warstwie sieci). Domyślnie taki nasłuch jest odrzucany.",
+    )
+    p_up.add_argument(
+        "--open",
+        action="store_true",
+        help="Otwórz konsolę w przeglądarce po starcie (UX launchera; tylko loopback).",
     )
     p_up.set_defaults(func=_cmd_up)
 

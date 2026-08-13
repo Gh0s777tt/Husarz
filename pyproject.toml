@@ -35,10 +35,13 @@ dev = [
   "types-PyYAML>=6.0",
   "pre-commit>=3.7",
 ]
+# Pakowanie do jednego pliku wykonywalnego (buduje operator/CI, nie środowisko dev).
+package = ["pyinstaller>=6.0"]
 
 [project.scripts]
-# Launcher CLI (pełna implementacja w Etapie 5). Na razie punkt wejścia szkieletu.
+# CLI (validate/version/up/useradd) oraz launcher desktopowy (serwer + przeglądarka).
 husarz = "husarz.launcher.cli:main"
+husarz-app = "husarz.launcher.app:main"
 
 [project.urls]
 Homepage = "https://gitlab.com/Gh0s777tt/husarz"
