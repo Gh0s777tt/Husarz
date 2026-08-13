@@ -5,6 +5,14 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Zmienione (standard prowadzenia projektu)
+- `CLAUDE.md`: doprecyzowany standard prowadzenia projektu (wymóg użytkownika) — aktualizacja
+  na bieżąco README/CHANGELOG/ROADMAP/`docs/`/wiki/PDF w tym samym kroku co kod; wiki/PDF ze
+  zrzutami ekranu (preferowany interaktywny PDF), zasoby w `docs/assets/`; higiena gita
+  (commit/branch/merge/push-readiness, tagi SemVer spójne z CHANGELOG); skan plików publicznych
+  pod kątem kluczy/danych prywatnych przed publikacją (w tym zrzutów ekranu); obowiązkowy opis
+  kodu „niebezpiecznego" (po co, ryzyko, czy usuwalny/jak zabezpieczony).
+
 ### Dodane (Etap 14b — trwałość SQLite + szyfrowanie at-rest + przewleczenie sekretów)
 - `SqliteVectorStore` (stdlib `sqlite3`, jeden plik `data_dir/memory/<collection>.db`) za
   NIEZMIENIONYM `Protocol VectorStore` — realna pamięć długoterminowa (przeżywa restart).
