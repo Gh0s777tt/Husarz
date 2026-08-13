@@ -69,6 +69,8 @@ class FileGitConnectionStore(InMemoryGitConnectionStore):
     def __init__(self, path: str | Path) -> None:
         super().__init__()
         self._path = Path(path)
+        # Serializuje mutację+zapis (endpointy FastAPI w puli wątków) — atomowo.
+        self._file_lock = threading.Lock()
         self._load()
 
     def _load(self) -> None:
@@ -76,29 +78,32 @@ class FileGitConnectionStore(InMemoryGitConnectionStore):
             return
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:  # pragma: no cover - uszkodzony plik
+            for item in data.get("connections", []):
+                conn = GitConnection(
+                    name=item["name"],
+                    provider=GitProviderKind(item["provider"]),
+                    api_base=item["api_base"],
+                    token_ref=item["token_ref"],
+                    username=item.get("username"),
+                )
+                self._by_name[conn.name] = conn
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             raise GitConnectionError(f"Nie można wczytać połączeń z {self._path}: {exc}") from exc
-        for item in data.get("connections", []):
-            conn = GitConnection(
-                name=item["name"],
-                provider=GitProviderKind(item["provider"]),
-                api_base=item["api_base"],
-                token_ref=item["token_ref"],
-                username=item.get("username"),
-            )
-            self._by_name[conn.name] = conn
 
     def _persist(self) -> None:
+        # Migawka pod zamkiem + zapis atomowy do unikatowego pliku tymczasowego.
         self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"connections": [asdict(c) for c in self._by_name.values()]}
-        tmp = self._path.with_name(f"{self._path.name}.tmp")
+        tmp = self._path.with_name(f"{self._path.name}.{os.getpid()}.tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, self._path)
 
     def add(self, conn: GitConnection) -> None:  # noqa: D102
-        super().add(conn)
-        self._persist()
+        with self._file_lock:  # cała para mutacja+zapis atomowa (inny zamek niż bazowy)
+            super().add(conn)
+            self._persist()
 
     def remove(self, name: str) -> None:  # noqa: D102
-        super().remove(name)
-        self._persist()
+        with self._file_lock:
+            super().remove(name)
+            self._persist()

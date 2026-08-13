@@ -368,20 +368,24 @@
       $("g-repos-btn").onclick = async () => {
         const name = $("g-conn-sel").value; if (!name) return;
         $("git-repos").textContent = "…";
-        const r = await fetch("/api/git/connections/" + encodeURIComponent(name) + "/repos", { headers: authHeaders() });
-        const d = await r.json();
-        if (!Array.isArray(d)) { $("git-repos").innerHTML = `<span class="err">${esc(d.detail || "Błąd.")}</span>`; return; }
-        $("git-repos").innerHTML = d.length ? "<table><tr><th>Repozytorium</th><th>Gałąź</th><th>Prywatne</th></tr>" +
-          d.map((x) => `<tr><td>${esc(x.full_name)}</td><td>${esc(x.default_branch)}</td><td>${x.private ? "tak" : "—"}</td></tr>`).join("") + "</table>"
-          : "<span class='muted'>Brak repozytoriów.</span>";
+        try {
+          const r = await fetch("/api/git/connections/" + encodeURIComponent(name) + "/repos", { headers: authHeaders() });
+          const d = await r.json();
+          if (!Array.isArray(d)) { $("git-repos").innerHTML = `<span class="err">${esc(d.detail || "Błąd.")}</span>`; return; }
+          $("git-repos").innerHTML = d.length ? "<table><tr><th>Repozytorium</th><th>Gałąź</th><th>Prywatne</th></tr>" +
+            d.map((x) => `<tr><td>${esc(x.full_name)}</td><td>${esc(x.default_branch)}</td><td>${x.private ? "tak" : "—"}</td></tr>`).join("") + "</table>"
+            : "<span class='muted'>Brak repozytoriów.</span>";
+        } catch (e) { $("git-repos").innerHTML = `<span class="err">Błąd sieci: ${esc(e.message || e)}</span>`; }
       };
       $("pr-create").onclick = async () => {
         const name = $("g-conn-sel").value; if (!name) return;
         $("pr-out").hidden = false; $("pr-out").textContent = "…";
         const body = { repo: $("pr-repo").value.trim(), title: $("pr-title").value.trim(),
           head: $("pr-head").value.trim(), base: $("pr-base").value.trim(), body: $("pr-body").value };
-        const d = await api("git/connections/" + encodeURIComponent(name) + "/pull-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        $("pr-out").textContent = d.url ? "Utworzono PR/MR: " + d.url : "Błąd: " + (d.detail || JSON.stringify(d));
+        try {
+          const d = await api("git/connections/" + encodeURIComponent(name) + "/pull-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          $("pr-out").textContent = d.url ? "Utworzono PR/MR: " + d.url : "Błąd: " + (d.detail || JSON.stringify(d));
+        } catch (e) { $("pr-out").textContent = "Błąd sieci: " + (e.message || e); }
       };
     }
 

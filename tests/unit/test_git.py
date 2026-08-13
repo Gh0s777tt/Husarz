@@ -146,6 +146,65 @@ def test_build_provider_egress_allowed_when_allowlisted() -> None:
     assert isinstance(provider, GitHubProvider)
 
 
+def _conn_with(api_base: str) -> GitConnection:
+    return GitConnection(
+        name="x", provider=GitProviderKind.GITHUB, api_base=api_base, token_ref="env:X"
+    )
+
+
+def test_build_provider_blocks_internal_host_ssrf() -> None:
+    # Nawet przy egress=allow host wewnętrzny (metadata/loopback) jest twardo blokowany.
+    allow = EgressConfig(default_policy=EgressPolicy.ALLOW)
+    for host in ("https://169.254.169.254", "https://127.0.0.1", "https://localhost"):
+        with pytest.raises(EgressError):
+            build_provider(_conn_with(host), "tok", allow)
+
+
+def test_build_provider_rejects_non_https_and_userinfo() -> None:
+    allow = EgressConfig(default_policy=EgressPolicy.ALLOW)
+    with pytest.raises(GitError):
+        build_provider(_conn_with("http://api.github.com"), "tok", allow)  # nie-https
+    with pytest.raises(GitError):
+        build_provider(_conn_with("https://user@api.github.com"), "tok", allow)  # userinfo
+
+
+def test_github_create_pr_encodes_repo_path() -> None:
+    t = FakeTransport({("POST", "/pulls"): (201, {"number": 1, "html_url": "u", "title": "x"})})
+    GitHubProvider("https://api.github.com", "tok", t).create_pull_request(
+        "acme/a b", title="x", head="h", base="m"
+    )
+    assert "acme/a%20b/pulls" in t.calls[0][1]  # spacja zakodowana, '/' zachowany
+
+
+def test_list_repositories_skips_non_dict_items() -> None:
+    t = FakeTransport(
+        {
+            ("GET", "/user/repos"): (
+                200,
+                [
+                    None,
+                    "x",
+                    {
+                        "full_name": "a/b",
+                        "default_branch": "main",
+                        "private": False,
+                        "html_url": "u",
+                    },
+                ],
+            )
+        }
+    )
+    repos = GitHubProvider("https://api.github.com", "tok", t).list_repositories()
+    assert [r.full_name for r in repos] == ["a/b"]
+
+
+def test_file_store_load_corrupt_raises_clean(tmp_path: Path) -> None:
+    path = tmp_path / "c.json"
+    path.write_text('{"connections": [{"name": "x"}]}', encoding="utf-8")  # brak wymaganych pól
+    with pytest.raises(GitConnectionError):
+        FileGitConnectionStore(path)
+
+
 # --- Magazyn połączeń -------------------------------------------------------
 
 

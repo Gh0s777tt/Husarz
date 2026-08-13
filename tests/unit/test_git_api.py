@@ -140,3 +140,99 @@ def test_rbac_user_cannot_access_git(repo_config_dir: Path) -> None:
     client = _client(repo_config_dir, GitService(), api_token="s3cret", api_role="user")
     resp = client.get("/api/git/connections", headers={"Authorization": "Bearer s3cret"})
     assert resp.status_code == 403
+
+
+def test_rbac_user_cannot_write_or_pr(repo_config_dir: Path) -> None:
+    client = _client(repo_config_dir, GitService(), api_token="s3cret", api_role="user")
+    hdr = {"Authorization": "Bearer s3cret"}
+    conn = {
+        "name": "x",
+        "provider": "github",
+        "api_base": "https://api.github.com",
+        "token_ref": "env:X",
+    }
+    assert client.post("/api/git/connections", json=conn, headers=hdr).status_code == 403
+    pr = {"repo": "o/n", "title": "t", "head": "h", "base": "main"}
+    assert (
+        client.post("/api/git/connections/gh/pull-request", json=pr, headers=hdr).status_code == 403
+    )
+
+
+def test_add_connection_rejects_raw_token_422(repo_config_dir: Path) -> None:
+    client = _client(repo_config_dir, GitService())
+    body = {
+        "name": "x",
+        "provider": "github",
+        "api_base": "https://api.github.com",
+        "token_ref": "ghp_RAWSECRET",
+    }  # nie-referencja
+    assert client.post("/api/git/connections", json=body).status_code == 422
+
+
+def test_add_connection_rejects_http_422(repo_config_dir: Path) -> None:
+    client = _client(repo_config_dir, GitService())
+    body = {
+        "name": "x",
+        "provider": "github",
+        "api_base": "http://api.github.com",
+        "token_ref": "env:X",
+    }
+    assert client.post("/api/git/connections", json=body).status_code == 422
+
+
+def test_pull_request_rejects_bad_repo_422(repo_config_dir: Path) -> None:
+    svc = _live_service({})
+    body = {"repo": "o/r?x=1", "title": "t", "head": "h", "base": "main"}
+    assert (
+        _client(repo_config_dir, svc)
+        .post("/api/git/connections/gh/pull-request", json=body)
+        .status_code
+        == 422
+    )
+
+
+def test_provider_auth_error_maps_502(repo_config_dir: Path) -> None:
+    svc = _live_service({("GET", "/user/repos"): (401, {"message": "bad token"})})
+    assert _client(repo_config_dir, svc).get("/api/git/connections/gh/repos").status_code == 502
+
+
+def test_delete_connection(repo_config_dir: Path) -> None:
+    svc = GitService()
+    svc.add(_github_conn())
+    client = _client(repo_config_dir, svc)
+    assert client.delete("/api/git/connections/gh").status_code == 200
+    assert client.get("/api/git/connections").json() == []
+
+
+def test_gitlab_merge_request_via_api(repo_config_dir: Path) -> None:
+    svc = GitService(
+        secrets=FakeSecrets(),
+        egress=EgressConfig(default_policy=EgressPolicy.ALLOW),
+        transport=FakeTransport(
+            {("POST", "/merge_requests"): (201, {"iid": 5, "web_url": "w5", "title": "Fix"})}
+        ),
+    )
+    svc.add(
+        GitConnection(
+            name="gl",
+            provider=GitProviderKind.GITLAB,
+            api_base="https://gitlab.com/api/v4",
+            token_ref="env:GL",
+        )
+    )
+    body = {"repo": "grp/app", "title": "Fix", "head": "feat", "base": "main"}
+    pr = (
+        _client(repo_config_dir, svc).post("/api/git/connections/gl/pull-request", json=body).json()
+    )
+    assert pr["number"] == 5
+
+
+def test_pull_request_egress_block_is_audited(repo_config_dir: Path) -> None:
+    audit = AuditLog()
+    svc = GitService(secrets=FakeSecrets(), egress=EgressConfig())  # deny-all
+    svc.add(_github_conn())
+    config = load_config(repo_config_dir)
+    client = TestClient(create_app(config, audit=audit, git_service=svc))
+    body = {"repo": "o/n", "title": "t", "head": "h", "base": "main"}
+    assert client.post("/api/git/connections/gh/pull-request", json=body).status_code == 403
+    assert any(e.action == "git.pull_request" for e in audit.entries)  # próba audytowana

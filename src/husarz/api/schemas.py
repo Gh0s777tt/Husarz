@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -171,6 +172,30 @@ class GitConnectionIn(BaseModel):
     token_ref: str = Field(min_length=1, max_length=256)
     username: str | None = Field(default=None, max_length=128)
 
+    @field_validator("token_ref")
+    @classmethod
+    def _token_ref_is_reference(cls, value: str) -> str:
+        # Wymuszamy REFERENCJĘ (env:/file:/vault:/sops:) — surowy token nie może trafić
+        # do magazynu na dysku (spójnie z „sekrety poza repo/magazynem").
+        if not value.startswith(("env:", "file:", "vault:", "sops:")):
+            raise ValueError(
+                "token_ref musi być referencją do sekretu (env:/file:/vault:/sops:), "
+                "a nie samą wartością tokenu."
+            )
+        return value
+
+    @field_validator("api_base")
+    @classmethod
+    def _api_base_is_https(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme != "https":
+            raise ValueError("api_base musi być adresem https://.")
+        if parsed.username or parsed.password or "@" in parsed.netloc:
+            raise ValueError("api_base nie może zawierać poświadczeń w URL.")
+        if not parsed.hostname:
+            raise ValueError("api_base nie zawiera hosta.")
+        return value
+
 
 class GitConnectionView(BaseModel):
     """Widok połączenia Git (bez sekretu — ``token_ref`` to tylko referencja)."""
@@ -199,6 +224,21 @@ class PullRequestIn(BaseModel):
     head: str = Field(min_length=1, max_length=256)
     base: str = Field(min_length=1, max_length=256)
     body: str = Field(default="", max_length=100_000)
+
+    @field_validator("repo")
+    @classmethod
+    def _repo_is_safe_path(cls, value: str) -> str:
+        # 'owner/name' (GitHub) lub 'grupa/.../projekt' (GitLab): segmenty [\w.-], min. dwa,
+        # bez '..' — koniec wstrzykiwania '?','#',spacji do ścieżki URL.
+        segments = value.split("/")
+        if len(segments) < 2 or any(
+            not seg or seg == ".." or not all(ch.isalnum() or ch in "._-" for ch in seg)
+            for seg in segments
+        ):
+            raise ValueError(
+                "repo musi mieć postać 'owner/name' (dozwolone znaki: litery, cyfry, . _ -)."
+            )
+        return value
 
 
 class PullRequestView(BaseModel):

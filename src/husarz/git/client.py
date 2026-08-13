@@ -8,15 +8,53 @@ przechodzi przez bramkę egress (deny-all): host bazy API musi być dozwolony w
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any, Protocol, runtime_checkable
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
-from husarz.config.schema import EgressConfig
+from husarz.config.schema import EgressConfig, EgressPolicy
 from husarz.git.errors import GitAuthError, GitError, GitTransportError
 from husarz.git.models import GitConnection, GitProviderKind, PullRequest, Repo
-from husarz.router.egress import check_endpoint_allowed
+from husarz.router.egress import EgressError
 
 _DEFAULT_TIMEOUT = 30
+
+
+def _is_internal_host(host: str) -> bool:
+    """Host wewnętrzny (loopback/link-local/metadata/unspecified) — HARD BLOCK dla Git."""
+    h = host.strip("[]").lower()
+    if h == "localhost" or h.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return False  # nazwa hosta (nie IP literał) — i tak wymagana jest allowlista
+    return ip.is_loopback or ip.is_link_local or ip.is_unspecified
+
+
+def _validate_git_endpoint(api_base: str, egress: EgressConfig) -> None:
+    """Twarda walidacja hosta Git (anty-SSRF): https, bez userinfo, bez hostów
+    wewnętrznych, host MUSI być na allowliście egress. Świadomie NIE korzysta z
+    „lokalne = zawsze dozwolone" (to bezpieczne dla lokalnego Ollamy, nie dla Gita)."""
+    parsed = urlparse(api_base)
+    if parsed.scheme != "https":
+        raise GitError("api_base musi być adresem https:// (token nie może lecieć plaintextem).")
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        raise GitError("api_base nie może zawierać poświadczeń w URL (userinfo).")
+    host = parsed.hostname
+    if not host:
+        raise GitError("api_base nie zawiera hosta.")
+    if _is_internal_host(host):
+        raise EgressError(
+            f"Host '{host}' zablokowany dla Git (loopback/link-local/metadata — SSRF)."
+        )
+    if egress.default_policy is EgressPolicy.ALLOW:
+        return
+    if any(host == domain or host.endswith(f".{domain}") for domain in egress.allowlist):
+        return
+    raise EgressError(
+        f"Egress zabroniony dla hosta '{host}' — dodaj go do security.egress.allowlist."
+    )
 
 
 @runtime_checkable
@@ -108,7 +146,7 @@ class GitHubProvider:
             _DEFAULT_TIMEOUT,
         )
         _raise_for_status(status, data, "lista repozytoriów")
-        items = data if isinstance(data, list) else []
+        items = [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
         return [
             Repo(
                 full_name=str(r.get("full_name", "")),
@@ -124,7 +162,8 @@ class GitHubProvider:
     ) -> PullRequest:  # noqa: D102
         status, data = self._t(
             "POST",
-            f"{self._base}/repos/{repo}/pulls",
+            # Kodowanie ścieżki repo (zachowanie '/') — koniec wstrzykiwania '?','#' do URL.
+            f"{self._base}/repos/{quote(repo, safe='/')}/pulls",
             self._headers(),
             {"title": title, "head": head, "base": base, "body": body},
             _DEFAULT_TIMEOUT,
@@ -158,7 +197,7 @@ class GitLabProvider:
             _DEFAULT_TIMEOUT,
         )
         _raise_for_status(status, data, "lista repozytoriów")
-        items = data if isinstance(data, list) else []
+        items = [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
         return [
             Repo(
                 full_name=str(r.get("path_with_namespace", "")),
@@ -199,9 +238,10 @@ def build_provider(
     """Buduje klienta dostawcy dla połączenia. Sprawdza egress bazy API (deny-all).
 
     Raises:
-        EgressError: host bazy API nie jest dozwolony przez politykę egress.
+        EgressError: host bazy API wewnętrzny albo niedozwolony przez politykę egress.
+        GitError: api_base nie jest poprawnym https bez poświadczeń w URL.
     """
-    check_endpoint_allowed(conn.api_base, egress)
+    _validate_git_endpoint(conn.api_base, egress)
     active = transport if transport is not None else HttpxGitTransport()
     if conn.provider is GitProviderKind.GITHUB:
         return GitHubProvider(conn.api_base, token, active)

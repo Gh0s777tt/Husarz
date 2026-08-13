@@ -638,12 +638,13 @@ def create_app(
         dependencies=[dep_git_pr],
     )
     def git_pull_request(name: str, request: PullRequestIn) -> PullRequestView:
-        provider = _git_provider(_require_git(), name)
+        # Audyt PRÓBY przed budową dostawcy — także odrzucenia egress/nieznane połączenie.
         audit_log.record(
             "api",
             "git.pull_request",
             {"connection": name[:64], "repo": request.repo[:128], "base": request.base[:128]},
         )
+        provider = _git_provider(_require_git(), name)
         try:
             pr = provider.create_pull_request(
                 request.repo,

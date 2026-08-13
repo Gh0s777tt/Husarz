@@ -315,3 +315,20 @@ to obrona miękka; limit tokenów pozostaje miękki (rozliczany po odpowiedzi).
 **Ograniczenia:** uwierzytelnianie to PAT (referencja) — pełny OAuth + tokeny
 szyfrowane at-rest (tryb hostowany) odłożone; egzekwowanie egress na warstwie
 aplikacji (pełne wymuszenie sieciowe: NetworkPolicy/sandbox, Etap 6).
+
+### Etap 9 — hardening po przeglądzie (data: 2026-08-13)
+
+Przegląd (3 wymiary, 11 findingów, 11 potwierdzonych — w tym blocker SSRF) i utwardzenia:
+
+| Poprawka | Test |
+|---|---|
+| SSRF: twardy blok hostów wewnętrznych (loopback/link-local/metadata) dla Git | `test_build_provider_blocks_internal_host_ssrf`, `test_build_provider_egress_denied_by_default` |
+| api_base https-only, bez userinfo | `test_build_provider_rejects_non_https_and_userinfo`, `test_add_connection_rejects_http_422` |
+| token_ref musi być referencją (surowy token → 422) | `test_add_connection_rejects_raw_token_422` |
+| repo bez wstrzyknięć (walidator + URL-encode) | `test_pull_request_rejects_bad_repo_422`, `test_github_create_pr_encodes_repo_path` |
+| Magazyn: zapis atomowy pod zamkiem; odporny `_load` | `test_file_connection_store_persists`, `test_file_store_load_corrupt_raises_clean` |
+| Klient: pomijanie elementów nie-dict; audyt próby PR przed budową dostawcy | `test_list_repositories_skips_non_dict_items`, `test_pull_request_egress_block_is_audited` |
+| RBAC: user bez git:write/git:pr; 502 z odmowy dostawcy | `test_rbac_user_cannot_write_or_pr`, `test_provider_auth_error_maps_502` |
+
+**Ograniczenia:** ochrona przed DNS-rebinding (walidacja po rozwiązaniu nazwy) —
+do rozważenia; egzekwowanie egress to warstwa aplikacji (pełne wymuszenie: NetworkPolicy).

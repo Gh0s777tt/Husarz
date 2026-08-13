@@ -21,6 +21,23 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 - Testy: +21 (klienci GitHub/GitLab na mock transport, egress, magazyn, GitService,
   API — 404/409/403/RBAC). Docs: `docs/GIT.md`, ADR-0011.
 
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 9)
+- **Blocker SSRF**: dla Git NIE stosujemy „lokalne = zawsze dozwolone" — nowa walidacja
+  `api_base` twardo **blokuje hosty wewnętrzne** (loopback/link-local/metadata
+  `169.254.169.254`/localhost) i **wymaga jawnej allowlisty** egress.
+- **api_base https-only, bez userinfo** (token nie leci plaintextem/na obcy host) —
+  walidator schematu (422) + walidacja runtime (403/502).
+- **token_ref jako referencja** — walidator odrzuca surowy token (422); sekret nie
+  trafia na dysk (spójne z ADR-0011).
+- **repo bez wstrzyknięć** — walidator postaci `owner/name` + URL-encode ścieżki w
+  kliencie GitHub (koniec `?`,`#` w URL).
+- Magazyn połączeń: zapis atomowy pod zamkiem (mutacja+persist), unikatowy temp,
+  odporny `_load` (uszkodzony plik → czytelny `GitConnectionError`).
+- Klienci: pomijanie elementów nie-`dict` w liście repo (koniec 500). Audyt próby
+  PR **przed** budową dostawcy (blok egress też audytowany).
+- Testy: +13 (SSRF/https/userinfo, encode repo, non-dict, corrupt-load, 422 dla
+  token/api_base/repo, 502 auth, DELETE, RBAC write/PR, GitLab MR, audyt egress).
+
 ### Dodane (Etap 8 — załączniki do czatu)
 - Moduł `husarz.attachments`: pliki/foldery jako kontekst czatu. Treść NIEZAUFANA —
   twarde limity (liczba, rozmiar per plik/łączny → DoS), czyszczenie nazw (basename),
