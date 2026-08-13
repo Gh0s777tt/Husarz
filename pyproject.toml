@@ -37,6 +37,9 @@ dev = [
 ]
 # Pakowanie do jednego pliku wykonywalnego (buduje operator/CI, nie środowisko dev).
 package = ["pyinstaller>=6.0"]
+# Trwała pamięć (RAG) z szyfrowaniem at-rest — SqliteVectorStore używa stdlib sqlite3,
+# a AesGcmCipher wymaga 'cryptography'. Bramka jakości instaluje [dev,memory].
+memory = ["cryptography>=42.0"]
 
 [project.scripts]
 # CLI (validate/version/up/useradd) oraz launcher desktopowy (serwer + przeglądarka).

@@ -27,6 +27,7 @@ from urllib.parse import urlparse
 from husarz.agents.base import AgentResult, BaseAgent, SupportsComplete
 from husarz.agents.react import ParseKind, ToolAction, parse_action, protocol_instructions
 from husarz.config.schema import HusarzConfig, ToolLoopConfig
+from husarz.config.secrets import SecretsProvider
 from husarz.fencing import fence_untrusted
 from husarz.router.types import ChatMessage, ChatRequest
 from husarz.security.audit import AuditLog
@@ -226,15 +227,23 @@ def build_tool_loop(
     executor: SandboxExecutor | None = None,
     fetcher: Fetcher | None = None,
     rag_backend: RagBackend | None = None,
+    secrets: SecretsProvider | None = None,
+    data_dir: str | Path | None = None,
     registry: ToolProviderRegistry | None = None,
 ) -> ToolLoop:
-    """Buduje ``ToolLoop`` z konfiguracji (mirror ``build_tools``/``build_plugin_service``)."""
+    """Buduje ``ToolLoop`` z konfiguracji (mirror ``build_tools``/``build_plugin_service``).
+
+    ``secrets``/``data_dir`` przewleczone do budowy trwałej pamięci RAG (sqlite + at-rest);
+    domyślnie ``data_dir`` z ``config.platform``.
+    """
     tools = build_tools(
         config,
         workspace=workspace,
         executor=executor,
         fetcher=fetcher,
         rag_backend=rag_backend,
+        secrets=secrets,
+        data_dir=data_dir if data_dir is not None else config.platform.data_dir,
         registry=registry,
     )
     kind_of = {name: tool_config.kind for name, tool_config in config.tools.items()}

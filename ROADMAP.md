@@ -94,8 +94,16 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Izolacja cross-agent (rozłączne kolekcje — walidacja), airgap na endpoint embeddera,
   wynik `search` ogradzany w pętli. Config typowany (`RagBackendConfig`). Testy: +25 (offline).
   Docs: ADR-0017.
-- ⬜ Etap 14b: trwałość (`SqliteVectorStore`) + szyfrowanie at-rest (`AesGcmCipher`) +
-  przewleczenie sekretów do produkcji; pgvector/mem0/graphiti jako adaptery za `RagBackend`.
+## ✅ Etap 14b — Trwałość + szyfrowanie at-rest pamięci
+- ✅ `SqliteVectorStore` (stdlib `sqlite3`, plik `data_dir/memory/<collection>.db`) za
+  NIEZMIENIONYM `VectorStore` — pamięć przeżywa restart. Namespace, dedup, FIFO, lock.
+- ✅ Szyfrowanie at-rest CAŁEGO rekordu (tekst+metadane+wektor) `AesGcmCipher` (AES-256-GCM,
+  nonce/rekord, `AAD=namespace` anti-swap; extra `husarz[memory]`). `IdentityCipher` tylko dev.
+- ✅ Przewleczenie `SecretsProvider`+`data_dir` do produkcji (`cli→create_app→build_tool_loop→
+  build_rag_backend`) — `encryption_key_ref` realnie rozwiązywany. Bramki fail-closed
+  (brak klucza/globalny at_rest / brak praw zapisu). Testy: +13 (offline). Docs: ADR-0018.
+- ⬜ Przyszłe adaptery za `RagBackend`/`VectorStore`: pgvector (serwer), mem0/graphiti;
+  KMS/rotacja klucza (obecnie DEK=SHA-256 sekretu, KDF-lite).
 
 ## ✅ Etap 13 — Pętla narzędziowa (function-calling)
 - ✅ Pętla ReAct (`agents/tool_loop.py`) — pierwszy egzekutor narzędzi; prompt-based

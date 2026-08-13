@@ -89,14 +89,22 @@ Rejestr obsługuje wyłącznie providerów **first-party** — świadomie NIE ł
 modułów (`entry_points`/`importlib`), bo import = wykonanie kodu (RCE/łańcuch dostaw).
 Rozszerzalność zewnętrzną realizują **wtyczki/konektory MCP** (data-driven, `husarz.plugins`).
 
-### Pamięć długoterminowa / RAG (Etap 14, ADR-0017)
+### Pamięć długoterminowa / RAG (Etap 14/14b, ADR-0017/0018)
 
 Narzędzie `rag` ma dwa backendy (`config/tools/rag.yaml`, pole `config.backend`):
 `memory` — słowny (domyślny, zero zależności) i `embedding` — wektorowy (`husarz.memory.
-EmbeddingRagBackend`: lokalny embedder Ollama, egress-gated + magazyn cosine w pamięci,
-izolacja `collection`/namespace, cap `max_items`). Trwałość i szyfrowanie at-rest wchodzą
-w Etapie 14b. Nowy backend = gałąź w `build_rag_backend` + plik. Izolacja między agentami:
-rozłączne `collection` (walidacja odrzuca kolizję). Patrz [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md).
+EmbeddingRagBackend`: lokalny embedder Ollama, egress-gated + magazyn wektorów,
+izolacja `collection`/namespace, cap `max_items`). Nowy backend = gałąź w `build_rag_backend`
++ plik. Izolacja między agentami: rozłączne `collection` (walidacja odrzuca kolizję).
+
+**Trwałość + szyfrowanie at-rest (Etap 14b, ADR-0018).** Dla `backend: embedding` magazyn
+wektorów wybiera pole `config.store`: `in_memory` (ulotny, domyślny) lub `sqlite` (trwały,
+plik `data_dir/memory/<collection>.db`). Przy `store: sqlite` cały rekord (tekst+metadane+
+wektor) jest szyfrowany at-rest (AES-256-GCM) kluczem z `config.encryption_key_ref`
+(referencja `env:`/`file:` rozwiązywana przez `SecretsProvider`; wymaga extry `husarz[memory]`).
+`config.encrypt_at_rest` (domyślnie dziedziczy `security.encryption.at_rest`) i `config.path`
+(nadpisanie ścieżki pliku) dopełniają konfigurację. Fail-closed: sqlite bez rozwiązywalnego
+klucza → błąd startu (nigdy cichy plaintext). Patrz [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md).
 
 ### Wykonanie w pętli narzędziowej (Etap 13, ADR-0016)
 

@@ -72,6 +72,7 @@ from husarz.attachments import (
 )
 from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
+from husarz.config.secrets import SecretsProvider
 from husarz.git import GitConnection, GitProviderKind, GitService
 from husarz.git.errors import GitAuthError, GitConnectionError, GitError
 from husarz.orchestrator import Orchestrator, build_orchestrator
@@ -209,6 +210,7 @@ def create_app(
     plugin_service: PluginService | None = None,
     chat_model: str | None = None,
     trusted_hosts: list[str] | None = None,
+    secrets: SecretsProvider | None = None,
 ) -> FastAPI:
     """Buduje aplikację FastAPI dla podanej konfiguracji.
 
@@ -251,7 +253,13 @@ def create_app(
         # Pętla narzędziowa: pierwszy egzekutor narzędzi. Zależności są leniwe
         # (executor/fetcher/rag budowane domyślnie), więc konstrukcja jest bezpieczna
         # bez Dockera — realne wykonanie potrzebują tylko agenci z opt-in (tool_loop_enabled).
-        loop = build_tool_loop(cfg, workspace=cfg.platform.workspace_dir, audit=audit_log)
+        loop = build_tool_loop(
+            cfg,
+            workspace=cfg.platform.workspace_dir,
+            audit=audit_log,
+            secrets=secrets,
+            data_dir=cfg.platform.data_dir,
+        )
         orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir, tool_loop=loop)
         return active, orch
 

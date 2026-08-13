@@ -117,3 +117,24 @@ def test_store_growth_capped() -> None:
     for i in range(10):
         backend.add(f"wpis numer {i}")
     assert store.count("ns") == 3  # magazyn ograniczony
+
+
+def test_sqlite_at_rest_no_plaintext_on_disk(tmp_path: Path) -> None:
+    # Niezmiennik at-rest: przy AesGcmCipher plik .db NIE zawiera jawnego tekstu/metadanych,
+    # wektora ANI odcisku treści. Idziemy ŚCIEŻKĄ PRODUKCYJNĄ: item_id = sha256(text), jak w
+    # EmbeddingRagBackend.add — jawny odcisk byłby membership-oracle / brute-force do PII.
+    import hashlib
+
+    from husarz.memory import AesGcmCipher, SqliteVectorStore
+
+    text = "TAJNE-PII-Kowalski 85010112345"
+    item_id = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    path = tmp_path / "mem.db"
+    store = SqliteVectorStore(path, AesGcmCipher(b"K" * 32))
+    store.upsert("ns", item_id, [0.1234, 0.5678, 0.9012], {"text": text, "m": "poufne"})
+    store.close()
+    raw = path.read_bytes()
+    assert text.encode("utf-8") not in raw  # tekst zaszyfrowany
+    assert b"poufne" not in raw  # metadane zaszyfrowane
+    assert b"0.5678" not in raw  # wektor zaszyfrowany (anti-inwersja)
+    assert item_id.encode("utf-8") not in raw  # BRAK jawnego odcisku treści (klucz zaślepiony)

@@ -458,3 +458,38 @@ panelu + krytyki suwerenności; at-rest/trwałość świadomie odłożone do 14b
 `SecretsProvider` do produkcji (inaczej klucz nierozwiązywalny = teatr). `FakeEmbedder` to
 test-double, nie realne wyszukiwanie — produkcja wymaga Ollamy; domyślny backend `memory`
 (słowny) zapewnia brak regresji. Deszyfruj-przed-scoringiem (14b) → koszt O(N), stąd `max_items`.
+
+### Etap 14b — trwałość + szyfrowanie at-rest pamięci (data: 2026-08-13)
+
+**Zakres:** `SqliteVectorStore` (trwały plik) + szyfrowanie at-rest CAŁEGO rekordu
+(`AesGcmCipher`, AES-256-GCM) + przewleczenie `SecretsProvider`/`data_dir` do produkcji —
+domknięcie blockera z Etapu 14 (klucz teraz realnie rozwiązywany, nie martwe pole).
+Powierzchnia: dane pamięci na dysku (PII/treść), sekret klucza, ścieżka pliku.
+**Wymóg bramki jakości:** instalacja `[dev,memory]` (extra `cryptography`) — test at-rest jest
+twardy (nie skip).
+
+| Niezmiennik | Test |
+|---|---|
+| At-rest: plik `.db` NIE zawiera jawnego tekstu, metadanych, wektora ANI odcisku treści (`id`) | `test_sqlite_at_rest_no_plaintext_on_disk`, `test_sqlite_encrypted_dedup_and_blinded_id` |
+| Jawna kolumna `id` zaślepiona (`blind_id`=HMAC pod DEK) — brak membership-oracle/korelacji | `test_sqlite_encrypted_dedup_and_blinded_id` |
+| Niekontrolowany błąd sqlite (`sqlite3.Error`) → `RagBackendError` (degradacja, nie HTTP 500) | (opakowanie `upsert/search/count`) |
+| Brak extry `cryptography` przy at-rest → błąd PRZY BUDOWIE (nie odroczony `ImportError`) | `build_cipher` (fail-closed) |
+| Pola at-rest wymagają `store: sqlite`; `store: sqlite` wymaga `backend: embedding` | `test_atrest_fields_require_sqlite_and_embedding` |
+| Niezgodny wymiar wektora w trwałym magazynie → `RagBackendError` (nie cicha `0.0`) | `test_sqlite_dim_mismatch_fails_closed` |
+| `AAD=namespace` (anti-swap): rekord kolekcji A nie odszyfruje się jako B | `test_aesgcm_wrong_aad_rejected` |
+| Zły klucz → odrzucenie (InvalidTag → `RagBackendError`, bez wycieku) | `test_aesgcm_bad_key_rejected` |
+| Fail-closed: sqlite + at-rest + brak klucza → błąd startu (nigdy plaintext) | `test_sqlite_encrypt_without_key_fails_closed`, `test_build_cipher_gates` |
+| Globalny `at_rest=true` nie może być wyłączony lokalnie dla trwałego magazynu | `test_global_at_rest_forbids_local_encrypt_false` |
+| `IdentityCipher` dozwolony WYŁĄCZNIE gdy at-rest wyłączony (dev) | `test_sqlite_unencrypted_allowed_when_global_off` |
+| Trwałość: pamięć przeżywa reopen; dedup + cap FIFO na dysku | `test_sqlite_persists_across_reopen`, `test_sqlite_dedup_and_cap` |
+| Sekret przewleczony przez pętlę → szyfrowana pamięć na dysku (E2E) | `test_sqlite_encrypted_memory_persists_and_via_loop` |
+| Izolacja `namespace` w sqlite (search filtruje kolekcję) | `test_sqlite_roundtrip_and_namespace` |
+
+**Ograniczenia (świadome):** DEK = SHA-256 sekretu (KDF-lite) — bez soli/rotacji; pełne
+KMS/rotacja odłożone. Scoring deszyfruje O(N) rekordów (brak indeksu ANN) — sufit `max_items`.
+SQLCipher / szyfrowany wolumen odłożone na rzecz przenośnej koperty app-level. Schematy
+`vault:`/`sops:` są przyjmowane przez walidator `encryption_key_ref`, ale dostarczony resolver
+CLI rozwiązuje `env:`/`file:` — `vault:`/`sops:` wymagają wspierającego `SecretsProvider`
+(zachowanie i tak fail-closed: brak klucza → błąd, nie plaintext). Połączenie `SqliteVectorStore`
+żyje przez cykl życia stacku; przy `POST /api/config/runtime` nowe łączenie powstaje bez zamknięcia
+starego (follow-up: `close()` w protokole). Szczegóły i alternatywy — ADR-0018.

@@ -50,6 +50,7 @@ class BuildContext:
     fetcher: Fetcher
     rag_backend: RagBackend | None
     secrets: SecretsProvider
+    data_dir: Path  # katalog trwałych danych (np. magazyn pamięci sqlite)
 
 
 # Builder: z kontekstu buduje gotowe narzędzie.

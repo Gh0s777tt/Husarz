@@ -483,7 +483,8 @@ class RagBackendConfig(_StrictModel):
     """Konfiguracja backendu pamięci (RAG) parsowana z ``ToolConfig.config`` narzędzia rag.
 
     ``memory`` — obecny backend słowny (zero zależności, domyślny). ``embedding`` — wektorowy
-    (embedder + magazyn wektorów). Trwałość (SQLite) i szyfrowanie at-rest wchodzą w Etapie 14b.
+    (embedder + magazyn wektorów). Magazyn: ``in_memory`` (ulotny) lub ``sqlite`` (trwały,
+    szyfrowany at-rest przez ``encryption_key_ref``) — patrz ADR-0018.
     """
 
     backend: Literal["memory", "embedding"] = "memory"
@@ -491,6 +492,36 @@ class RagBackendConfig(_StrictModel):
     top_k: int = Field(default=8, ge=1)
     max_items: int = Field(default=5000, ge=1)  # cap magazynu + ewikcja FIFO (anty-OOM)
     embedder: EmbedderConfig = Field(default_factory=EmbedderConfig)
+    # Magazyn wektorów (dla backend=embedding): ``in_memory`` (ulotny) lub ``sqlite`` (trwały).
+    store: Literal["in_memory", "sqlite"] = "in_memory"
+    path: Path | None = None  # plik sqlite; None → data_dir/memory/<collection>.db
+    # Szyfrowanie at-rest (sqlite): None → dziedziczy security.encryption.at_rest.
+    encrypt_at_rest: bool | None = None
+    encryption_key_ref: str | None = None  # referencja env:/file:/vault:/sops: do klucza (DEK)
+
+    @model_validator(mode="after")
+    def _validate(self) -> RagBackendConfig:
+        if self.encryption_key_ref is not None and not self.encryption_key_ref.startswith(
+            _SECRET_REF_SCHEMES
+        ):
+            raise ValueError(
+                "encryption_key_ref musi być referencją do sekretu (env:/file:/vault:/sops:)."
+            )
+        # Walidacja krzyżowa: pola trwałości/at-rest mają sens WYŁĄCZNIE dla trwałego magazynu
+        # sqlite — inaczej byłyby po cichu ignorowane (fałszywe poczucie włączonego szyfrowania).
+        atrest_set = (
+            self.encrypt_at_rest is not None
+            or self.encryption_key_ref is not None
+            or self.path is not None
+        )
+        if atrest_set and self.store != "sqlite":
+            raise ValueError(
+                "Pola trwałości/at-rest (path/encrypt_at_rest/encryption_key_ref) wymagają "
+                "store: sqlite — dla store: in_memory byłyby ignorowane."
+            )
+        if self.store == "sqlite" and self.backend != "embedding":
+            raise ValueError("store: sqlite wymaga backend: embedding (trwały magazyn wektorowy).")
+        return self
 
 
 class PluginConfig(_StrictModel):

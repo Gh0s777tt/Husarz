@@ -233,6 +233,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         router_factory=_router_factory,
         trusted_hosts=trusted,
         prompts_dir=prompts,
+        secrets=_SchemeSecrets(),  # przewleczenie sekretów: trwała pamięć RAG (klucz at-rest)
     )
     if api_token and accounts is not None:
         auth_note = "auth: token + konta"

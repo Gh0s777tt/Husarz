@@ -73,6 +73,8 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e ".[dev]"
 # Linux/macOS:
 # .venv/bin/python -m pip install -e ".[dev]"
+# Trwała, szyfrowana pamięć długoterminowej (sqlite + AES-256-GCM at-rest) wymaga extry:
+#   .venv\Scripts\python.exe -m pip install -e ".[dev,memory]"
 
 # 2) Walidacja przykładowej konfiguracji (działa out-of-the-box)
 .venv\Scripts\python.exe -m husarz.launcher.cli validate --config ./config

@@ -5,6 +5,48 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 14b — trwałość SQLite + szyfrowanie at-rest + przewleczenie sekretów)
+- `SqliteVectorStore` (stdlib `sqlite3`, jeden plik `data_dir/memory/<collection>.db`) za
+  NIEZMIENIONYM `Protocol VectorStore` — realna pamięć długoterminowa (przeżywa restart).
+  Izolacja `namespace` (WHERE), dedup `(namespace,id)`, ewikcja FIFO po `max_items`,
+  zapis atomowy pod `threading.Lock`. Wybór magazynu: `RagBackendConfig.store ∈ {in_memory, sqlite}`.
+- Szyfrowanie at-rest CAŁEGO rekordu (tekst + metadane + **wektor**) — `AesGcmCipher`
+  (AES-256-GCM, lazy import `cryptography`, opcjonalny extra `husarz[memory]`). Nonce per rekord,
+  **`AAD = namespace`** (anti-swap: rekordu nie da się przenieść/odszyfrować jako innej kolekcji).
+  `IdentityCipher` tylko dla dev (`encrypt_at_rest=false`). DEK = SHA-256 sekretu z referencji.
+- **Przewleczenie `SecretsProvider` do produkcji** (domknięcie blockera z Etapu 14):
+  `cli._cmd_up → create_app(secrets) → build_tool_loop(secrets, data_dir) → build_tools →
+  BuildContext → _build_rag → build_rag_backend` — `encryption_key_ref` realnie się rozwiązuje.
+- Config: `RagBackendConfig` rozszerzony o `store`, `path`, `encrypt_at_rest` (None → dziedziczy
+  z `security.encryption.at_rest`), `encryption_key_ref` (walidowany: musi być referencją sekretu).
+- Bramki fail-closed przy budowie: sqlite+at-rest bez klucza → błąd PL (nigdy cichy plaintext);
+  globalny `at_rest=true` nie może być wyłączony lokalnie dla trwałego magazynu; brak praw
+  zapisu do `data_dir` → czytelny `RagBackendError`.
+- Testy: +13 (unit crypto/sqlite/bramki, security „brak jawnego tekstu na dysku", integracja
+  szyfrowana pamięć przez pętlę), wszystko OFFLINE. Docs: ADR-0018.
+
+### Poprawione (adwersaryjny przegląd Etapu 14b)
+- Przegląd (3 wymiary, 13 potwierdzonych z 14) i utwardzenia:
+- **Odcisk treści at-rest (major)**: jawna kolumna `id` = `sha256(text)` była membership-oracle
+  / brute-force do PII. Teraz autorytatywny `item_id` żyje w zaszyfrowanym blobie, a kolumna to
+  `Cipher.blind_id` = `HMAC-SHA256(DEK, namespace‖id)` — nieodwracalna bez klucza, namespace'owana
+  (brak korelacji między kolekcjami), zachowuje dedup. Test at-rest idzie ścieżką produkcyjną.
+- **Niekontrolowany crash (minor)**: `sqlite3.Error` w `upsert/search/count` opakowany w
+  `RagBackendError` → dispatch degraduje do `ToolResult(ok=False)` zamiast HTTP 500.
+- **Fail-closed przy budowie (minor)**: `build_cipher` przy at-rest sprawdza dostępność
+  `cryptography` (czytelny błąd PL: zainstaluj `husarz[memory]`), nie odroczony `ImportError`.
+- **Walidacja krzyżowa (minor)**: pola at-rest (`path`/`encrypt_at_rest`/`encryption_key_ref`)
+  wymagają `store: sqlite`, a `store: sqlite` wymaga `backend: embedding` — koniec cichego
+  ignorowania intencji szyfrowania.
+- **Anty-korupcja wymiaru (nit)**: niezgodny wymiar wektora w trwałym magazynie (zmiana modelu
+  embeddera) → `RagBackendError`, nie cicha `0.0`.
+- Docs↔kod: zaktualizowane nieaktualne wzmianki „wchodzą w 14b" (`memory/__init__.py`,
+  `memory/store.py`, `docs/NARZEDZIA.md`, `config/tools/rag.yaml`). Udokumentowane ograniczenia
+  (ADR-0018): `vault:`/`sops:` przyjmowane przez schemat, rozwiązywane tylko przez wspierający
+  `SecretsProvider`; cykl życia połączenia sqlite przy runtime-rekonfiguracji (follow-up).
+- Testy: +4 (odcisk treści na ścieżce produkcyjnej, szyfrowany dedup + zaślepiony klucz,
+  fail-closed wymiaru, walidacja krzyżowa configu).
+
 ### Dodane (Etap 14 — pamięć długoterminowa / RAG)
 - Pakiet `husarz.memory`: produkcyjny `EmbeddingRagBackend` (wektorowa pamięć semantyczna)
   za NIEZMIENIONYM `Protocol RagBackend` — drop-in za `InMemoryRagBackend`, `RagTool` bez zmian.

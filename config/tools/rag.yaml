@@ -1,5 +1,6 @@
 # rag — pamięć i wyszukiwanie. Backend słowny 'memory' (domyślny, zero-dep) lub wektorowy
-# 'embedding' (semantyczny, wymaga lokalnego embeddera). Trwałość + szyfrowanie at-rest: Etap 14b.
+# 'embedding' (semantyczny, wymaga lokalnego embeddera). Trwałość + szyfrowanie at-rest
+# (store: sqlite): Etap 14b / ADR-0018 — patrz zakomentowany przykład niżej.
 name: rag
 kind: rag
 description: Zapis/odczyt pamięci i wyszukiwanie (słowne lub semantyczne wektorowe).
@@ -18,3 +19,8 @@ config:
   #   endpoint: http://127.0.0.1:11434
   #   model: nomic-embed-text  # dim MUSI pasować do modelu: nomic-embed-text=768
   #   dim: 768
+  # Trwała, szyfrowana pamięć (wymaga backend: embedding oraz extry husarz[memory]):
+  # store: sqlite            # 'in_memory' (ulotny, domyślny) lub 'sqlite' (trwały plik)
+  # path: null               # null → data_dir/memory/<collection>.db (nadpisz ścieżkę pliku)
+  # encrypt_at_rest: null    # null → dziedziczy security.encryption.at_rest
+  # encryption_key_ref: env:HUSARZ_MEM_KEY  # referencja env:/file: do klucza (NIE surowy klucz)

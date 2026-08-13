@@ -1,8 +1,9 @@
 """VectorStore — magazyn wektorów z wyszukiwaniem po cosinusie.
 
 ``InMemoryVectorStore`` (czysty Python, bez numpy) to domyślny magazyn MVP: najlżejszy,
-w pełni offline-testowalny, bez powierzchni at-rest (tylko RAM). Trwały magazyn (SQLite)
-i szyfrowanie at-rest wchodzą w Etapie 14b (razem z przewleczeniem sekretów).
+w pełni offline-testowalny, bez powierzchni at-rest (tylko RAM). Trwały magazyn
+(``SqliteVectorStore``) i szyfrowanie at-rest są dostarczone w Etapie 14b — patrz
+``sqlite_store``/``crypto`` oraz ADR-0018.
 
 Izolacja: każdy rekord należy do ``namespace`` (kolekcji); ``search`` skanuje WYŁĄCZNIE
 podany namespace — zatruty ``add`` jednej kolekcji nie wypływa w ``search`` innej. Wzrost

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -176,14 +177,17 @@ def test_embedder_config_rejects_raw_key() -> None:
         EmbedderConfig(kind="ollama", api_key_ref="surowy-klucz")
 
 
-def test_build_rag_backend_dispatch() -> None:
+def test_build_rag_backend_dispatch(tmp_path: Path) -> None:
+    from husarz.config.schema import SecurityConfig
     from husarz.tools.rag import InMemoryRagBackend
 
-    mem = build_rag_backend(RagBackendConfig(backend="memory"), EgressConfig())
+    sec = SecurityConfig()
+    mem = build_rag_backend(RagBackendConfig(backend="memory"), sec, data_dir=tmp_path)
     assert isinstance(mem, InMemoryRagBackend)
     emb = build_rag_backend(
         RagBackendConfig(backend="embedding", embedder=EmbedderConfig(kind="fake", dim=8)),
-        EgressConfig(),
+        sec,
+        data_dir=tmp_path,
     )
     assert isinstance(emb, EmbeddingRagBackend)
 
@@ -212,11 +216,12 @@ def test_embedder_config_default_dim_matches_nomic() -> None:
     assert EmbedderConfig().dim == 768
 
 
-def test_build_rag_backend_allow_policy_embedding() -> None:
+def test_build_rag_backend_allow_policy_embedding(tmp_path: Path) -> None:
+    from husarz.config.schema import SecurityConfig
+
     # Pod polityką allow embedder ollama i tak buduje się poprawnie (transport wstrzyknięty).
     cfg = RagBackendConfig(backend="embedding", embedder=EmbedderConfig(kind="ollama", dim=4))
-    backend = build_rag_backend(
-        cfg, EgressConfig(default_policy=EgressPolicy.ALLOW), transport=FakeTransport(dim=4)
-    )
+    sec = SecurityConfig(egress=EgressConfig(default_policy=EgressPolicy.ALLOW))
+    backend = build_rag_backend(cfg, sec, data_dir=tmp_path, transport=FakeTransport(dim=4))
     backend.add("tekst")  # egress allow → transport użyty
     assert backend.search("tekst", top_k=1)

@@ -104,7 +104,9 @@ def _build_rag(ctx: BuildContext) -> Tool:
     # Klucze o wartości null traktujemy jak brak (jak dawne _int_setting) → domyślne z schematu.
     settings = {key: value for key, value in ctx.tool_config.config.items() if value is not None}
     rag_config = RagBackendConfig(**settings)
-    backend = build_rag_backend(rag_config, ctx.security.egress, secrets=ctx.secrets)
+    backend = build_rag_backend(
+        rag_config, ctx.security, data_dir=ctx.data_dir, secrets=ctx.secrets
+    )
     return RagTool(backend, top_k=rag_config.top_k)
 
 
@@ -128,6 +130,7 @@ def build_tools(
     fetcher: Fetcher | None = None,
     rag_backend: RagBackend | None = None,
     secrets: SecretsProvider | None = None,
+    data_dir: str | Path = "./data",
     registry: ToolProviderRegistry | None = None,
 ) -> dict[str, Tool]:
     """Buduje mapę ``nazwa -> narzędzie`` z konfiguracji.
@@ -163,6 +166,7 @@ def build_tools(
                 fetcher=active_fetcher,
                 rag_backend=rag_backend,
                 secrets=active_secrets,
+                data_dir=Path(data_dir),
             )
         )
     return tools
