@@ -37,10 +37,15 @@ mtls:
   key_ref: null
 
 auth:
-  oidc_enabled: false        # włącz w prod
+  oidc_enabled: false        # włącz w prod (pełny przepływ tożsamości — Etap 6)
   issuer: null
   client_id: null
   roles: [admin, operator, viewer]
+  # Token API (Bearer) dla REST API/konsoli. Podaj REFERENCJĘ do sekretu (nie sam
+  # token!): "env:HUSARZ_API_TOKEN" lub "file:api_token". Gdy null — uwierzytelnianie
+  # wyłączone (dozwolone WYŁĄCZNIE na loopbacku; launcher wymusza token dla 0.0.0.0).
+  api_token_ref: null
+  api_role: operator         # rola przypisana ważnemu tokenowi (RBAC)
 
 audit:
   enabled: true

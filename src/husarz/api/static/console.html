@@ -46,6 +46,9 @@
   <header>
     <h1>🪽 Husarz</h1>
     <span class="badge" id="badge">łączenie…</span>
+    <span style="flex:1"></span>
+    <input id="token" type="password" placeholder="token API (jeśli wymagany)"
+           style="width:220px" autocomplete="off" />
   </header>
   <nav>
     <button data-tab="chat" class="active">Czat</button>
@@ -96,7 +99,26 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const api = (p, opt) => fetch("/api/" + p, opt).then((r) => r.json());
+
+    // Escapowanie HTML — WSZYSTKIE dane z API renderowane w innerHTML muszą przejść
+    // przez esc(), inaczej np. nazwa agenta z '<img onerror=...>' daje XSS.
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    // Token API (opcjonalny) — trzymany lokalnie, doklejany jako nagłówek Bearer.
+    const TOKEN_KEY = "husarz_api_token";
+    const getToken = () => $("token").value.trim() || localStorage.getItem(TOKEN_KEY) || "";
+    const authHeaders = (base) => {
+      const h = Object.assign({}, base || {});
+      const t = getToken();
+      if (t) h["Authorization"] = "Bearer " + t;
+      return h;
+    };
+    const api = (p, opt) => {
+      const o = Object.assign({}, opt || {});
+      o.headers = authHeaders(o.headers);
+      return fetch("/api/" + p, o).then((r) => r.json());
+    };
 
     document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
       document.querySelectorAll("nav button").forEach((x) => x.classList.remove("active"));
@@ -107,6 +129,11 @@
     });
 
     async function boot() {
+      $("token").value = localStorage.getItem(TOKEN_KEY) || "";
+      $("token").addEventListener("change", () => {
+        const t = $("token").value.trim();
+        if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY);
+      });
       try {
         const h = await api("health");
         $("badge").textContent = `v${h.version} · profil: ${h.profile}`;
@@ -119,20 +146,23 @@
       if (tab === "usage") $("usage-out").textContent = JSON.stringify(await api("usage"), null, 2);
       if (tab === "agents") {
         const a = await api("agents");
+        if (!Array.isArray(a)) { $("agents-out").innerHTML = `<p class='err'>${esc(a.detail || "Brak dostępu.")}</p>`; return; }
         $("agents-out").innerHTML = "<table><tr><th>Agent</th><th>Klasa</th><th>Model</th><th>Narzędzia</th><th>ROE</th></tr>" +
-          a.map((x) => `<tr><td>${x.name}</td><td>${x.agent_class}</td><td>${x.model}</td><td>${x.tools.join(", ") || "—"}</td><td>${x.roe_required ? "tak" : "—"}</td></tr>`).join("") + "</table>";
+          a.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.agent_class)}</td><td>${esc(x.model)}</td><td>${esc(x.tools.join(", ")) || "—"}</td><td>${x.roe_required ? "tak" : "—"}</td></tr>`).join("") + "</table>";
       }
       if (tab === "audit") {
         const a = await api("audit");
-        $("audit-status").innerHTML = a.verified ? `<span class="ok">łańcuch zweryfikowany</span> (${a.count})` : `<span class="err">łańcuch USZKODZONY</span>`;
+        if (!a.entries) { $("audit-out").innerHTML = `<p class='err'>${esc(a.detail || "Brak dostępu.")}</p>`; return; }
+        $("audit-status").innerHTML = a.verified ? `<span class="ok">łańcuch zweryfikowany</span> (${esc(a.count)})` : `<span class="err">łańcuch USZKODZONY</span>`;
         $("audit-out").innerHTML = a.entries.length ? "<table><tr><th>Czas</th><th>Aktor</th><th>Akcja</th><th>ROE</th></tr>" +
-          a.entries.map((e) => `<tr><td>${e.timestamp}</td><td>${e.actor}</td><td>${e.action}</td><td>${e.roe_ref || "—"}</td></tr>`).join("") + "</table>" : "<p class='muted'>Brak wpisów.</p>";
+          a.entries.map((e) => `<tr><td>${esc(e.timestamp)}</td><td>${esc(e.actor)}</td><td>${esc(e.action)}</td><td>${esc(e.roe_ref) || "—"}</td></tr>`).join("") + "</table>" : "<p class='muted'>Brak wpisów.</p>";
       }
     }
 
     $("send").onclick = async () => {
       $("chat-out").hidden = false; $("chat-out").textContent = "…";
-      const r = await fetch("/api/orchestrate", { method: "POST", headers: { "Content-Type": "application/json" },
+      const r = await fetch("/api/orchestrate", { method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ task: $("task").value }) });
       const d = await r.json();
       $("chat-out").textContent = r.ok ? `Odpowiedź: ${d.answer}\n\nObserwacje:\n` +

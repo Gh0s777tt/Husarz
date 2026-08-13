@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from typing import Any
 
 from husarz import __version__
 from husarz.config import HusarzConfig, load_config
@@ -51,29 +52,89 @@ def _cmd_version(_: argparse.Namespace) -> int:
     return 0
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _is_loopback(host: str) -> bool:
+    return host in _LOOPBACK_HOSTS
+
+
+def _resolve_api_token(config: HusarzConfig) -> str | None:
+    """Rozwiązuje token API z referencji do sekretu (``security.auth.api_token_ref``).
+
+    Zwraca ``None``, gdy referencji brak (uwierzytelnianie wyłączone). Gdy referencja
+    jest ustawiona, ale nie da się jej rozwiązać, zgłasza ``ConfigError`` (fail-closed —
+    nie startujemy z „skonfigurowanym, lecz nieaktywnym" tokenem).
+    """
+    ref = config.security.auth.api_token_ref
+    if not ref:
+        return None
+    if ref.startswith(("vault:", "sops:")):
+        raise ConfigError(
+            f"api_token_ref='{ref}': dostawcy vault/sops wymagają jawnej konstrukcji — "
+            "użyj referencji 'env:NAZWA' lub 'file:nazwa' dla launchera."
+        )
+    # Import leniwy — 'validate'/'version' nie potrzebują dostawców sekretów.
+    from husarz.config.secrets import (  # noqa: PLC0415
+        EnvSecretsProvider,
+        FileSecretsProvider,
+    )
+
+    provider = FileSecretsProvider("./secrets") if ref.startswith("file:") else EnvSecretsProvider()
+    token = provider.resolve(ref)
+    if not token or not token.strip():
+        raise ConfigError(f"Nie udało się rozwiązać tokenu API (api_token_ref='{ref}').")
+    return token.strip()
+
+
 def _cmd_up(args: argparse.Namespace) -> int:
     # Ładujemy konfigurację, wymuszając wybrany profil jako nadpisanie runtime.
     try:
         config = load_config(args.config, runtime_overrides={"platform": {"profile": args.profile}})
+        api_token = _resolve_api_token(config)
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+
+    # Fail-closed: nasłuch poza loopbackiem BEZ tokenu = otwarte control-plane API.
+    if not _is_loopback(args.host) and api_token is None:
+        print(
+            f"Odmowa: nasłuch na '{args.host}' (poza loopbackiem) wymaga tokenu API. "
+            "Ustaw security.auth.api_token_ref na referencję sekretu (env:/file:) "
+            "albo nasłuchuj na 127.0.0.1.",
+            file=sys.stderr,
+        )
+        return 2
 
     # Importy leniwe — 'validate'/'version' nie wymagają FastAPI/uvicorn.
     import uvicorn  # noqa: PLC0415
 
     from husarz.api import create_app  # noqa: PLC0415
+    from husarz.orchestrator import build_orchestrator  # noqa: PLC0415
     from husarz.router import ModelRouter  # noqa: PLC0415
+
+    prompts = args.prompts
+
+    def _orchestrator_factory(cfg: HusarzConfig) -> Any:
+        # Router budowany z aktualnej konfiguracji — po nadpisaniu runtime orkiestrator
+        # jest przebudowywany, więc /api/orchestrate używa NOWYCH ustawień (nie starych).
+        return build_orchestrator(cfg, ModelRouter(cfg), prompts_dir=prompts)
+
+    # TrustedHost tylko dla loopbacku (obrona przed DNS-rebindingiem na localhost).
+    trusted = ["localhost", "127.0.0.1"] if _is_loopback(args.host) else None
 
     app = create_app(
         config,
         config_dir=args.config,
-        router=ModelRouter(config),
-        prompts_dir=args.prompts,
+        api_token=api_token,
+        orchestrator_factory=_orchestrator_factory,
+        trusted_hosts=trusted,
+        prompts_dir=prompts,
     )
+    auth_note = "token API: wymagany" if api_token else "token API: brak (loopback)"
     print(
         f"Husarz API — profil {config.platform.profile.value} — "
-        f"http://{args.host}:{args.port} (konsola: /)"
+        f"http://{args.host}:{args.port} (konsola: /) — {auth_note}"
     )
     uvicorn.run(app, host=args.host, port=args.port)  # pragma: no cover - serwer blokujący
     return 0

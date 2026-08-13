@@ -48,8 +48,9 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Dostawcy sekretów File/SOPS/Vault (backendy wstrzykiwalne, testowalne).
 - ✅ Testy: blokada celu spoza ROE, wymóg `--authorized`, audyt kompletny i tamper-evident.
 - ⬜ Kryptograficzna weryfikacja podpisu ROE przez dostawcę sekretów (obecnie: obecność podpisu).
-- ⬜ Runtime egress deny-all na warstwie sieci + izolacja sandboxa (Etap 6), mTLS, OIDC
-  (uwierzytelnienie + przypisanie ról) — Etap 5 (API).
+- 🚧 Uwierzytelnienie + przypisanie ról: **token Bearer + RBAC wpięte w API (Etap 5)**;
+  pełny **OIDC** i **mTLS** — Etap 6.
+- ⬜ Runtime egress deny-all na warstwie sieci + izolacja sandboxa (Etap 6).
 - ⬜ Aktywować strategie routingu `cost`/`latency` (obecnie placeholdery; aktywne `tags`).
 
 ## ✅ Etap 5 — API + Launcher + Web
@@ -58,8 +59,13 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Launcher `husarz up --profile dev` (uvicorn; importy FastAPI/uvicorn leniwe).
 - ✅ Konsola WWW (jednoplikowa, serwowana przez API): czat + panel konfiguracji +
   audyt + monitor. Pełny Next.js — ścieżka produkcyjna na przyszłość.
-- ✅ Testy: smoke API (TestClient, bez sieci), orkiestracja, walidacja configu, konsola.
-- ⬜ WebSocket streaming odpowiedzi; OIDC/mTLS przed API (Etap 6).
+- ✅ **Uwierzytelnianie Bearer + RBAC** (token z sekretu `api_token_ref`; rola
+  `api_role`); fail-closed launchera dla nasłuchu poza loopbackiem; `TrustedHost`.
+- ✅ Escapowanie XSS w konsoli; mapowanie błędów routera na kody HTTP; spójne liczniki
+  usage/audyt; atomowy łańcuch audytu (Lock); przebudowa orkiestratora po runtime.
+- ✅ Testy: smoke API (TestClient, bez sieci), orkiestracja, walidacja configu, konsola,
+  macierz RBAC, odporność i współbieżność (regresje z przeglądu).
+- ⬜ WebSocket streaming odpowiedzi; pełny **OIDC** (przepływ tożsamości) + mTLS (Etap 6).
 
 ## ⬜ Etap 6 — Deploy i profile
 - ⬜ docker-compose profile dev/prod/airgap; manifesty k8s + NetworkPolicy deny-all.

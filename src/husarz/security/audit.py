@@ -12,6 +12,7 @@ import copy
 import hashlib
 import hmac
 import json
+import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -78,6 +79,11 @@ class AuditLog:
     hmac_key: bytes | None = None
     _entries: list[AuditEntry] = field(default_factory=list)
     _last_hash: str = GENESIS_HASH
+    # Serializuje dopisywanie: endpointy FastAPI (zwykłe ``def``) biegną w puli
+    # wątków, więc read-modify-write łańcucha skrótów musi być atomowe — inaczej
+    # dwa równoległe wpisy dostają ten sam ``prev_hash`` i ``verify`` daje fałszywy
+    # alarm manipulacji. Wykluczony z porównań/reprezentacji dataclass.
+    _lock: threading.Lock = field(default_factory=threading.Lock, compare=False, repr=False)
 
     def _compute_hash(self, payload: str) -> str:
         data = payload.encode("utf-8")
@@ -104,26 +110,29 @@ class AuditLog:
         roe_ref: str | None = None,
     ) -> AuditEntry:
         """Dopisuje wpis i zwraca go. Zapis do pliku PRZED mutacją pamięci."""
-        timestamp = self.clock().isoformat()
         # Głęboka kopia — treść nie może zmienić się po zahashowaniu (niezmienność).
         safe_detail = copy.deepcopy(dict(detail or {}))
-        try:
-            payload = _payload(timestamp, actor, action, safe_detail, roe_ref, self._last_hash)
-        except (TypeError, ValueError) as exc:
-            raise AuditError(f"Szczegóły audytu nie są serializowalne do JSON: {exc}") from exc
-        entry = AuditEntry(
-            timestamp=timestamp,
-            actor=actor,
-            action=action,
-            detail=safe_detail,
-            roe_ref=roe_ref,
-            prev_hash=self._last_hash,
-            entry_hash=self._compute_hash(payload),
-        )
-        # Persist-first: jeśli zapis do pliku zawiedzie, stan w pamięci NIE rozjeżdża się.
-        self._append_to_file(entry)
-        self._entries.append(entry)
-        self._last_hash = entry.entry_hash
+        # Cała sekwencja (odczyt prev_hash → hash → zapis pliku → mutacja pamięci)
+        # jest krytyczna sekcją: gwarantuje ciągłość łańcucha pod współbieżnością.
+        with self._lock:
+            timestamp = self.clock().isoformat()
+            try:
+                payload = _payload(timestamp, actor, action, safe_detail, roe_ref, self._last_hash)
+            except (TypeError, ValueError) as exc:
+                raise AuditError(f"Szczegóły audytu nie są serializowalne do JSON: {exc}") from exc
+            entry = AuditEntry(
+                timestamp=timestamp,
+                actor=actor,
+                action=action,
+                detail=safe_detail,
+                roe_ref=roe_ref,
+                prev_hash=self._last_hash,
+                entry_hash=self._compute_hash(payload),
+            )
+            # Persist-first: jeśli zapis pliku zawiedzie, stan w pamięci NIE rozjeżdża się.
+            self._append_to_file(entry)
+            self._entries.append(entry)
+            self._last_hash = entry.entry_hash
         return entry
 
     def verify(self) -> bool:

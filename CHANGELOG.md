@@ -14,8 +14,28 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 - Launcher `husarz up --profile dev --host --port` (uvicorn; importy FastAPI/uvicorn leniwe).
 - Zależności: `fastapi`, `uvicorn`.
 - Testy: smoke API przez `TestClient` (bez serwera/sieci), orkiestracja, walidacja
-  configu, serwowanie konsoli; łącznie ~303 przypadki.
+  configu, serwowanie konsoli.
 - Dokumentacja: `docs/API.md`, ADR-0007; aktualizacja ARCHITEKTURA/ROADMAP.
+
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 5)
+- **Uwierzytelnianie API (blocker):** token Bearer + RBAC na wszystkich endpointach
+  poza `/api/health`. Token pochodzi z **sekretu** (`security.auth.api_token_ref`,
+  `env:`/`file:`), nigdy z configu; rola z `security.auth.api_role`. Macierz:
+  `config:read` (podgląd), `audit:read` (audyt), `agent:run` (orkiestracja),
+  `config:write` (nadpisania runtime — tylko admin). Wstrzykiwalne do `create_app`.
+- **XSS w konsoli (blocker):** wszystkie dane z API renderowane w tabelach (agenci,
+  audyt) są escapowane HTML (`esc()`); dodano pole tokenu (nagłówek Bearer).
+- **Fail-closed launchera:** `husarz up` odmawia nasłuchu poza loopbackiem bez tokenu
+  (kod 2); `TrustedHostMiddleware` dla loopbacku (obrona przed DNS-rebindingiem).
+- **Odporność `/api/orchestrate`:** błędy routera mapowane na `429`/`502`/`503`
+  (nie gołe `500`); treść błędu nie wycieka.
+- **Spójność liczników:** `usage.orchestrations` liczy próby (spójnie z audytem) +
+  `failures`; inkrementy i `AuditLog.record` serializowane `Lock`-iem (endpointy biegną
+  w puli wątków — koniec fałszywego alarmu `verify` przy współbieżności).
+- **Przebudowa orkiestratora** po `POST /api/config/runtime` (koniec działania na
+  starej konfiguracji); `GET /api/audit?limit` walidowany `0..10000` (`0` → pusto).
+- Testy: +20 regresji (macierz RBAC, mapowanie błędów, liczniki, przebudowa,
+  limit audytu, malformed body, fail-closed launchera, atomowość łańcucha pod wątkami).
 
 ### Dodane (Etap 4 — bezpieczeństwo/ROE)
 - Pakiet `husarz.security`:

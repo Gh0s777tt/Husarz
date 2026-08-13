@@ -255,12 +255,22 @@ class MtlsConfig(_StrictModel):
 
 
 class AuthConfig(_StrictModel):
-    """OIDC + RBAC."""
+    """OIDC + RBAC + uwierzytelnianie API tokenem Bearer.
+
+    ``api_token_ref`` to **referencja do sekretu** (rozwiązywana przez dostawcę
+    sekretów ENV/Vault/SOPS przy starcie), nigdy sam token — zgodnie z zasadą
+    „sekrety nie trafiają do configu". Gdy ustawiona, API wymaga nagłówka
+    ``Authorization: Bearer <token>`` na wszystkich endpointach ``/api``, a rola
+    ``api_role`` decyduje o uprawnieniach (RBAC). Gdy pusta, API działa bez
+    uwierzytelnienia — dopuszczalne wyłącznie dla nasłuchu loopback (dev).
+    """
 
     oidc_enabled: bool = False
     issuer: str | None = None
     client_id: str | None = None
     roles: list[str] = Field(default_factory=lambda: ["admin", "operator", "viewer"])
+    api_token_ref: str | None = None
+    api_role: str = "operator"
 
 
 class AuditConfig(_StrictModel):

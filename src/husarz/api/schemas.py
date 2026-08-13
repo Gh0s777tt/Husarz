@@ -79,9 +79,14 @@ class AuditView(BaseModel):
 
 
 class UsageResponse(BaseModel):
-    """Monitor kosztów/tokenów (MVP)."""
+    """Monitor kosztów/tokenów (MVP).
+
+    ``orchestrations`` liczy WSZYSTKIE próby (spójnie z audytem, który zapisuje
+    wpis przed uruchomieniem), a ``failures`` — próby zakończone błędem routera.
+    """
 
     orchestrations: int
+    failures: int = 0
     max_tokens_per_request: int | None
     max_requests_per_minute: int | None
 
