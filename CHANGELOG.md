@@ -19,6 +19,23 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   routerze, integracja `build_orchestrator` na realnej konfiguracji i promptach.
 - Dokumentacja: `docs/ORKIESTRATOR.md`, ADR-0004; aktualizacja ARCHITEKTURA/AGENCI/ROADMAP.
 
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 2)
+- **Blocker (bezpieczeństwo):** path traversal w ładowaniu promptu — `prompt_file`
+  walidowany wzorcem `^[A-Za-z0-9._-]+\.md$` w schemacie + konfinacja ścieżki w loaderze.
+- **Blocker (correctness):** obserwacje trafiają teraz jako kontekst do kroków z refleksji
+  (wcześniej kanał `context` był martwy — kroki działały „na ślepo").
+- **Izolacja treści niezaufanej:** obserwacje agentów są ogradzane i oznaczane jako dane
+  (nie instrukcje) w promptach hetmana; kontekst agenta trafia do wiadomości user, a nie
+  do system promptu (koniec inwersji zaufania). Flaga `security.prompt_injection_filters`
+  jest teraz realnie egzekwowana (steruje izolacją).
+- **ROE-gate na poziomie orkiestracji:** agent z `roe_required` nie jest delegowany bez
+  aktywnego ROE (pełny ROE-gate runtime: Etap 4).
+- **Parser planu/refleksji:** odporne wyłuskiwanie JSON (`raw_decode`, obce nawiasy/wiele
+  obiektów), brak wyjątku na `RecursionError`, `done` odporne na string `"false"` i na brak
+  klucza (domyślne wg obecności kroków), kroki tylko z niepustych pól tekstowych.
+- **Router:** pole `model` z pliku agenta działa jako fallback po `routing.agent_models`.
+- +29 testów regresyjnych (łącznie 180).
+
 ### Dodane (Etap 1 — router modeli)
 - Pakiet `husarz.router` — warstwa OpenAI-compat (vLLM/Ollama/SGLang):
   - `select_candidates` — wybór modelu po tagach/agencie/jawnym modelu + rozwijanie

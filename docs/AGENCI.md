@@ -26,8 +26,9 @@ Pętla narzędziowa (function-calling) dla Towarzysza dojdzie w Etapie 3.
 | Kanclerz   | towarzysz | `glm-main`       | `file_edit, git`                  | nie |
 | Chorąży    | pocztowy  | `hermes`         | —                                 | nie |
 
-Model per agent ustawia `config/routing.yaml -> agent_models` (można też podać
-`model` bezpośrednio w pliku agenta, lub `auto` — wtedy decyduje router).
+Model per agent (kolejność priorytetu): `config/routing.yaml -> agent_models`
+(tabela centralna) → pole `model` w pliku agenta (gdy nie `auto`) → reguły po
+tagach → `models.default`. Ustaw `model: auto`, by całość zostawić routerowi.
 
 ## Role
 

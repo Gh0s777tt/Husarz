@@ -35,31 +35,60 @@ class Reflection:
     additional_steps: list[PlanStep] = field(default_factory=list)
 
 
+_TRUE_STRINGS = frozenset({"true", "1", "yes", "tak"})
+_JSON_DECODER = json.JSONDecoder()
+
+
 def _extract_json_object(text: str) -> dict[str, Any] | None:
-    """Wyłuskuje obiekt JSON z tekstu (czysty albo osadzony w prozie)."""
+    """Wyłuskuje PIERWSZY poprawny obiekt JSON z tekstu (czysty lub osadzony w prozie).
+
+    Skanuje kolejne pozycje ``{`` i próbuje ``raw_decode`` — dzięki temu obce
+    nawiasy w prozie czy wiele obiektów nie psują wyniku (inaczej niż find/rfind).
+    Nigdy nie rzuca: ``RecursionError``/``JSONDecodeError`` na złośliwym wejściu
+    kończy się ``None`` (kontrakt: szum modelu -> brak obiektu, nie wyjątek).
+    """
     stripped = text.strip()
     try:
-        obj = json.loads(stripped)
-        return obj if isinstance(obj, dict) else None
-    except json.JSONDecodeError:
+        whole = json.loads(stripped)
+        if isinstance(whole, dict):
+            return whole
+    except (json.JSONDecodeError, RecursionError):
         pass
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start != -1 and end > start:
+
+    index = stripped.find("{")
+    while index != -1:
         try:
-            obj = json.loads(stripped[start : end + 1])
-            return obj if isinstance(obj, dict) else None
-        except json.JSONDecodeError:
-            return None
+            candidate, _ = _JSON_DECODER.raw_decode(stripped, index)
+        except (json.JSONDecodeError, RecursionError):
+            candidate = None
+        if isinstance(candidate, dict):
+            return candidate
+        index = stripped.find("{", index + 1)
     return None
 
 
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    """Interpretuje ``done`` odpornie: bool wprost, string 'true/1/yes/tak', brak -> default."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUE_STRINGS
+    return bool(value)
+
+
 def _parse_steps(raw: Any) -> list[PlanStep]:
+    """Buduje kroki tylko z pozycji o niepustych, tekstowych polach agent/task."""
     steps: list[PlanStep] = []
     if isinstance(raw, list):
         for item in raw:
-            if isinstance(item, dict) and "agent" in item and "task" in item:
-                steps.append(PlanStep(agent=str(item["agent"]), task=str(item["task"])))
+            if not isinstance(item, dict):
+                continue
+            agent = item.get("agent")
+            task = item.get("task")
+            if isinstance(agent, str) and agent and isinstance(task, str) and task:
+                steps.append(PlanStep(agent=agent, task=task))
     return steps
 
 
@@ -72,11 +101,14 @@ def parse_plan(text: str) -> Plan:
 
 
 def parse_reflection(text: str) -> Reflection:
-    """Parsuje refleksję. Nieparsowalne wejście = zakończ (``done=True``)."""
+    """Parsuje refleksję. Nieparsowalne wejście = zakończ (``done=True``).
+
+    Gdy klucz ``done`` jest nieobecny, domyślamy go na podstawie obecności kroków
+    (kroki obecne -> ``done=False``), by nie porzucić jawnie podanych ``additional_steps``.
+    """
     obj = _extract_json_object(text)
     if obj is None:
         return Reflection(done=True)
-    return Reflection(
-        done=bool(obj.get("done", True)),
-        additional_steps=_parse_steps(obj.get("additional_steps")),
-    )
+    additional = _parse_steps(obj.get("additional_steps"))
+    done = _coerce_bool(obj.get("done"), default=not additional)
+    return Reflection(done=done, additional_steps=additional)

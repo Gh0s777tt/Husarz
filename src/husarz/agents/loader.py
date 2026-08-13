@@ -17,12 +17,20 @@ from husarz.config.schema import AgentClass, HusarzConfig
 
 
 def _read_prompt(prompts_dir: Path, filename: str) -> str:
-    path = prompts_dir / filename
+    # Defense-in-depth wobec walidacji nazwy w schemacie: wymuszamy, by rozwiązana
+    # ścieżka pozostała WEWNĄTRZ katalogu prompts (ochrona przed path traversal,
+    # także gdyby nazwa pochodziła z ENV/panelu z pominięciem walidacji YAML).
+    base = prompts_dir.resolve()
+    target = (base / filename).resolve()
+    if not target.is_relative_to(base):
+        raise PromptNotFoundError(
+            f"Ścieżka promptu poza katalogiem prompts: {filename!r} (odrzucono)."
+        )
     try:
-        return path.read_text(encoding="utf-8")
+        return target.read_text(encoding="utf-8")
     except OSError as exc:
         raise PromptNotFoundError(
-            f"Brak pliku promptu agenta: {path}. Utwórz go w katalogu prompts/."
+            f"Brak pliku promptu agenta: {target}. Utwórz go w katalogu prompts/."
         ) from exc
 
 

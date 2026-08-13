@@ -34,7 +34,9 @@ plan ─▶ deleguj ─▶ obserwuj ─▶ refleksja ─▶ (ew. dodatkowe kroki
    Dodatkowe kroki są wykonywane (do `max_extra_rounds`, domyślnie 1).
 4. **Synteza** — hetman składa obserwacje w spójną odpowiedź końcową.
 
-`build_orchestrator(config, router, prompts_dir)` składa Chorągiew i hetmana z konfiguracji.
+`build_orchestrator(config, router, *, prompts_dir)` składa Chorągiew i hetmana z
+konfiguracji (`prompts_dir` jest argumentem nazwanym). Izolacja treści niezaufanej
+(ogradzanie obserwacji) jest sterowana flagą `security.prompt_injection_filters`.
 
 ## Fazy i sterowanie
 

@@ -99,3 +99,20 @@ konfiguracji (jedynego obecnie strażnika, dopóki runtime to zaślepki):
   `runtime_override` sekcji `security` — Etap 4.
 - Pola bezpieczeństwa w opaque `config`/`params` narzędzi (`network`, `allow_push`)
   do wypromowania na typowane pola — Etap 3.
+
+### Etap 2 — hardening po przeglądzie adwersaryjnym (data: 2026-08-13)
+
+**Kontekst:** przegląd rdzenia agentów i orkiestratora (5 wymiarów, 20 findingów).
+Wdrożone poprawki bezpieczeństwa:
+
+| Niezmiennik / poprawka                                        | Test |
+|---------------------------------------------------------------|------|
+| Brak path traversal w `prompt_file` (wzorzec + konfinacja ścieżki) | `test_prompt_file_pattern_rejects_paths`, `test_read_prompt_confines_to_prompts_dir` |
+| Obserwacje ogradzane i oznaczane jako dane w promptach hetmana | `test_observations_are_fenced_when_isolation_on` |
+| Kontekst agenta poza system promptem (koniec inwersji zaufania) | `test_run_puts_context_in_fenced_user_message_not_system` |
+| `security.prompt_injection_filters` realnie steruje izolacją    | `test_observations_not_fenced_when_isolation_off`, `test_build_orchestrator_custom_name_and_rounds` |
+| ROE-gate na poziomie orkiestracji (agent `roe_required` blokowany) | `test_roe_required_agent_is_not_delegated` |
+| Parser odporny na złośliwe wejście (RecursionError, obce nawiasy) | `test_parser_never_raises_on_recursion`, `test_extract_skips_stray_braces_in_prose` |
+
+**Ograniczenie:** izolacja treści niezaufanej to ogrodzenie + instrukcja w prompcie
+(mityguje indirect prompt injection). Twarde filtry I/O i pełny ROE-gate runtime — Etap 4.

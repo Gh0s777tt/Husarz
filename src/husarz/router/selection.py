@@ -38,11 +38,16 @@ def select_candidates(
     if model is not None:
         ordered.append(model)
     else:
-        # (2) model przypisany agentowi
+        # (2) model przypisany agentowi: najpierw routing.agent_models (tabela centralna),
+        #     a gdy brak wpisu (lub 'auto') — pole 'model' z pliku agenta (config/agents/*.yaml).
         if agent is not None:
             mapped = routing.agent_models.get(agent)
             if mapped is not None and mapped != "auto":
                 ordered.append(mapped)
+            else:
+                agent_cfg = config.agents.get(agent)
+                if agent_cfg is not None and agent_cfg.model != "auto":
+                    ordered.append(agent_cfg.model)
 
         # (3) reguły routingu dopasowane po tagach.
         # Reguła z pustym match_tags jest pomijana (nie jest łapaczem wszystkiego —

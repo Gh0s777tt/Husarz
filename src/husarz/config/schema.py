@@ -297,7 +297,9 @@ class AgentConfig(_StrictModel):
     role: str = ""
     # Id modelu z rejestru lub "auto" (wtedy decyduje router).
     model: str = "auto"
-    prompt_file: str
+    # Nazwa pliku promptu w katalogu prompts/ — sama nazwa (bez ścieżek, bez '..',
+    # bez litery dysku), by ENV/panel nie mogły wskazać dowolnego pliku (path traversal).
+    prompt_file: str = Field(pattern=r"^[A-Za-z0-9._-]+\.md$")
     tools: list[str] = Field(default_factory=list)
     max_iterations: int = 8
     roe_required: bool = False  # True dla Puszkarza
