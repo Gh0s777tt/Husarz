@@ -46,6 +46,16 @@ auth:
   # wyłączone (dozwolone WYŁĄCZNIE na loopbacku; launcher wymusza token dla 0.0.0.0).
   api_token_ref: null
   api_role: operator         # rola przypisana ważnemu tokenowi (RBAC)
+  # --- Konta użytkowników (logowanie/rejestracja, sesje, limity tokenów) ---
+  # Aktywne, gdy ustawisz accounts_path LUB seed_admin_username LUB allow_registration.
+  allow_registration: false  # false = „dla wybranych" (konta zakłada admin)
+  default_user_role: operator
+  default_token_quota: null   # null = bez limitu (tryb suwerenny); liczba = limit per konto
+  session_ttl_minutes: 720    # ważność sesji (12 h)
+  accounts_path: null         # np. ./data/accounts.json (trwałość); null = tylko w pamięci
+  # Seed administratora przy pustym magazynie — hasło z REFERENCJI do sekretu:
+  seed_admin_username: null
+  seed_admin_password_ref: null  # np. "env:HUSARZ_ADMIN_PASSWORD"
 
 audit:
   enabled: true

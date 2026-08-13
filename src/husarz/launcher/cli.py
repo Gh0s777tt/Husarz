@@ -87,28 +87,66 @@ def _resolve_api_token(config: HusarzConfig) -> str | None:
     return token.strip()
 
 
+def _accounts_enabled(config: HusarzConfig) -> bool:
+    """Czy konta są aktywne (skonfigurowano magazyn, seed lub rejestrację)."""
+    auth = config.security.auth
+    return bool(auth.accounts_path or auth.seed_admin_username or auth.allow_registration)
+
+
+def _build_accounts(config: HusarzConfig) -> Any:
+    """Buduje usługę kont z configu (lub None). Importy leniwe. Może rzucić ConfigError."""
+    if not _accounts_enabled(config):
+        return None
+    from husarz.accounts.builder import build_account_service  # noqa: PLC0415
+    from husarz.accounts.errors import AccountError  # noqa: PLC0415
+
+    try:
+        return build_account_service(config.security.auth, secrets=_SchemeSecrets())
+    except AccountError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+class _SchemeSecrets:
+    """Dostawca sekretów rozwiązujący referencje po schemacie (env:/file:)."""
+
+    def resolve(self, ref: str) -> str | None:
+        """Zwraca wartość sekretu dla referencji ``env:``/``file:`` albo ``None``."""
+        from husarz.config.secrets import (  # noqa: PLC0415
+            EnvSecretsProvider,
+            FileSecretsProvider,
+        )
+
+        if ref.startswith("file:"):
+            return FileSecretsProvider("./secrets").resolve(ref)
+        return EnvSecretsProvider().resolve(ref)
+
+
 def _cmd_up(args: argparse.Namespace) -> int:
     # Ładujemy konfigurację, wymuszając wybrany profil jako nadpisanie runtime.
     try:
         config = load_config(args.config, runtime_overrides={"platform": {"profile": args.profile}})
         api_token = _resolve_api_token(config)
+        accounts = _build_accounts(config)
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    # Fail-closed: nasłuch poza loopbackiem BEZ tokenu = otwarte control-plane API.
-    if not _is_loopback(args.host) and api_token is None:
+    # Uwierzytelnianie jest włączone, gdy jest token maszynowy ALBO usługa kont (sesje).
+    auth_enabled = api_token is not None or accounts is not None
+
+    # Fail-closed: nasłuch poza loopbackiem BEZ jakiegokolwiek uwierzytelniania = otwarte API.
+    if not _is_loopback(args.host) and not auth_enabled:
         if not args.allow_insecure:
             print(
-                f"Odmowa: nasłuch na '{args.host}' (poza loopbackiem) wymaga tokenu API. "
-                "Ustaw security.auth.api_token_ref na referencję sekretu (env:/file:), "
-                "nasłuchuj na 127.0.0.1, albo (świadomie) użyj --allow-insecure.",
+                f"Odmowa: nasłuch na '{args.host}' (poza loopbackiem) wymaga uwierzytelniania. "
+                "Ustaw security.auth.api_token_ref (token maszynowy) lub włącz konta "
+                "(accounts_path/seed_admin/allow_registration), nasłuchuj na 127.0.0.1, "
+                "albo (świadomie) użyj --allow-insecure.",
                 file=sys.stderr,
             )
             return 2
-        # Świadoma zgoda operatora (np. kontener za publikacją tylko na loopback hosta).
         print(
-            f"OSTRZEŻENIE: nasłuch na '{args.host}' BEZ tokenu API (--allow-insecure). "
+            f"OSTRZEŻENIE: nasłuch na '{args.host}' BEZ uwierzytelniania (--allow-insecure). "
             "Zabezpiecz dostęp na warstwie sieci (publikacja portu tylko na loopback, "
             "NetworkPolicy).",
             file=sys.stderr,
@@ -135,11 +173,19 @@ def _cmd_up(args: argparse.Namespace) -> int:
         config,
         config_dir=args.config,
         api_token=api_token,
+        accounts=accounts,
         router_factory=_router_factory,
         trusted_hosts=trusted,
         prompts_dir=prompts,
     )
-    auth_note = "token API: wymagany" if api_token else "token API: brak (loopback)"
+    if api_token and accounts is not None:
+        auth_note = "auth: token + konta"
+    elif accounts is not None:
+        auth_note = "auth: konta (logowanie)"
+    elif api_token:
+        auth_note = "auth: token maszynowy"
+    else:
+        auth_note = "auth: brak (loopback)"
     print(
         f"Husarz API — profil {config.platform.profile.value} — "
         f"http://{args.host}:{args.port} (konsola: /) — {auth_note}"

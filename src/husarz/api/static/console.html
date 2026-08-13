@@ -72,6 +72,21 @@
     .chat-row textarea { resize: vertical; }
     .chat-row button { margin-top: 0; white-space: nowrap; }
     .typing { color: var(--muted); font-style: italic; }
+
+    /* --- Konto: pasek użytkownika + modal logowania --- */
+    .userbox { font-size: 12px; color: var(--muted); }
+    .userbox b { color: var(--fg); }
+    header button.link { background: transparent; border: 1px solid var(--border);
+                         color: var(--muted); border-radius: 6px; padding: 4px 10px;
+                         cursor: pointer; font-size: 13px; }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 50;
+             display: none; align-items: center; justify-content: center; }
+    .modal.open { display: flex; }
+    .modal-card { background: var(--panel); border: 1px solid var(--border);
+                  border-radius: 12px; padding: 22px; width: 360px; max-width: 92%; }
+    .modal-card h3 { margin: 0 0 14px; }
+    .modal-card input { margin-bottom: 10px; }
+    .modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -79,8 +94,8 @@
     <h1>🪽 Husarz</h1>
     <span class="badge" id="badge">łączenie…</span>
     <span style="flex:1"></span>
-    <input id="token" type="password" placeholder="token API (jeśli wymagany)"
-           style="width:220px" autocomplete="off" />
+    <span class="userbox" id="userbox"></span>
+    <button id="auth-btn" class="link" type="button" hidden>Zaloguj</button>
   </header>
   <nav>
     <button data-tab="chat" class="active">Czat</button>
@@ -139,6 +154,26 @@
     </section>
   </main>
 
+  <div class="modal" id="login-modal">
+    <div class="modal-card">
+      <h3 id="login-title">Zaloguj się</h3>
+      <input id="login-user" placeholder="nazwa użytkownika" autocomplete="username" />
+      <input id="login-pass" type="password" placeholder="hasło" autocomplete="current-password" />
+      <p class="err" id="login-err" hidden></p>
+      <div class="modal-actions">
+        <button class="primary" id="login-submit" style="margin-top:0">Zaloguj</button>
+        <button class="link" id="login-toggle" type="button">Załóż konto</button>
+        <span style="flex:1"></span>
+        <button class="link" id="login-close" type="button">Zamknij</button>
+      </div>
+      <details style="margin-top:14px">
+        <summary class="muted" style="cursor:pointer">Zaawansowane: token maszynowy (Bearer)</summary>
+        <input id="token" type="password" placeholder="token API" autocomplete="off" style="margin-top:8px" />
+        <button class="link" id="token-save" type="button" style="margin-top:6px">Użyj tokenu</button>
+      </details>
+    </div>
+  </div>
+
   <script>
     const $ = (id) => document.getElementById(id);
 
@@ -147,9 +182,10 @@
     const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-    // Token API (opcjonalny) — trzymany lokalnie, doklejany jako nagłówek Bearer.
+    // Aktywny token Bearer (sesja użytkownika LUB token maszynowy) — w localStorage.
     const TOKEN_KEY = "husarz_api_token";
-    const getToken = () => $("token").value.trim() || localStorage.getItem(TOKEN_KEY) || "";
+    const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
+    const setToken = (t) => t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
     const authHeaders = (base) => {
       const h = Object.assign({}, base || {});
       const t = getToken();
@@ -170,16 +206,90 @@
       load(b.dataset.tab);
     });
 
-    async function boot() {
-      $("token").value = localStorage.getItem(TOKEN_KEY) || "";
-      $("token").addEventListener("change", () => {
+    // --- Konto: logowanie / rejestracja / pasek użytkownika ---
+    let authMode = "login";
+    const openLogin = () => { $("login-err").hidden = true; $("login-modal").classList.add("open"); };
+    const closeLogin = () => $("login-modal").classList.remove("open");
+
+    function setAuthMode(mode) {
+      authMode = mode;
+      $("login-title").textContent = mode === "register" ? "Załóż konto" : "Zaloguj się";
+      $("login-submit").textContent = mode === "register" ? "Zarejestruj" : "Zaloguj";
+      $("login-toggle").textContent = mode === "register" ? "Mam już konto" : "Załóż konto";
+    }
+
+    async function refreshMe() {
+      let r;
+      try { r = await fetch("/api/auth/me", { headers: authHeaders() }); }
+      catch { $("userbox").textContent = ""; return; }
+      if (r.status === 401) { showLoggedOut(); return; }
+      showUser(await r.json());
+    }
+
+    function showUser(me) {
+      closeLogin();
+      const anon = me.username.startsWith("(");   // (dev) / (token maszynowy)
+      const quota = me.token_quota == null ? "∞" : me.token_quota;
+      const rem = me.tokens_remaining == null ? "" : ` · pozostało ${esc(me.tokens_remaining)}`;
+      $("userbox").innerHTML = `<b>${esc(me.username)}</b> · ${esc(me.role)} &nbsp;|&nbsp; ` +
+        `model: ${esc(me.chat_model)} &nbsp;|&nbsp; zużyto ${esc(me.tokens_used)}/${esc(quota)} tok${rem}`;
+      $("auth-btn").hidden = anon;               // brak wylogowania w trybie dev/token
+      $("auth-btn").textContent = "Wyloguj";
+      $("auth-btn").dataset.action = "logout";
+    }
+
+    function showLoggedOut() {
+      $("userbox").textContent = "niezalogowano";
+      $("auth-btn").hidden = false;
+      $("auth-btn").textContent = "Zaloguj";
+      $("auth-btn").dataset.action = "login";
+      openLogin();
+    }
+
+    async function submitAuth() {
+      const username = $("login-user").value.trim(), password = $("login-pass").value;
+      if (!username || !password) return;
+      const path = authMode === "register" ? "auth/register" : "auth/login";
+      let r, d;
+      try {
+        r = await fetch("/api/" + path, { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }) });
+        d = await r.json();
+      } catch (e) { $("login-err").hidden = false; $("login-err").textContent = "Błąd sieci."; return; }
+      if (r.ok && d.token) {
+        setToken(d.token); $("login-pass").value = ""; closeLogin();
+        await refreshMe(); resetChat();
+      } else {
+        $("login-err").hidden = false;
+        $("login-err").textContent = d.detail || "Nie udało się zalogować.";
+      }
+    }
+
+    function wireAuth() {
+      $("auth-btn").onclick = async () => {
+        if ($("auth-btn").dataset.action === "logout") {
+          try { await fetch("/api/auth/logout", { method: "POST", headers: authHeaders() }); } catch {}
+          setToken(""); await refreshMe();
+        } else { setAuthMode("login"); openLogin(); }
+      };
+      $("login-submit").onclick = submitAuth;
+      $("login-toggle").onclick = () => setAuthMode(authMode === "register" ? "login" : "register");
+      $("login-close").onclick = closeLogin;
+      $("login-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") submitAuth(); });
+      $("token-save").onclick = () => {
         const t = $("token").value.trim();
-        if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY);
-      });
+        if (t) { setToken(t); $("token").value = ""; closeLogin(); refreshMe(); resetChat(); }
+      };
+    }
+
+    async function boot() {
+      wireAuth();
       try {
         const h = await api("health");
         $("badge").textContent = `v${h.version} · profil: ${h.profile}`;
       } catch { $("badge").textContent = "API niedostępne"; }
+      await refreshMe();
       resetChat();
     }
 
@@ -326,6 +436,7 @@
         out.innerHTML = `<span class="err">Błąd sieci: ${esc(e.message || e)}</span>`;
       }
       log().scrollTop = log().scrollHeight;
+      refreshMe();  // odśwież licznik zużytych tokenów w pasku użytkownika
     }
 
     $("send").onclick = send;

@@ -219,3 +219,24 @@ no-new-privileges), hasło Redisa, przypięcie obrazów, `pull_policy: never` w 
 poprawki CI (dind, hadolint). Nowe testy niezmienników: hardening compose, e2e
 rozwiązanie tokenu prod, PSA `restricted`, sondy `/api/health`, brak `--allow-insecure`
 w k8s. Odrzucone (fałszywe): pętla Vault, brak Secreta (celowy), zapis artifacts/workspace.
+
+### Etap 7 — konta, sesje i limity tokenów (data: 2026-08-13)
+
+**Zakres:** `husarz.accounts` (hasła, sesje, limity) + uwierzytelnianie API kont.
+
+| Niezmiennik | Test |
+|---|---|
+| Hasła: hash `scrypt` (nie plaintext), losowa sól, weryfikacja w stałym czasie | `test_password_hash_is_not_plaintext_and_verifies`, `test_password_hash_uses_random_salt` |
+| Błędny format hasha → fail-closed (False) | `test_verify_rejects_malformed_encoding` |
+| Rejestracja domyślnie wyłączona („dla wybranych") | `test_registration_disabled_by_default`, `test_registration_disabled_returns_403` |
+| Złe poświadczenia → `AuthenticationError`/401 (bez rozróżnienia user/hasło) | `test_authenticate_wrong_credentials`, `test_login_wrong_password_401` |
+| Sesje: wygasanie (TTL) i unieważnianie (logout) | `test_session_expires`, `test_logout_invalidates_session` |
+| Token sesji działa jako Bearer; zły token → 401 | `test_session_token_works_as_bearer` |
+| Konta włączone ⇒ uwierzytelnianie ON (poza `/api/health`) | `test_auth_required_when_accounts_enabled` |
+| Limit tokenów → HTTP 402; zużycie doliczane | `test_quota_blocks_with_402`, `test_chat_records_token_usage` |
+| RBAC per użytkownik (viewer bez `agent:run`) | `test_viewer_account_cannot_chat` |
+| Seed-admin fail-closed przy nierozwiązywalnym sekrecie | `test_seed_admin_fails_closed_when_secret_missing` |
+
+**Weryfikacja na żywo (wykonano):** uruchomiony serwer z kontami — rejestracja →
+token, `/api/auth/me` (rola, model `husarz-local`, liczniki), sesja jako Bearer (200),
+wylogowanie → 401. Konsola serwuje modal logowania i pasek użytkownika.

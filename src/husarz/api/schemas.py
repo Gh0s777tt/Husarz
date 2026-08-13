@@ -115,6 +115,39 @@ class ChatReply(BaseModel):
     content: str
 
 
+class RegisterRequest(BaseModel):
+    """Żądanie rejestracji konta (gdy włączona)."""
+
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class LoginRequest(BaseModel):
+    """Żądanie logowania."""
+
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class AuthToken(BaseModel):
+    """Wynik logowania/rejestracji: token sesji + podstawowe dane konta."""
+
+    token: str
+    username: str
+    role: str
+
+
+class MeResponse(BaseModel):
+    """Bieżący użytkownik: rola, aktywny model czatu i budżet tokenów."""
+
+    username: str
+    role: str
+    chat_model: str
+    tokens_used: int
+    token_quota: int | None
+    tokens_remaining: int | None
+
+
 class OrchestrateRequest(BaseModel):
     """Żądanie orkiestracji zadania."""
 

@@ -150,6 +150,7 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 - [docs/ORKIESTRATOR.md](docs/ORKIESTRATOR.md) — rdzeń agentów i hetman „Husarz".
 - [docs/NARZEDZIA.md](docs/NARZEDZIA.md) — narzędzia i sandbox (allowlisty, izolacja).
 - [docs/API.md](docs/API.md) — REST API i konsola WWW (`husarz up`).
+- [docs/KONTA.md](docs/KONTA.md) — konta, logowanie/rejestracja, sesje, limity tokenów.
 - [docs/DEPLOY.md](docs/DEPLOY.md) — wdrożenie: obrazy, compose (dev/prod/airgap), k8s.
 - [docs/AGENCI.md](docs/AGENCI.md) — role i konfiguracja agentów.
 - [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) — model bezpieczeństwa i weryfikacje.

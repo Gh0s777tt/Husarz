@@ -5,6 +5,27 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 7 — konta, sesje i limity tokenów)
+- Pakiet `husarz.accounts`: hashowanie haseł `scrypt` (biblioteka standardowa, bez
+  zależności), magazyn kont wstrzykiwalny (`InMemory`/`File` JSON), `AccountService`
+  (rejestracja gated, logowanie z sesją, TTL, `logout`, limit i zużycie tokenów).
+- API kont: `POST /api/auth/register`, `/login`, `/logout`, `GET /api/auth/me`
+  (rola, aktywny model czatu, `tokens_used`/`token_quota`/`tokens_remaining`).
+- Uwierzytelnianie Bearer rozszerzone: akceptuje token **sesji użytkownika** oraz
+  statyczny token maszynowy → `Principal(role, user_id, username)`; RBAC per użytkownik.
+- Limit tokenów: `POST /api/chat` i `/api/orchestrate` zwracają **HTTP 402** po
+  wyczerpaniu; zużycie doliczane z pola `usage` odpowiedzi modelu (czat).
+- Konfiguracja `security.auth`: `allow_registration`, `default_user_role`,
+  `default_token_quota`, `session_ttl_minutes`, `accounts_path`, seed-admin (hasło z
+  referencji do sekretu). Launcher aktywuje konta i traktuje je jako uwierzytelnianie
+  (nasłuch nie-loopback dozwolony z kontami).
+- Konsola: modal logowania/rejestracji, pasek użytkownika (nazwa, rola, **model**,
+  zużyte/limit tokenów), wylogowanie; token sesji jako Bearer (localStorage).
+- `models.chat` prezentowany jako aktywny model czatu w `/api/auth/me`.
+- Testy: hasła (scrypt), rejestracja/logowanie/sesje/wygasanie/limity, API kont
+  (sesja jako Bearer, 402, RBAC viewer), seed-admin fail-closed.
+- Dokumentacja: `docs/KONTA.md`, ADR-0009.
+
 ### Dodane (Czat lokalny + customowy model Ollama)
 - **Customowy model Ollama** `husarz` (`ollama/Husarz.Modelfile`): persona hetmana
   (PL, czat + kodowanie) zaszyta w `SYSTEM`, baza wymienna przez `FROM` (domyślnie

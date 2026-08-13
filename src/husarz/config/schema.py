@@ -280,6 +280,18 @@ class AuthConfig(_StrictModel):
     roles: list[str] = Field(default_factory=lambda: ["admin", "operator", "viewer"])
     api_token_ref: str | None = None
     api_role: str = "operator"
+    # --- Konta użytkowników (Etap 7): logowanie/rejestracja, sesje, limity ---
+    # Rejestracja domyślnie WYŁĄCZONA (model „dla wybranych" — konta tworzy admin).
+    allow_registration: bool = False
+    default_user_role: str = "operator"
+    # Limit tokenów dla nowego konta (None = bez limitu; sensowne w trybie hostowanym).
+    default_token_quota: int | None = Field(default=None, ge=1)
+    session_ttl_minutes: int = Field(default=720, ge=1)
+    # Trwały magazyn kont (JSON). None = tylko w pamięci (dev/testy, bez trwałości).
+    accounts_path: Path | None = None
+    # Seed konta administratora przy pustym magazynie (hasło z referencji do sekretu).
+    seed_admin_username: str | None = None
+    seed_admin_password_ref: str | None = None
 
 
 class AuditConfig(_StrictModel):

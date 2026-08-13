@@ -81,6 +81,22 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ⬜ Realne uruchomienie na klastrze (CNI+NetworkPolicy, gVisor, Vault unseal) —
   środowisko docelowe; pgvector/RAG i pętla narzędziowa Towarzysza (reszta Etapu 3).
 
+## ✅ Czat lokalny (Ollama) + customowy model
+- ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
+  `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
+
+## ✅ Etap 7 — Konta, sesje i limity tokenów
+- ✅ `husarz.accounts`: hasła `scrypt` (bez zależności), magazyn wstrzykiwalny,
+  `AccountService` (rejestracja gated, sesje+TTL, logout, limit/zużycie tokenów).
+- ✅ API: `/api/auth/register|login|logout|me`; Bearer = sesja LUB token maszynowy;
+  RBAC per użytkownik; limit tokenów → HTTP 402; zużycie z pola `usage` (czat).
+- ✅ Konsola: modal logowania/rejestracji, pasek użytkownika (nazwa, rola, model,
+  zużyte/limit tokenów), wylogowanie. Seed-admin z sekretu (fail-closed).
+- ✅ Testy: hasła, rejestracja/logowanie/sesje/limity, API kont (sesja jako Bearer,
+  402, RBAC), seed-admin. Docs: KONTA.md, ADR-0009.
+- ⬜ Rozliczanie tokenów orkiestracji (sumowanie `usage`); sesje współdzielone
+  (Redis) do skalowania; płatności/subskrypcje; integracje Git/VS Code; załączniki.
+
 ## Pozostałe ustalenia
 - Modele (GLM-5.2, Bielik v3, Hermes) pobierane lokalnie do `models/` (gitignored)
   na dysku z zapasem miejsca — dopiero od Etapu 1 (router) i realnego uruchomienia.
