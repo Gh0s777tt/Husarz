@@ -85,6 +85,15 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
   `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
 
+## ✅ Etap 9 — Integracje Git (GitHub/GitLab) + tworzenie PR
+- ✅ `husarz.git`: klienci GitHub/GitLab nad wstrzykiwalnym transportem (lista repo,
+  utworzenie PR/MR); magazyn połączeń (File/mem); token jako referencja do sekretu.
+- ✅ Bramka egress (deny-all) na hoście dostawcy; RBAC `git:read`/`git:write`/`git:pr`.
+- ✅ API `/api/git/*`; sekcja configu `git` (`config/git.yaml`); zakładka Połączenia.
+- ✅ Testy: klienci (mock transport), egress, magazyn, GitService, API. Docs: GIT.md, ADR-0011.
+- ⬜ Pełny OAuth (rejestracja aplikacji + callback; tokeny szyfrowane at-rest dla
+  trybu hostowanego); commit plików+push przez API (agent Kopijnik); przegląd PR.
+
 ## ✅ Etap 8 — Załączniki do czatu
 - ✅ `husarz.attachments`: pliki/foldery jako kontekst; limity (liczba/rozmiar),
   czyszczenie nazw, odrzucanie binariów, ogrodzony blok anty-prompt-injection.

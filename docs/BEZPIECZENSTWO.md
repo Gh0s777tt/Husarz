@@ -297,3 +297,21 @@ zasadniczą obroną pozostaje ramka w j. naturalnym + interpretacja modelu) i ut
 **Ograniczenia:** wolnotekstowa perswazja w treści nie jest (i nie może być)
 w pełni wyeliminowana strukturalnie — ogrodzenie + etykieta „dane, NIE instrukcje"
 to obrona miękka; limit tokenów pozostaje miękki (rozliczany po odpowiedzi).
+
+### Etap 9 — integracje Git (data: 2026-08-13)
+
+**Zakres:** `husarz.git` — połączenia z GitHub/GitLab, tworzenie PR/MR.
+
+| Niezmiennik | Test |
+|---|---|
+| Token jako REFERENCJA do sekretu (nie plaintext); brak tokenu → GitAuthError | `test_service_provider_for_missing_token_raises_auth`, `test_add_and_list_connection_hides_no_secret` |
+| Bramka egress (deny-all): host dostawcy spoza allowlisty → EgressError/403 | `test_build_provider_egress_denied_by_default`, `test_egress_blocked_returns_403` |
+| Host na allowliście → połączenie dozwolone | `test_build_provider_egress_allowed_when_allowlisted` |
+| Błędny token dostawcy (401/403) → GitAuthError; 4xx → GitError | `test_github_auth_error`, `test_github_error_status` |
+| RBAC: `user` bez `git:read` → 403 | `test_rbac_user_cannot_access_git` |
+| Magazyn połączeń: zapis atomowy, bez sekretu | `test_file_connection_store_persists` |
+| Transport wstrzykiwalny — testy bez sieci | całość `test_git.py`/`test_git_api.py` |
+
+**Ograniczenia:** uwierzytelnianie to PAT (referencja) — pełny OAuth + tokeny
+szyfrowane at-rest (tryb hostowany) odłożone; egzekwowanie egress na warstwie
+aplikacji (pełne wymuszenie sieciowe: NetworkPolicy/sandbox, Etap 6).

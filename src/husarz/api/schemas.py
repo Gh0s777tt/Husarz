@@ -162,6 +162,53 @@ class MeResponse(BaseModel):
     tokens_remaining: int | None
 
 
+class GitConnectionIn(BaseModel):
+    """Żądanie dodania połączenia Git. ``token_ref`` to REFERENCJA do sekretu (nie token)."""
+
+    name: str = Field(min_length=1, max_length=64)
+    provider: Literal["github", "gitlab"]
+    api_base: str = Field(min_length=1, max_length=256)
+    token_ref: str = Field(min_length=1, max_length=256)
+    username: str | None = Field(default=None, max_length=128)
+
+
+class GitConnectionView(BaseModel):
+    """Widok połączenia Git (bez sekretu — ``token_ref`` to tylko referencja)."""
+
+    name: str
+    provider: str
+    api_base: str
+    username: str | None
+    token_ref: str
+
+
+class RepoView(BaseModel):
+    """Repozytorium (znormalizowane między dostawcami)."""
+
+    full_name: str
+    default_branch: str
+    private: bool
+    url: str
+
+
+class PullRequestIn(BaseModel):
+    """Żądanie utworzenia PR (GitHub) / MR (GitLab)."""
+
+    repo: str = Field(min_length=1, max_length=256)
+    title: str = Field(min_length=1, max_length=256)
+    head: str = Field(min_length=1, max_length=256)
+    base: str = Field(min_length=1, max_length=256)
+    body: str = Field(default="", max_length=100_000)
+
+
+class PullRequestView(BaseModel):
+    """Wynik utworzenia PR/MR."""
+
+    number: int | None
+    url: str
+    title: str
+
+
 class OrchestrateRequest(BaseModel):
     """Żądanie orkiestracji zadania."""
 

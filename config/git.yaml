@@ -1,0 +1,13 @@
+# ============================================================================
+# config/git.yaml — integracje Git (sekcja "git"). Plik OPCJONALNY; domyślnie
+# integracje są wyłączone. Nadpisania przez ENV: HUSARZ_GIT__...
+#
+# WAŻNE (suwerenność): tokeny podajesz jako REFERENCJE do sekretów w połączeniu
+# (env:/file:/vault:), nigdy jako wartość. Hosty dostawców (api.github.com,
+# gitlab.com) muszą być dodane do security.egress.allowlist — inaczej bramka
+# egress (deny-all) zablokuje połączenie.
+# ============================================================================
+
+enabled: false
+# Trwały magazyn połączeń (metadane + referencja tokenu, BEZ sekretu). None = w pamięci.
+connections_path: null   # np. ./data/git-connections.json

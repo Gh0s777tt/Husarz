@@ -108,6 +108,15 @@ def _build_accounts(config: HusarzConfig) -> Any:
         raise ConfigError(str(exc)) from exc
 
 
+def _build_git(config: HusarzConfig) -> Any:
+    """Buduje usługę integracji Git z configu (lub None, gdy wyłączona). Import leniwy."""
+    if not config.git.enabled:
+        return None
+    from husarz.git import build_git_service  # noqa: PLC0415
+
+    return build_git_service(config.git, config.security, secrets=_SchemeSecrets())
+
+
 class _SchemeSecrets:
     """Dostawca sekretów rozwiązujący referencje po schemacie (env:/file:)."""
 
@@ -129,6 +138,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         config = load_config(args.config, runtime_overrides={"platform": {"profile": args.profile}})
         api_token = _resolve_api_token(config)
         accounts = _build_accounts(config)
+        git_service = _build_git(config)
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -176,6 +186,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         config_dir=args.config,
         api_token=api_token,
         accounts=accounts,
+        git_service=git_service,
         router_factory=_router_factory,
         trusted_hosts=trusted,
         prompts_dir=prompts,

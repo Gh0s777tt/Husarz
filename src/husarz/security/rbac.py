@@ -16,7 +16,17 @@ from husarz.security.errors import AuthorizationError
 DEFAULT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "admin": frozenset({"*"}),
     "operator": frozenset(
-        {"config:read", "agent:run", "agent:puszkarz", "tool:*", "audit:read", "roe:authorize"}
+        {
+            "config:read",
+            "agent:run",
+            "agent:puszkarz",
+            "tool:*",
+            "audit:read",
+            "roe:authorize",
+            "git:read",
+            "git:write",
+            "git:pr",
+        }
     ),
     # Zwykły użytkownik (np. samodzielna rejestracja): może rozmawiać/orkiestrować,
     # ale NIE ma tool:*, roe:authorize (autoryzacja ofensywy) ani audit:read.

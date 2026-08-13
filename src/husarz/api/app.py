@@ -41,6 +41,8 @@ from husarz.api.schemas import (
     ChatReply,
     ChatRequest,
     ConfigSummary,
+    GitConnectionIn,
+    GitConnectionView,
     HealthResponse,
     LoginRequest,
     MeResponse,
@@ -48,7 +50,10 @@ from husarz.api.schemas import (
     ObservationView,
     OrchestrateRequest,
     OrchestrateResponse,
+    PullRequestIn,
+    PullRequestView,
     RegisterRequest,
+    RepoView,
     ToolInfo,
     UsageResponse,
     ValidateRequest,
@@ -57,9 +62,12 @@ from husarz.api.schemas import (
 from husarz.attachments import AttachmentError, build_context_block, sanitize_attachments
 from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
+from husarz.git import GitConnection, GitProviderKind, GitService
+from husarz.git.errors import GitAuthError, GitConnectionError, GitError
 from husarz.orchestrator import Orchestrator, build_orchestrator
 from husarz.router import ChatMessage, Usage
 from husarz.router import ChatRequest as RouterChatRequest
+from husarz.router.egress import EgressError
 from husarz.router.errors import (
     NoModelAvailableError,
     RateLimitExceededError,
@@ -75,6 +83,9 @@ _PERM_CONFIG_READ = "config:read"
 _PERM_CONFIG_WRITE = "config:write"
 _PERM_AGENT_RUN = "agent:run"
 _PERM_AUDIT_READ = "audit:read"
+_PERM_GIT_READ = "git:read"
+_PERM_GIT_WRITE = "git:write"
+_PERM_GIT_PR = "git:pr"
 
 
 def _summary(config: HusarzConfig) -> ConfigSummary:
@@ -104,6 +115,7 @@ def create_app(
     api_role: str | None = None,
     rbac: Rbac | None = None,
     accounts: AccountService | None = None,
+    git_service: GitService | None = None,
     chat_model: str | None = None,
     trusted_hosts: list[str] | None = None,
 ) -> FastAPI:
@@ -210,6 +222,9 @@ def create_app(
     dep_config_write = Depends(_require(_PERM_CONFIG_WRITE))
     dep_agent_run = Depends(_require(_PERM_AGENT_RUN))
     dep_audit_read = Depends(_require(_PERM_AUDIT_READ))
+    dep_git_read = Depends(_require(_PERM_GIT_READ))
+    dep_git_write = Depends(_require(_PERM_GIT_WRITE))
+    dep_git_pr = Depends(_require(_PERM_GIT_PR))
 
     # /api/health celowo BEZ uwierzytelniania — sonda liveness (minimalne dane).
     @app.get("/api/health", response_model=HealthResponse)
@@ -539,6 +554,108 @@ def create_app(
             tokens_remaining=remaining,
         )
 
+    # --- Integracje Git (GitHub/GitLab): połączenia, repozytoria, tworzenie PR ---
+
+    def _require_git() -> GitService:
+        if git_service is None:
+            raise HTTPException(status_code=404, detail="Integracje Git nie są włączone.")
+        return git_service
+
+    @app.get(
+        "/api/git/connections",
+        response_model=list[GitConnectionView],
+        dependencies=[dep_git_read],
+    )
+    def git_connections() -> list[GitConnectionView]:
+        svc = _require_git()
+        return [
+            GitConnectionView(
+                name=c.name,
+                provider=c.provider.value,
+                api_base=c.api_base,
+                username=c.username,
+                token_ref=c.token_ref,
+            )
+            for c in svc.list_connections()
+        ]
+
+    @app.post(
+        "/api/git/connections",
+        response_model=GitConnectionView,
+        dependencies=[dep_git_write],
+    )
+    def git_add_connection(request: GitConnectionIn) -> GitConnectionView:
+        svc = _require_git()
+        conn = GitConnection(
+            name=request.name,
+            provider=GitProviderKind(request.provider),
+            api_base=request.api_base,
+            token_ref=request.token_ref,
+            username=request.username,
+        )
+        try:
+            svc.add(conn)
+        except GitConnectionError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit_log.record(
+            "api", "git.connection.add", {"name": conn.name, "provider": conn.provider}
+        )
+        return GitConnectionView(
+            name=conn.name,
+            provider=conn.provider.value,
+            api_base=conn.api_base,
+            username=conn.username,
+            token_ref=conn.token_ref,
+        )
+
+    @app.delete("/api/git/connections/{name}", dependencies=[dep_git_write])
+    def git_remove_connection(name: str) -> dict[str, bool]:
+        _require_git().remove(name)
+        audit_log.record("api", "git.connection.remove", {"name": name[:64]})
+        return {"ok": True}
+
+    @app.get(
+        "/api/git/connections/{name}/repos",
+        response_model=list[RepoView],
+        dependencies=[dep_git_read],
+    )
+    def git_repos(name: str) -> list[RepoView]:
+        provider = _git_provider(_require_git(), name)
+        try:
+            repos = provider.list_repositories()
+        except (GitError, EgressError) as exc:
+            raise _git_http_error(exc) from exc
+        return [
+            RepoView(
+                full_name=r.full_name, default_branch=r.default_branch, private=r.private, url=r.url
+            )
+            for r in repos
+        ]
+
+    @app.post(
+        "/api/git/connections/{name}/pull-request",
+        response_model=PullRequestView,
+        dependencies=[dep_git_pr],
+    )
+    def git_pull_request(name: str, request: PullRequestIn) -> PullRequestView:
+        provider = _git_provider(_require_git(), name)
+        audit_log.record(
+            "api",
+            "git.pull_request",
+            {"connection": name[:64], "repo": request.repo[:128], "base": request.base[:128]},
+        )
+        try:
+            pr = provider.create_pull_request(
+                request.repo,
+                title=request.title,
+                head=request.head,
+                base=request.base,
+                body=request.body,
+            )
+        except (GitError, EgressError) as exc:
+            raise _git_http_error(exc) from exc
+        return PullRequestView(number=pr.number, url=pr.url, title=pr.title)
+
     @app.get("/")
     def console() -> FileResponse:
         return FileResponse(_STATIC_DIR / "console.html", media_type="text/html")
@@ -583,3 +700,22 @@ def _record_tokens(
     total = usage.total_tokens if usage is not None else None
     if total:
         accounts.record_usage(principal.user_id, total)
+
+
+def _git_http_error(exc: Exception) -> HTTPException:
+    """Mapuje wyjątki Git na kody HTTP (nieznane połączenie/egress/upstream)."""
+    if isinstance(exc, GitConnectionError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, EgressError):
+        return HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, GitAuthError):
+        return HTTPException(status_code=502, detail=str(exc))
+    return HTTPException(status_code=502, detail="Błąd dostawcy Git.")
+
+
+def _git_provider(svc: GitService, name: str) -> Any:
+    """Buduje klienta dostawcy dla połączenia, mapując błędy na HTTP."""
+    try:
+        return svc.provider_for(name)
+    except (GitError, EgressError) as exc:
+        raise _git_http_error(exc) from exc

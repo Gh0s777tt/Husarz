@@ -509,6 +509,18 @@ class ChatConfig(_StrictModel):
     max_request_bytes: int = Field(default=8_000_000, ge=1024)
 
 
+class GitConfig(_StrictModel):
+    """Integracje Git (config/git.yaml). Opcjonalny — domyślnie wyłączony.
+
+    Połączenia (host + referencja tokenu) trzymane są w magazynie runtime; tu tylko
+    włącznik i ścieżka trwałego magazynu. Hosty dostawców i tak muszą przejść przez
+    bramkę egress (deny-all) — dodaj je do ``security.egress.allowlist``.
+    """
+
+    enabled: bool = False
+    connections_path: Path | None = None  # np. ./data/git-connections.json; None = w pamięci
+
+
 class HusarzConfig(_StrictModel):
     """Kompletna, zwalidowana konfiguracja platformy Husarz."""
 
@@ -517,6 +529,7 @@ class HusarzConfig(_StrictModel):
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     chat: ChatConfig = Field(default_factory=ChatConfig)
+    git: GitConfig = Field(default_factory=GitConfig)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     tools: dict[str, ToolConfig] = Field(default_factory=dict)
     roe: dict[str, RoeConfig] = Field(default_factory=dict)

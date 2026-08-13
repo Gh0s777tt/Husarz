@@ -112,6 +112,7 @@
     <button data-tab="chat" class="active">Czat</button>
     <button data-tab="config">Konfiguracja</button>
     <button data-tab="agents">Agenci</button>
+    <button data-tab="git">Połączenia</button>
     <button data-tab="audit">Audyt</button>
     <button data-tab="usage">Monitor</button>
   </nav>
@@ -156,6 +157,44 @@
 
     <section class="tab" id="tab-agents">
       <div class="card"><h3>Chorągiew</h3><div id="agents-out">…</div></div>
+    </section>
+
+    <section class="tab" id="tab-git">
+      <div class="card">
+        <h3>Połączenia Git</h3>
+        <p class="muted">Token podaj jako <b>referencję do sekretu</b> (np. <code>env:GITHUB_TOKEN</code>), nie jako wartość. Host dostawcy musi być na <code>security.egress.allowlist</code>.</p>
+        <div id="git-conns">…</div>
+      </div>
+      <div class="card">
+        <h3>Dodaj połączenie</h3>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <input id="g-name" placeholder="nazwa (np. moj-github)" />
+          <select id="g-provider"><option value="github">GitHub</option><option value="gitlab">GitLab</option></select>
+          <input id="g-base" placeholder="api_base (np. https://api.github.com)" />
+          <input id="g-token" placeholder="token_ref (np. env:GITHUB_TOKEN)" />
+          <input id="g-user" placeholder="użytkownik (opcjonalnie)" />
+        </div>
+        <button class="primary" id="g-add">Dodaj</button>
+        <pre id="g-add-out" hidden></pre>
+      </div>
+      <div class="card">
+        <h3>Repozytoria i Pull Request</h3>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <select id="g-conn-sel"></select>
+          <button class="link" id="g-repos-btn" type="button">Pokaż repozytoria</button>
+        </div>
+        <div id="git-repos" class="muted" style="margin-top:8px">—</div>
+        <h4 style="margin:12px 0 6px">Utwórz PR / MR</h4>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <input id="pr-repo" placeholder="repo (owner/name lub grupa/projekt)" />
+          <input id="pr-title" placeholder="tytuł" />
+          <input id="pr-head" placeholder="gałąź źródłowa (head)" />
+          <input id="pr-base" placeholder="gałąź docelowa (base, np. main)" />
+        </div>
+        <textarea id="pr-body" rows="2" placeholder="opis (opcjonalnie)" style="margin-top:8px"></textarea>
+        <button class="primary" id="pr-create">Utwórz PR</button>
+        <pre id="pr-out" hidden></pre>
+      </div>
     </section>
 
     <section class="tab" id="tab-audit">
@@ -299,9 +338,57 @@
       };
     }
 
+    // --- Połączenia Git ---
+    let gitConns = [];
+    async function loadGit() {
+      const r = await fetch("/api/git/connections", { headers: authHeaders() });
+      if (r.status === 404) { $("git-conns").innerHTML = "<p class='muted'>Integracje Git nie są włączone (ustaw <code>git.enabled: true</code>).</p>"; return; }
+      if (!r.ok) { $("git-conns").innerHTML = `<p class='err'>${esc((await r.json()).detail || "Brak dostępu.")}</p>`; return; }
+      gitConns = await r.json();
+      $("git-conns").innerHTML = gitConns.length ? "<table><tr><th>Nazwa</th><th>Dostawca</th><th>Host</th><th>token_ref</th><th></th></tr>" +
+        gitConns.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.provider)}</td><td>${esc(c.api_base)}</td><td>${esc(c.token_ref)}</td>` +
+          `<td><button class="link g-del" type="button" data-n="${esc(c.name)}">usuń</button></td></tr>`).join("") + "</table>"
+        : "<p class='muted'>Brak połączeń.</p>";
+      $("git-conns").querySelectorAll(".g-del").forEach((b) => b.onclick = async () => {
+        await fetch("/api/git/connections/" + encodeURIComponent(b.dataset.n), { method: "DELETE", headers: authHeaders() });
+        loadGit();
+      });
+      $("g-conn-sel").innerHTML = gitConns.map((c) => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join("");
+    }
+    function wireGit() {
+      $("g-add").onclick = async () => {
+        $("g-add-out").hidden = false; $("g-add-out").textContent = "…";
+        const body = { name: $("g-name").value.trim(), provider: $("g-provider").value,
+          api_base: $("g-base").value.trim(), token_ref: $("g-token").value.trim(),
+          username: $("g-user").value.trim() || null };
+        const d = await api("git/connections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        $("g-add-out").textContent = d.name ? "Dodano: " + d.name : "Błąd: " + (d.detail || JSON.stringify(d));
+        loadGit();
+      };
+      $("g-repos-btn").onclick = async () => {
+        const name = $("g-conn-sel").value; if (!name) return;
+        $("git-repos").textContent = "…";
+        const r = await fetch("/api/git/connections/" + encodeURIComponent(name) + "/repos", { headers: authHeaders() });
+        const d = await r.json();
+        if (!Array.isArray(d)) { $("git-repos").innerHTML = `<span class="err">${esc(d.detail || "Błąd.")}</span>`; return; }
+        $("git-repos").innerHTML = d.length ? "<table><tr><th>Repozytorium</th><th>Gałąź</th><th>Prywatne</th></tr>" +
+          d.map((x) => `<tr><td>${esc(x.full_name)}</td><td>${esc(x.default_branch)}</td><td>${x.private ? "tak" : "—"}</td></tr>`).join("") + "</table>"
+          : "<span class='muted'>Brak repozytoriów.</span>";
+      };
+      $("pr-create").onclick = async () => {
+        const name = $("g-conn-sel").value; if (!name) return;
+        $("pr-out").hidden = false; $("pr-out").textContent = "…";
+        const body = { repo: $("pr-repo").value.trim(), title: $("pr-title").value.trim(),
+          head: $("pr-head").value.trim(), base: $("pr-base").value.trim(), body: $("pr-body").value };
+        const d = await api("git/connections/" + encodeURIComponent(name) + "/pull-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        $("pr-out").textContent = d.url ? "Utworzono PR/MR: " + d.url : "Błąd: " + (d.detail || JSON.stringify(d));
+      };
+    }
+
     async function boot() {
       wireAuth();
       wireAttachments();
+      wireGit();
       try {
         const h = await api("health");
         $("badge").textContent = `v${h.version} · profil: ${h.profile}`;
@@ -313,6 +400,7 @@
     async function load(tab) {
       if (tab === "config") $("config-out").textContent = JSON.stringify(await api("config/summary"), null, 2);
       if (tab === "usage") $("usage-out").textContent = JSON.stringify(await api("usage"), null, 2);
+      if (tab === "git") loadGit();
       if (tab === "agents") {
         const a = await api("agents");
         if (!Array.isArray(a)) { $("agents-out").innerHTML = `<p class='err'>${esc(a.detail || "Brak dostępu.")}</p>`; return; }

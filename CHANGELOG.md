@@ -5,6 +5,22 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 9 — integracje Git: GitHub/GitLab + tworzenie PR)
+- Pakiet `husarz.git`: klienci `GitHubProvider`/`GitLabProvider` nad WSTRZYKIWALNYM
+  transportem (testy bez sieci): lista repozytoriów + utworzenie PR/MR. Magazyn
+  połączeń (InMemory/File JSON, zapis atomowy); `GitService` (rozwiązuje token z
+  referencji przy operacji). **Token jako referencja do sekretu**, nigdy plaintext.
+- **Bramka egress (deny-all)**: host dostawcy musi być na `security.egress.allowlist`
+  — inaczej 403. Ta sama warstwa co router modeli (suwerenność).
+- API: `GET/POST/DELETE /api/git/connections`, `GET …/{name}/repos`,
+  `POST …/{name}/pull-request`. RBAC: `git:read`/`git:write`/`git:pr` (operator/admin).
+- Sekcja konfiguracji `git` (`config/git.yaml`, opcjonalna): `enabled`,
+  `connections_path`. ENV: `HUSARZ_GIT__…`. Launcher buduje usługę, gdy włączona.
+- Konsola: zakładka **Połączenia** — lista/dodawanie/usuwanie połączeń (token jako
+  referencja), podgląd repozytoriów, formularz utworzenia PR/MR.
+- Testy: +21 (klienci GitHub/GitLab na mock transport, egress, magazyn, GitService,
+  API — 404/409/403/RBAC). Docs: `docs/GIT.md`, ADR-0011.
+
 ### Dodane (Etap 8 — załączniki do czatu)
 - Moduł `husarz.attachments`: pliki/foldery jako kontekst czatu. Treść NIEZAUFANA —
   twarde limity (liczba, rozmiar per plik/łączny → DoS), czyszczenie nazw (basename),
