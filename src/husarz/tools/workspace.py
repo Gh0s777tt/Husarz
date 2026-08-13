@@ -28,8 +28,14 @@ def _match_segments(path_segments: list[str], pattern_segments: list[str]) -> bo
 
 
 def glob_match(relative_posix: str, pattern: str) -> bool:
-    """Dopasowuje ścieżkę względną (posix) do wzorca glob z obsługą ``**``."""
-    return _match_segments(relative_posix.split("/"), pattern.split("/"))
+    """Dopasowuje ścieżkę względną (posix) do wzorca glob z obsługą ``**``.
+
+    Dopasowanie jest bez rozróżniania wielkości liter (``casefold``), by deny-glob
+    nie dało się ominąć na systemach plików case-insensitive (np. ``SECRET.ENV``).
+    """
+    path_segments = relative_posix.casefold().split("/")
+    pattern_segments = pattern.casefold().split("/")
+    return _match_segments(path_segments, pattern_segments)
 
 
 def resolve_within_workspace(

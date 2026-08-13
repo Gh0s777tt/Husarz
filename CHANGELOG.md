@@ -22,6 +22,19 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   in-memory, ładowarka, osobne testy bezpieczeństwa — wszystko bez Dockera/DB/sieci.
 - Dokumentacja: `docs/NARZEDZIA.md`, ADR-0005; aktualizacja ARCHITEKTURA/ROADMAP.
 
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 3)
+- **Hardening sandboxa:** `build_docker_argv` dodaje `--user` (non-root), `--read-only`
+  (rootfs) + `--tmpfs /tmp`, `--pids-limit`; opcjonalny montaż workspace `:ro`; odrzuca
+  obraz zaczynający się od `-`. Executor nazywa kontener i po timeout robi `docker rm -f`
+  (koniec osieroconych kontenerów). Pola `SandboxConfig.run_as_user/pids_limit/read_only_rootfs`.
+- **Ochrona SSRF w web:** narzędzie web odrzuca literalne adresy wewnętrzne/zarezerwowane
+  (loopback/RFC1918/link-local — metadane chmury) niezależnie od allowlisty i egress.
+- `file_edit`: limit `max_bytes` egzekwowany także przy odczycie; `metadata.bytes` liczy
+  bajty UTF-8. Deny-globi są teraz case-insensitive (koniec obejścia `SECRET.ENV`).
+- Loader: jawny `null` w `config` narzędzia nie wywraca ładowania (fallback do domyślnych).
+- Testy: +27 (razem 240, 1 skip symlink na Windows) — hardening argv, SSRF, read deny-glob/
+  traversal, propagacja limitów web, okablowanie loadera, extra_args, symlink escape.
+
 ### Dodane (Etap 2 — rdzeń agentów i orkiestrator „Husarz")
 - Pakiet `husarz.agents`: `BaseAgent`, `Towarzysz`, `Pocztowy`, `AgentResult`,
   protokół `SupportsComplete` oraz `build_agents(config, prompts_dir)` — ładowarka

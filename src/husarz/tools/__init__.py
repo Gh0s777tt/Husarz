@@ -28,6 +28,7 @@ from husarz.tools.sandbox import (
     SandboxSpec,
     build_docker_argv,
     exec_to_result,
+    spec_from_config,
 )
 from husarz.tools.shell import ShellTool
 from husarz.tools.web import Fetcher, HttpxFetcher, WebTool
@@ -61,4 +62,5 @@ __all__ = [
     "exec_to_result",
     "glob_match",
     "resolve_within_workspace",
+    "spec_from_config",
 ]

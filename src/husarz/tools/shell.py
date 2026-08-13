@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from husarz.config.schema import SandboxConfig
 from husarz.tools.base import ToolResult
-from husarz.tools.sandbox import SandboxExecutor, SandboxSpec, exec_to_result
+from husarz.tools.sandbox import SandboxExecutor, exec_to_result, spec_from_config
 
 
 class ShellTool:
@@ -29,23 +29,13 @@ class ShellTool:
         self._sandbox = sandbox
         self._workspace_host_path = workspace_host_path
 
-    def _spec(self, command: list[str]) -> SandboxSpec:
-        return SandboxSpec(
-            command=command,
-            network=self._sandbox.network,
-            cpu_limit=self._sandbox.cpu_limit,
-            memory_limit=self._sandbox.memory_limit,
-            timeout_seconds=self._sandbox.timeout_seconds,
-            image=self._sandbox.image,
-            runtime_class=self._sandbox.runtime_class,
-            workspace_host_path=self._workspace_host_path,
-        )
-
     def run(self, command: list[str]) -> ToolResult:
         if not command:
             return ToolResult(self.name, ok=False, error="Puste polecenie.")
         binary = command[0]
         if binary not in self._allow:
             return ToolResult(self.name, ok=False, error=f"Polecenie '{binary}' spoza allowlisty.")
-        result = self._executor.run(self._spec(command))
-        return exec_to_result(self.name, result)
+        spec = spec_from_config(
+            command, self._sandbox, workspace_host_path=self._workspace_host_path
+        )
+        return exec_to_result(self.name, self._executor.run(spec))

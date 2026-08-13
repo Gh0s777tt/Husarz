@@ -56,5 +56,5 @@ globalna polityka `security.egress` (ta sama `check_endpoint_allowed`, co router
 
 - **Bezpośrednie `subprocess`/`httpx` w narzędziach**: brak izolacji testów,
   wymóg Dockera/sieci w CI jednostkowym, trudniejsze wymuszenie deny-all egress.
-- **`PurePath.full_match` do deny-globów**: dostępne dopiero w 3.11+? (od 3.13) —
-  złamałoby wsparcie Pythona 3.11 z matrycy CI.
+- **`PurePath.full_match` do deny-globów**: dostępne dopiero od Pythona 3.13,
+  więc złamałoby wsparcie Pythona 3.11 z matrycy CI.

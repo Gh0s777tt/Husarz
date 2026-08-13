@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
+from typing import Any
 
 from husarz.config.schema import HusarzConfig
 from husarz.tools.base import Tool
@@ -21,6 +22,12 @@ from husarz.tools.sandbox import DockerSandboxExecutor, SandboxExecutor
 from husarz.tools.shell import ShellTool
 from husarz.tools.web import DEFAULT_MAX_BYTES as WEB_MAX_BYTES
 from husarz.tools.web import DEFAULT_TIMEOUT, Fetcher, HttpxFetcher, WebTool
+
+
+def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
+    """Zwraca wartość int z ustawień; brak klucza LUB jawny ``null`` -> ``default``."""
+    value = settings.get(key)
+    return default if value is None else int(value)
 
 
 def build_tools(
@@ -53,8 +60,8 @@ def build_tools(
         if kind == "file_edit":
             tools[name] = FileEditTool(
                 workspace_path,
-                deny_globs=list(settings.get("deny_globs", [])),
-                max_bytes=int(settings.get("max_file_bytes", DEFAULT_MAX_BYTES)),
+                deny_globs=list(settings.get("deny_globs") or []),
+                max_bytes=_int_setting(settings, "max_file_bytes", DEFAULT_MAX_BYTES),
             )
         elif kind == "shell":
             tools[name] = ShellTool(
@@ -74,7 +81,7 @@ def build_tools(
         elif kind == "run_tests":
             tools[name] = RunTestsTool(
                 active_executor,
-                command=shlex.split(str(settings.get("command", "pytest -q"))),
+                command=shlex.split(str(settings.get("command") or "pytest -q")),
                 sandbox=security.sandbox,
                 workspace_host_path=workspace_host,
             )
@@ -83,11 +90,13 @@ def build_tools(
                 active_fetcher,
                 domain_allowlist=tool_config.allowlist,
                 egress=security.egress,
-                max_bytes=int(settings.get("max_bytes", WEB_MAX_BYTES)),
-                timeout=int(settings.get("timeout_seconds", DEFAULT_TIMEOUT)),
+                max_bytes=_int_setting(settings, "max_bytes", WEB_MAX_BYTES),
+                timeout=_int_setting(settings, "timeout_seconds", DEFAULT_TIMEOUT),
             )
         elif kind == "rag":
-            tools[name] = RagTool(active_backend, top_k=int(settings.get("top_k", DEFAULT_TOP_K)))
+            tools[name] = RagTool(
+                active_backend, top_k=_int_setting(settings, "top_k", DEFAULT_TOP_K)
+            )
         else:
             raise ToolError(f"Nieznany rodzaj narzędzia '{kind}' (narzędzie '{name}').")
     return tools

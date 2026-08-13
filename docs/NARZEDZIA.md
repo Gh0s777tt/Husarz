@@ -18,19 +18,26 @@ Kod: `husarz.tools`.
 | `shell`     | `ShellTool`      | allowlista binarek + sandbox (bez sieci, limity) |
 | `git`       | `GitTool`        | allowlista podkomend; `push` tylko gdy `allow_push` |
 | `run_tests` | `RunTestsTool`   | skonfigurowane polecenie testów w sandboxie |
-| `web`       | `WebTool`        | allowlista domen narzędzia **oraz** globalny egress |
-| `rag`       | `RagTool`        | pamięć/wyszukiwanie (in-memory w testach, pgvector w prod) |
+| `web`       | `WebTool`        | allowlista domen narzędzia **oraz** globalny egress + blok wewnętrznych IP |
+| `rag`       | `RagTool`        | pamięć/wyszukiwanie (obecnie in-memory także w prod; pgvector planowany, Etap 6) |
 
 ## Sandbox
 
 `SandboxSpec` opisuje uruchomienie; `build_docker_argv` buduje `docker run`:
 
 - **`--network none`** gdy `network=False` (domyślnie) — twarda izolacja sieci,
-- limity **`--cpus` / `--memory`**, timeout,
-- **`--cap-drop ALL`** i **`--security-opt no-new-privileges`** (hardening),
-- montaż **wyłącznie workspace** do `/workspace`,
+- limity **`--cpus` / `--memory` / `--pids-limit`**, timeout (kontener nazwany,
+  po timeout `docker rm -f` — bez osieroconych kontenerów),
+- **`--cap-drop ALL`**, **`no-new-privileges`**, **`--read-only`** (rootfs) + **`--tmpfs /tmp`**,
+  **`--user`** (non-root) — z `security.sandbox.run_as_user/pids_limit/read_only_rootfs`,
+- montaż **wyłącznie workspace** do `/workspace` (opcjonalnie `:ro`),
 - **`--runtime runsc`** dla gVisor (z `security.sandbox.runtime_class`),
-- wymaga `security.sandbox.image` (bez hardcode obrazu w kodzie).
+- wymaga `security.sandbox.image` (bez hardcode obrazu; nazwa nie może zaczynać się od `-`).
+
+> Uwaga bezpieczeństwa: `shell` sprawdza allowlistę binarki (`argv[0]`), ale argumenty
+> są dowolne — realną granicą jest sam sandbox. Dlatego **sekrety i wagi modeli nie
+> powinny znajdować się wewnątrz montowanego workspace** (deny-globi `file_edit` to
+> tylko dodatkowa, aplikacyjna warstwa, nieobowiązująca dla `shell`).
 
 `SandboxExecutor` to protokół; produkcyjny `DockerSandboxExecutor` woła Dockera,
 w testach wstrzykujemy własny executor (zapisuje `SandboxSpec`, nie uruchamia nic).

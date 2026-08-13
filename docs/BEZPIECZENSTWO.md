@@ -116,3 +116,21 @@ Wdrożone poprawki bezpieczeństwa:
 
 **Ograniczenie:** izolacja treści niezaufanej to ogrodzenie + instrukcja w prompcie
 (mityguje indirect prompt injection). Twarde filtry I/O i pełny ROE-gate runtime — Etap 4.
+
+### Etap 3 — hardening narzędzi i sandboxa (data: 2026-08-13)
+
+**Kontekst:** przegląd warstwy narzędzi (4 wymiary, 21 findingów). Wdrożone utwardzenia:
+
+| Niezmiennik / poprawka                                        | Test |
+|---------------------------------------------------------------|------|
+| Sandbox: non-root, rootfs read-only, `--pids-limit`, `--tmpfs`, montaż `:ro` | `test_argv_has_hardening_flags`, `test_argv_workspace_readonly_mount` |
+| Sandbox: odrzucenie obrazu `-...`; kill kontenera po timeout    | `test_argv_rejects_dash_image` (kill: `pragma no cover`, wymaga Dockera) |
+| web: blok literalnych adresów wewnętrznych/metadanych (SSRF)    | `test_web_blocks_internal_ip_literals` |
+| file_edit: `max_bytes` przy odczycie; deny-glob case-insensitive | `test_read_enforces_max_bytes`, `test_glob_match_is_case_insensitive` |
+| Konfinacja: escape przez symlink odrzucony                     | `test_symlink_escape_blocked` (skip bez uprawnień do symlinków) |
+
+**Ograniczenia (świadome):**
+- `shell` sprawdza tylko `argv[0]` — argumenty są dowolne; realną granicą jest sandbox,
+  dlatego sekrety/wagi muszą być POZA montowanym workspace (deny-globi to warstwa dodatkowa).
+- SSRF przez DNS rebinding (allowlistowana domena → adres wewnętrzny) wymaga pinowania IP — Etap 4/6.
+- Realne wykonanie sandboxa (Docker+gVisor) weryfikowane w środowisku z Dockerem — Etap 6.

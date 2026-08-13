@@ -7,6 +7,7 @@ Fetcher (HTTP) jest wstrzykiwalny, więc testy nie wykonują połączeń sieciow
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Protocol, runtime_checkable
 
 from husarz.config.net import endpoint_host
@@ -16,6 +17,28 @@ from husarz.tools.base import ToolResult
 
 DEFAULT_MAX_BYTES = 2_000_000
 DEFAULT_TIMEOUT = 20
+
+
+def _is_internal_ip_literal(host: str) -> bool:
+    """True, gdy host to literalny adres IP wewnętrzny/zarezerwowany (ochrona SSRF).
+
+    Blokuje m.in. loopback, prywatne (RFC 1918/ULA), link-local (169.254/16 —
+    endpoint metadanych chmury) oraz adresy zarezerwowane. Nie chroni przed
+    DNS rebindingiem (domena z allowlisty wskazująca na adres wewnętrzny) —
+    to wymaga pinowania IP i jest odłożone (patrz docs/NARZEDZIA.md).
+    """
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (
+        ip.is_loopback
+        or ip.is_private
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
 
 
 @runtime_checkable
@@ -62,6 +85,14 @@ class WebTool:
         host = endpoint_host(url)
         if host is None:
             return ToolResult(self.name, ok=False, error=f"Nie rozpoznano hosta w URL: {url!r}.")
+        # Ochrona SSRF: narzędzie web nie łączy się z literalnymi adresami wewnętrznymi
+        # (loopback/prywatne/link-local/metadane) niezależnie od allowlisty i egress.
+        if _is_internal_ip_literal(host):
+            return ToolResult(
+                self.name,
+                ok=False,
+                error=f"Host '{host}' to adres wewnętrzny/zarezerwowany (SSRF).",
+            )
         if not self._domain_allowed(host):
             return ToolResult(
                 self.name, ok=False, error=f"Domena '{host}' spoza allowlisty narzędzia web."

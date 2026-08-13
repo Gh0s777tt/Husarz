@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from husarz.config.schema import SandboxConfig
 from husarz.tools.base import ToolResult
-from husarz.tools.sandbox import SandboxExecutor, SandboxSpec, exec_to_result
+from husarz.tools.sandbox import SandboxExecutor, exec_to_result, spec_from_config
 
 
 class RunTestsTool:
@@ -27,14 +27,7 @@ class RunTestsTool:
 
     def run(self, extra_args: list[str] | None = None) -> ToolResult:
         command = [*self._command, *(extra_args or [])]
-        spec = SandboxSpec(
-            command=command,
-            network=self._sandbox.network,
-            cpu_limit=self._sandbox.cpu_limit,
-            memory_limit=self._sandbox.memory_limit,
-            timeout_seconds=self._sandbox.timeout_seconds,
-            image=self._sandbox.image,
-            runtime_class=self._sandbox.runtime_class,
-            workspace_host_path=self._workspace_host_path,
+        spec = spec_from_config(
+            command, self._sandbox, workspace_host_path=self._workspace_host_path
         )
         return exec_to_result(self.name, self._executor.run(spec))

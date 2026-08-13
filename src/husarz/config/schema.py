@@ -238,6 +238,10 @@ class SandboxConfig(_StrictModel):
     # Obraz kontenera i klasa runtime (np. 'runsc' dla gVisor) — bez hardcode w executorze.
     image: str | None = None
     runtime_class: str | None = None
+    # Dodatkowy hardening kontenera: użytkownik non-root, limit procesów, rootfs tylko-do-odczytu.
+    run_as_user: str | None = "1000:1000"
+    pids_limit: int | None = Field(default=512, ge=1)
+    read_only_rootfs: bool = True
 
 
 class MtlsConfig(_StrictModel):

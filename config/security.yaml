@@ -26,6 +26,9 @@ sandbox:
   path_allowlist: []         # dodatkowe ścieżki tylko-do-odczytu
   image: husarz-sandbox:latest   # obraz kontenera narzędzi (budowany lokalnie, Etap 6)
   runtime_class: runsc           # gVisor; null dla zwykłego Dockera
+  run_as_user: "1000:1000"       # non-root w kontenerze
+  pids_limit: 512                # limit procesów (ochrona przed fork-bombą)
+  read_only_rootfs: true         # rootfs tylko-do-odczytu (zapis tylko do /tmp i workspace)
 
 mtls:
   enabled: false             # włącz w prod; materiały przez sekrety, nie w repo

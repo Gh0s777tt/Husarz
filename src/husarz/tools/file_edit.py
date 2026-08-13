@@ -37,13 +37,19 @@ class FileEditTool:
         except PathNotAllowedError as exc:
             return ToolResult(self.name, ok=False, error=str(exc))
         try:
+            # Limit rozmiaru egzekwowany też przy odczycie (ochrona pamięci).
+            if target.is_file() and target.stat().st_size > self._max_bytes:
+                return ToolResult(
+                    self.name, ok=False, error=f"Plik przekracza limit {self._max_bytes} bajtów."
+                )
             content = target.read_text(encoding="utf-8")
         except OSError as exc:
             return ToolResult(self.name, ok=False, error=f"Nie można odczytać pliku: {exc}")
         return ToolResult(self.name, ok=True, output=content, metadata={"path": path})
 
     def write(self, path: str, content: str) -> ToolResult:
-        if len(content.encode("utf-8")) > self._max_bytes:
+        encoded = content.encode("utf-8")
+        if len(encoded) > self._max_bytes:
             return ToolResult(
                 self.name, ok=False, error=f"Plik przekracza limit {self._max_bytes} bajtów."
             )
@@ -56,4 +62,4 @@ class FileEditTool:
             target.write_text(content, encoding="utf-8")
         except OSError as exc:
             return ToolResult(self.name, ok=False, error=f"Nie można zapisać pliku: {exc}")
-        return ToolResult(self.name, ok=True, metadata={"path": path, "bytes": len(content)})
+        return ToolResult(self.name, ok=True, metadata={"path": path, "bytes": len(encoded)})

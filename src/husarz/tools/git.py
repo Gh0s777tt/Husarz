@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from husarz.config.schema import SandboxConfig
 from husarz.tools.base import ToolResult
-from husarz.tools.sandbox import SandboxExecutor, SandboxSpec, exec_to_result
+from husarz.tools.sandbox import SandboxExecutor, exec_to_result, spec_from_config
 
 
 class GitTool:
@@ -43,14 +43,7 @@ class GitTool:
             return ToolResult(
                 self.name, ok=False, error="git push jest wyłączony (allow_push=false)."
             )
-        spec = SandboxSpec(
-            command=["git", *args],
-            network=self._sandbox.network,
-            cpu_limit=self._sandbox.cpu_limit,
-            memory_limit=self._sandbox.memory_limit,
-            timeout_seconds=self._sandbox.timeout_seconds,
-            image=self._sandbox.image,
-            runtime_class=self._sandbox.runtime_class,
-            workspace_host_path=self._workspace_host_path,
+        spec = spec_from_config(
+            ["git", *args], self._sandbox, workspace_host_path=self._workspace_host_path
         )
         return exec_to_result(self.name, self._executor.run(spec))
