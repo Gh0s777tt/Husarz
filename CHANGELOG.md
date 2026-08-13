@@ -5,6 +5,21 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 1 — router modeli)
+- Pakiet `husarz.router` — warstwa OpenAI-compat (vLLM/Ollama/SGLang):
+  - `select_candidates` — wybór modelu po tagach/agencie/jawnym modelu + rozwijanie
+    łańcuchów fallback (odporne na cykle, tylko modele włączone).
+  - `OpenAICompatClient` + wstrzykiwalny `Transport` (`HttpxTransport` w produkcji);
+    `MockClient` dla backendu `mock` — testy bez sieci.
+  - `ModelRouter.complete()` — selekcja → limity → wywołanie z fallbackiem przy błędzie.
+  - Kontrola kosztów: clamp `max_tokens_per_request` + `RateLimiter` (token bucket,
+    wstrzykiwalny zegar) dla `max_requests_per_minute`.
+  - Klucz API z `ModelSpec.api_key_ref` rozwiązywany przez dostawcę sekretów.
+- Zależność `httpx` (klient HTTP warstwy OpenAI-compat).
+- Testy: selekcja, klient (mock transport), rate-limit, e2e fallback, integracja
+  na realnej konfiguracji repo (łącznie 103 testy zielone).
+- Dokumentacja: `docs/ROUTER.md`, ADR-0003 (router modeli); aktualizacja ARCHITEKTURA/ROADMAP.
+
 ### Dodane (Etap 0 — szkielet + loader konfiguracji)
 - Struktura repozytorium (src-layout: `src/husarz/{config,core,router,orchestrator,agents,tools,memory,security,api,launcher}`).
 - System konfiguracji „zero hardcode":

@@ -7,7 +7,7 @@ husarski), w pełni konfigurowalna, z własnym launcherem i interfejsem WWW,
 zaprojektowana pod **suwerenność danych**: modele i dane **nie opuszczają
 infrastruktury użytkownika bez wyraźnej zgody**. Domyślnie **deny-all egress**.
 
-> Status: **Etap 0 (szkielet + loader konfiguracji) — ukończony.**
+> Status: **Etap 0 (szkielet + loader konfiguracji) i Etap 1 (router modeli) — ukończone.**
 > Kolejne etapy: patrz [ROADMAP.md](ROADMAP.md).
 
 ---
@@ -51,7 +51,7 @@ przez zmianę `config/models.yaml`. Wagi trzymane lokalnie (`models/`, gitignore
 ## Stos technologiczny
 
 - **Rdzeń:** Python 3.11+, Pydantic (walidacja configu), FastAPI (API — Etap 5).
-- **Router modeli:** warstwa OpenAI-compat do vLLM / Ollama / SGLang (Etap 1).
+- **Router modeli:** warstwa OpenAI-compat do vLLM / Ollama / SGLang (✅ Etap 1).
 - **Dane:** PostgreSQL + pgvector, Redis, MinIO/S3, Vault/SOPS (Etap 3-4).
 - **Sandbox narzędzi:** Docker + gVisor (opcjonalnie Firecracker) (Etap 3).
 - **Frontend:** własne UI (Next.js/React) — czat + panel konfiguracji (Etap 5).
@@ -124,6 +124,7 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 ## Dokumentacja
 
 - [docs/ARCHITEKTURA.md](docs/ARCHITEKTURA.md) — architektura i przepływy.
+- [docs/ROUTER.md](docs/ROUTER.md) — router modeli (wybór, fallbacki, koszty).
 - [docs/AGENCI.md](docs/AGENCI.md) — role i konfiguracja agentów.
 - [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) — model bezpieczeństwa i weryfikacje.
 - [docs/adr/](docs/adr/) — rejestr decyzji architektonicznych (ADR).

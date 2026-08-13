@@ -11,13 +11,12 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Launcher CLI: `validate`/`version`.
 - ✅ Testy: ładowanie i walidacja configów + niezmienniki bezpieczeństwa.
 
-## ⬜ Etap 1 — Router modeli
-- ⬜ Warstwa OpenAI-compat do vLLM/Ollama/SGLang; klient per backend.
-- ⬜ Rejestr modeli z `models.yaml`; wybór po tagach/capabilities.
-- ⬜ Fallbacki i kontrola kosztów (limity z `routing.yaml`).
-- ⬜ Konsumpcja `ModelSpec.api_key_ref` (rozwiązanie przez dostawcę sekretów)
-  i `request_timeout_seconds` w kliencie HTTP — bez hardcode.
-- ⬜ Testy: mock endpointów, routing po capabilities, fallback przy błędzie.
+## ✅ Etap 1 — Router modeli
+- ✅ Warstwa OpenAI-compat do vLLM/Ollama/SGLang; jeden klient + wstrzykiwalny transport.
+- ✅ Rejestr modeli z `models.yaml`; wybór po tagach/agencie/jawnym modelu.
+- ✅ Fallbacki (odporne na cykle) i kontrola kosztów (clamp `max_tokens`, rate limit).
+- ✅ Konsumpcja `ModelSpec.api_key_ref` (dostawca sekretów) i `request_timeout_seconds`.
+- ✅ Testy: selekcja, klient (mock transport), rate-limit, e2e fallback, integracja.
 
 ## ⬜ Etap 2 — Rdzeń agentów i orkiestrator
 - ⬜ Ładowarka agentów z `config/agents/*.yaml`; klasy `Towarzysz`/`Pocztowy`.

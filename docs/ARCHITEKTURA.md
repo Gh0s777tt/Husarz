@@ -35,12 +35,15 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
                         └──────────────────────┘
 ```
 
-## Zaimplementowane w Etapie 0
+## Zaimplementowane
 
-- **Pakiet `husarz.config`** — schematy, loader, dostawcy sekretów.
+- **Pakiet `husarz.config`** (Etap 0) — schematy, loader, dostawcy sekretów.
 - **Launcher CLI** (`husarz.launcher.cli`) — `validate`, `version`.
-- Pozostałe pakiety (`core`, `router`, `orchestrator`, `agents`, `tools`,
-  `memory`, `security`, `api`) to na razie zaślepki z opisem roli i etapu wdrożenia.
+- **Pakiet `husarz.router`** (Etap 1) — warstwa OpenAI-compat (vLLM/Ollama/SGLang),
+  wybór modelu po tagach/agencie, fallbacki, kontrola kosztów. Szczegóły:
+  [ROUTER.md](ROUTER.md), [ADR-0003](adr/0003-router-modeli.md).
+- Pozostałe pakiety (`core`, `orchestrator`, `agents`, `tools`, `memory`,
+  `security`, `api`) to na razie zaślepki z opisem roli i etapu wdrożenia.
 
 ## Hierarchia konfiguracji (zaimplementowana)
 
