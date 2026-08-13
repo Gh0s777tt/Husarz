@@ -39,9 +39,10 @@ workspace/
 # Frontend (budowany osobno; obraz rdzenia serwuje konsolę statyczną).
 web/node_modules/
 
-# Testy i dokumentacja — niepotrzebne w obrazie runtime.
+# Testy, dokumentacja, wdrożenia i pakowanie — niepotrzebne w obrazie runtime.
 tests/
 docs/
 deploy/
+packaging/
 *.md
 !README.md

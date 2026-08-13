@@ -19,6 +19,17 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 - Testy: +6 (otwieranie przeglądarki, flaga --open, delegacja husarz-app, parser).
   Docs: `docs/LAUNCHER.md`, ADR-0012.
 
+### Poprawione (adwersaryjny przegląd Etapu 10)
+- CI Release: unikalne nazwy binarek per-OS (`husarz-app-{windows.exe,linux,macos}`)
+  + osobny sekwencyjny job `release` (jedno `gh-release`) — koniec kolizji nazw i
+  wyścigu przy dołączaniu do jednego Release.
+- Odporność: niezapisywalny audyt (np. read-only CWD binarki) → czytelne **503**
+  (handler `AuditError`), nie surowe 500.
+- Launcher: poprawny URL dla hosta IPv6 (`[::1]`), `--open` egzekwuje „tylko loopback".
+- `.dockerignore`: wykluczone `packaging/` (spójnie z tests/docs/deploy).
+- Testy: +6 (non-loopback --open, tłumienie błędu openera, IPv6, delegacja
+  profile/prompts + brak config, audyt→503).
+
 ### Dodane (Etap 9 — integracje Git: GitHub/GitLab + tworzenie PR)
 - Pakiet `husarz.git`: klienci `GitHubProvider`/`GitLabProvider` nad WSTRZYKIWALNYM
   transportem (testy bez sieci): lista repozytoriów + utworzenie PR/MR. Magazyn

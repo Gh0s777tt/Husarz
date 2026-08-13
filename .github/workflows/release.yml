@@ -1,5 +1,5 @@
 # Buduje pobieralny launcher (husarz-app) dla Windows/Linux/macOS.
-# Artefakty dostępne w zakładce Actions; dla tagu v* dołączane do GitHub Release.
+# Artefakty dostępne w zakładce Actions; dla tagu v* dołączane do jednego GitHub Release.
 name: Release launcher
 
 on:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write # potrzebne do utworzenia/aktualizacji Release przy tagu
+  contents: read
 
 jobs:
   build:
@@ -19,14 +19,14 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: husarz-app-windows
-            binary: dist/husarz-app.exe
+            built: dist/husarz-app.exe
+            asset: husarz-app-windows.exe
           - os: ubuntu-latest
-            artifact: husarz-app-linux
-            binary: dist/husarz-app
+            built: dist/husarz-app
+            asset: husarz-app-linux
           - os: macos-latest
-            artifact: husarz-app-macos
-            binary: dist/husarz-app
+            built: dist/husarz-app
+            asset: husarz-app-macos
     steps:
       - uses: actions/checkout@v4
 
@@ -42,15 +42,34 @@ jobs:
       - name: Budowa binarki
         run: pyinstaller packaging/husarz.spec --noconfirm
 
+      - name: Zmiana nazwy binarki (unikalna per-OS)
+        shell: bash
+        run: mv "${{ matrix.built }}" "dist/${{ matrix.asset }}"
+
       - name: Publikacja artefaktu
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.binary }}
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
           if-no-files-found: error
 
-      - name: Dołącz do Release (tylko dla tagu v*)
-        if: startsWith(github.ref, 'refs/tags/v')
+  # Osobny, sekwencyjny job Release: jedno wywołanie gh-release z WSZYSTKIMI binarkami
+  # (unikalne nazwy per-OS) — koniec kolizji nazw i wyścigu przy tworzeniu Release.
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Pobranie artefaktów
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Utworzenie/aktualizacja Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.binary }}
+          files: dist/*

@@ -74,6 +74,7 @@ from husarz.router.errors import (
     RouterError,
 )
 from husarz.security.audit import AuditLog, build_audit_log
+from husarz.security.errors import AuditError
 from husarz.security.rbac import Rbac
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -147,6 +148,15 @@ def create_app(
         if cl is not None and cl.isdigit() and int(cl) > max_request_bytes:
             return JSONResponse({"detail": "Żądanie przekracza limit rozmiaru."}, status_code=413)
         return await call_next(request)
+
+    @app.exception_handler(AuditError)
+    async def _audit_error_handler(request: Request, exc: AuditError) -> JSONResponse:
+        # Niezapisywalny audyt (np. read-only CWD binarki) → czytelne 503, nie surowe 500.
+        # Audyt jest twardym wymogiem — fail-closed: akcja nie „udaje się" bez zapisu.
+        return JSONResponse(
+            {"detail": "Audyt niedostępny (błąd zapisu dziennika). Sprawdź uprawnienia katalogu."},
+            status_code=503,
+        )
 
     audit_log = audit if audit is not None else build_audit_log(config.security)
     role = api_role if api_role is not None else config.security.auth.api_role

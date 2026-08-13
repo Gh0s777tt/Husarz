@@ -60,6 +60,11 @@ def _is_loopback(host: str) -> bool:
     return host in _LOOPBACK_HOSTS
 
 
+def _url_host(host: str) -> str:
+    """Host do URL — literał IPv6 (np. ``::1``) wymaga nawiasów (RFC 3986)."""
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
 def _open_browser_async(
     url: str, *, opener: Callable[[str], Any] | None = None, delay: float = 1.5
 ) -> None:
@@ -223,10 +228,8 @@ def _cmd_up(args: argparse.Namespace) -> int:
         auth_note = "auth: token maszynowy"
     else:
         auth_note = "auth: brak (loopback)"
-    url = f"http://{args.host}:{args.port}/"
-    print(
-        f"Husarz API — profil {config.platform.profile.value} — " f"{url} (konsola) — {auth_note}"
-    )
+    url = f"http://{_url_host(args.host)}:{args.port}/"
+    print(f"Husarz API — profil {config.platform.profile.value} — {url} (konsola) — {auth_note}")
     # Launcher: otwórz konsolę w przeglądarce (tylko loopback — sensowne lokalnie).
     if getattr(args, "open", False) and _is_loopback(args.host):
         _open_browser_async(url)
