@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import hmac
 import threading
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from husarz import __version__
 from husarz.accounts import AccountService, Principal
@@ -122,6 +122,19 @@ def create_app(
     app = FastAPI(title="Husarz API", version=__version__)
     if trusted_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+
+    max_request_bytes = config.chat.max_request_bytes
+
+    @app.middleware("http")
+    async def _limit_body_size(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        # Twardy limit rozmiaru ciała (ochrona przed OOM przy dużych załącznikach),
+        # sprawdzany z nagłówka Content-Length ZANIM ciało zostanie zmaterializowane.
+        cl = request.headers.get("content-length")
+        if cl is not None and cl.isdigit() and int(cl) > max_request_bytes:
+            return JSONResponse({"detail": "Żądanie przekracza limit rozmiaru."}, status_code=413)
+        return await call_next(request)
 
     audit_log = audit if audit is not None else build_audit_log(config.security)
     role = api_role if api_role is not None else config.security.auth.api_role

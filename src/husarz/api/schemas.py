@@ -96,14 +96,18 @@ class ChatMessageIn(BaseModel):
     """Pojedyncza wiadomość konwersacji (tryb bezpośredniego czatu)."""
 
     role: Literal["system", "user", "assistant"]
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=200_000)
 
 
 class AttachmentIn(BaseModel):
-    """Załącznik czatu: nazwa + treść tekstowa (limity egzekwuje serwer)."""
+    """Załącznik czatu: nazwa + treść tekstowa (limity egzekwuje serwer).
+
+    ``content`` ma twardy sufit schematu (defense-in-depth) — precyzyjne limity
+    (per plik/łączny) egzekwuje ``sanitize_attachments`` wg ``config.chat.attachments``.
+    """
 
     name: str = Field(min_length=1, max_length=256)
-    content: str
+    content: str = Field(max_length=8_000_000)
 
 
 class ChatRequest(BaseModel):
@@ -114,7 +118,8 @@ class ChatRequest(BaseModel):
     model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     # Załączniki (pliki/foldery) dołączane jako ogrodzony kontekst NIEZAUFANY.
-    attachments: list[AttachmentIn] = Field(default_factory=list)
+    # Twardy sufit liczby na poziomie schematu; precyzyjny limit — z configu.
+    attachments: list[AttachmentIn] = Field(default_factory=list, max_length=1000)
 
 
 class ChatReply(BaseModel):
@@ -160,7 +165,7 @@ class MeResponse(BaseModel):
 class OrchestrateRequest(BaseModel):
     """Żądanie orkiestracji zadania."""
 
-    task: str
+    task: str = Field(min_length=1, max_length=100_000)
 
 
 class ObservationView(BaseModel):

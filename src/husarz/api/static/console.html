@@ -438,11 +438,20 @@
         reader.readAsText(f);  // tekst; pliki binarne odrzuci serwer
       });
     }
+    function applyMode() {
+      // Załączniki obsługuje tylko tryb Czat — w Orkiestracji wyłączamy i czyścimy.
+      const chat = document.querySelector("input[name=mode]:checked").value === "chat";
+      $("attach-btn").disabled = !chat;
+      $("attach-folder-btn").disabled = !chat;
+      $("attach-btn").style.opacity = $("attach-folder-btn").style.opacity = chat ? "1" : ".4";
+      if (!chat && attachments.length) { attachments = []; renderAttachBar(); }
+    }
     function wireAttachments() {
       $("attach-btn").onclick = () => $("file-input").click();
       $("attach-folder-btn").onclick = () => $("folder-input").click();
       $("file-input").onchange = (e) => { readFiles(e.target.files); e.target.value = ""; };
       $("folder-input").onchange = (e) => { readFiles(e.target.files); e.target.value = ""; };
+      document.querySelectorAll("input[name=mode]").forEach((r) => r.addEventListener("change", applyMode));
     }
 
     async function send() {
@@ -451,7 +460,7 @@
       const mode = document.querySelector("input[name=mode]:checked").value;
       $("msg").value = "";
       const sent = mode === "chat" ? attachments.slice() : [];
-      if (sent.length) { attachments = []; renderAttachBar(); }
+      // Nie czyścimy tu — czyszczenie dopiero po sukcesie (przy błędzie zostają do ponowienia).
       addUser(text + (sent.length ? `\n\n📎 ${sent.length} załącznik(ów)` : ""));
       const out = bubble("assistant", '<span class="typing">Husarz pisze…</span>', "Husarz");
       try {
@@ -464,6 +473,7 @@
           if (d && d.content !== undefined) {
             out.innerHTML = renderMarkdown(d.content); wireCopy(out.parentElement);
             history.push({ role: "assistant", content: d.content });
+            if (sent.length) { attachments = []; renderAttachBar(); }  // czyść po sukcesie
             if (d.model) $("chat-model").textContent = "model: " + d.model;
           } else {
             history.pop();

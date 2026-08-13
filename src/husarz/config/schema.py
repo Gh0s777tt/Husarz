@@ -504,6 +504,9 @@ class ChatConfig(_StrictModel):
     """Ustawienia trybu czatu (config/chat.yaml). Opcjonalny — działają wartości domyślne."""
 
     attachments: AttachmentsConfig = Field(default_factory=AttachmentsConfig)
+    # Twardy limit rozmiaru ciała żądania (ochrona pamięci przed OOM podczas ingestii,
+    # zanim logika limitów załączników cokolwiek przytnie). Odrzucenie → HTTP 413.
+    max_request_bytes: int = Field(default=8_000_000, ge=1024)
 
 
 class HusarzConfig(_StrictModel):

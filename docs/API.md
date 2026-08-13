@@ -45,7 +45,7 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 | `GET /api/tools`          | narzędzia (kind, egress) | `config:read` |
 | `GET /api/audit?limit=N`  | wpisy audytu + `verified`; `limit` w zakresie `0..10000` (`0` → pusto) | `audit:read` |
 | `GET /api/usage`          | monitor: `orchestrations`, `chats`, `failures`, limity kosztów | `config:read` |
-| `POST /api/chat`          | `{messages, model?, temperature?}` → **bezpośredni czat** z jednym modelem (szybki, konwersacyjny + kodowanie). Model z `models.chat` lub `default` | `agent:run` |
+| `POST /api/chat`          | `{messages, model?, temperature?, attachments?}` → **bezpośredni czat** z jednym modelem (szybki, konwersacyjny + kodowanie). Model z `models.chat` lub `default` | `agent:run` |
 | `POST /api/orchestrate`   | `{task}` → hetman wieloagentowy. Brak routera → 503; błąd routera → 429/502/503 (nie 500) | `agent:run` |
 | `POST /api/config/validate` | `{overrides}` → walidacja nadpisań runtime (tylko odczyt) | `config:read` |
 | `POST /api/config/runtime`  | `{overrides}` → walidacja + zastosowanie w pamięci; **przebudowuje orkiestrator** (audytowane) | `config:write` |

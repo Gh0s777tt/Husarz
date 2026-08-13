@@ -278,3 +278,22 @@ przy skalowaniu poziomym); rozliczanie tokenów orkiestracji — po zsumowaniu `
 
 **Ograniczenia:** zdjęcia wymagają modelu wizyjnego (poza wersją); brak chunkowania/RAG
 dużych folderów (limity twarde); ścieżki serwera nie są przyjmowane od klienta.
+
+### Etap 8 — hardening po przeglądzie adwersaryjnym (data: 2026-08-13)
+
+Przegląd (3 wymiary, 11 findingów, 10 potwierdzonych — brak osiągalnej iniekcji;
+zasadniczą obroną pozostaje ramka w j. naturalnym + interpretacja modelu) i utwardzenia:
+
+| Poprawka | Test |
+|---|---|
+| Ogrodzenie: prefiksowanie każdej linii treści (koniec udawania znaczników) | `test_context_block_neutralizes_marker_forgery` |
+| Neutralizacja znacznika także w NAZWIE (redukcja run `=`) | `test_context_block_neutralizes_marker_in_name` |
+| Czyszczenie treści ze znaków sterujących/formatujących (ANSI/bidi/zero-width) | `test_strip_control_chars_from_content` |
+| Bezpieczne przycinanie wielobajtowe (poprawny UTF-8) | `test_truncate_multibyte_safe` |
+| Limit rozmiaru ciała (Content-Length → 413) — ochrona OOM przed ingestią | `test_body_size_limit_returns_413` |
+| Sufit liczby załączników na poziomie schematu (422) | `test_schema_caps_attachment_count` |
+| Pusta/sterująca nazwa → wartość domyślna | `test_clean_name_empty_becomes_default` |
+
+**Ograniczenia:** wolnotekstowa perswazja w treści nie jest (i nie może być)
+w pełni wyeliminowana strukturalnie — ogrodzenie + etykieta „dane, NIE instrukcje"
+to obrona miękka; limit tokenów pozostaje miękki (rozliczany po odpowiedzi).

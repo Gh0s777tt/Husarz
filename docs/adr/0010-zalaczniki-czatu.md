@@ -48,8 +48,9 @@ czatu (dziś załączniki, w przyszłości np. streaming). Brak pliku = wartośc
 - (+) Zużycie tokenów obejmuje kontekst (spójne z limitami kont).
 - (−) **Zdjęcia** wymagają modelu wizyjnego (llava/qwen2-vl) i formatu multimodalnego —
   poza tą wersją (tekst). Struktura gotowa do rozszerzenia.
-- (−) Bardzo duże foldery są ograniczane po stronie klienta i serwera (limity) — brak
-  chunkowania/RAG; docelowo pamięć długoterminowa (np. MemPalace/pgvector).
+- (−) Limity egzekwuje **serwer** (`sanitize_attachments` + limit rozmiaru ciała →
+  413); klient czyta pliki best-effort. Brak chunkowania/RAG dla wielkich folderów —
+  docelowo pamięć długoterminowa (np. MemPalace/pgvector).
 - (−) Kontekst dotyczy tury, w której został wysłany (nie jest trwały w historii).
 
 ## Alternatywy odrzucone

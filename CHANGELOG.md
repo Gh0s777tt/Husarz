@@ -19,6 +19,20 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 - Testy: sanityzacja (limity, binaria, konfinacja nazw, ogrodzenie+defang) + integracja
   `/api/chat` (kontekst doklejony, odrzucenia 400). Docs: `docs/API.md`, ADR-0010.
 
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 8)
+- **Ogrodzenie odporniejsze**: prefiksowanie KAŻDEJ linii treści niezaufanej (żadna
+  linia nie udaje znacznika) zamiast podmiany literałów; nazwy pozbawiane run `=`.
+- **Czyszczenie treści**: usuwanie znaków sterujących/formatujących (Cc/Cf poza `\n\t`)
+  — ANSI/bidi/zero-width (anty-obfuskacja), analogicznie do czyszczenia nazw.
+- **Limit rozmiaru ciała** (`chat.max_request_bytes`, middleware Content-Length → 413)
+  chroni pamięć przed OOM przed ingestią; sufity schematu na `content`, liczbę
+  załączników (≤1000), `messages.content`, `orchestrate.task`.
+- Konsola: załączniki wyłączone/czyszczone w trybie Orkiestracja; czyszczenie chipów
+  dopiero po sukcesie (zachowane do ponowienia przy błędzie).
+- Docs: sprostowany ADR-0010 (limity egzekwuje serwer) i wiersz `attachments?` w API.md.
+- Testy: +7 (przycinanie wielobajtowe, czyszczenie znaków sterujących, neutralizacja
+  znacznika w nazwie, limit rozmiaru ciała 413, sufit liczby załączników 422).
+
 ### Dodane (Etap 7 — konta, sesje i limity tokenów)
 - Pakiet `husarz.accounts`: hashowanie haseł `scrypt` (biblioteka standardowa, bez
   zależności), magazyn kont wstrzykiwalny (`InMemory`/`File` JSON), `AccountService`
