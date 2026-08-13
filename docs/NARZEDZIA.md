@@ -70,6 +70,25 @@ tools = build_tools(config, workspace="./workspace")  # prod: Docker/httpx/in-me
 result = tools["file_edit"].write("notes/todo.md", "treść")
 ```
 
+### Rejestr providerów (rozszerzalność, ADR-0014)
+
+Dispatch po `kind` idzie przez `ToolProviderRegistry` (`tools/registry.py`): każdy
+rodzaj to zarejestrowany builder `BuildContext -> Tool`. `default_registry()` daje
+świeżą instancję z sześcioma wbudowanymi rodzajami. Nowy rodzaj = nowa funkcja-builder
++ jedna linia `register(...)` — bez zmian w `build_tools`:
+
+```python
+from husarz.tools import build_tools, default_registry
+
+registry = default_registry()
+registry.register("moj_kind", lambda ctx: MojeNarzedzie(ctx.name))
+tools = build_tools(config, workspace="./workspace", registry=registry)
+```
+
+Rejestr obsługuje wyłącznie providerów **first-party** — świadomie NIE ładuje obcych
+modułów (`entry_points`/`importlib`), bo import = wykonanie kodu (RCE/łańcuch dostaw).
+Rozszerzalność zewnętrzną realizują **wtyczki/konektory MCP** (data-driven, `husarz.plugins`).
+
 ## Testy
 
 Konfinacja i allowlisty, budowa argv sandboxa (izolacja sieci, cap-drop, montaż),

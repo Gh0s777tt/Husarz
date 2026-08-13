@@ -1,8 +1,11 @@
 """Ładowarka narzędzi z konfiguracji.
 
 Buduje instancje narzędzi z ``config.tools`` (``config/tools/*.yaml``), honorując
-``enabled`` i allowlisty. Executor sandboxa, fetcher HTTP i backend RAG są
-wstrzykiwalne — w produkcji domyślne (Docker/httpx/in-memory), w testach mocki.
+``enabled`` i allowlisty. Dispatch po ``kind`` przechodzi przez wstrzykiwalny
+``ToolProviderRegistry`` (patrz ``husarz.tools.registry``) — nowy rodzaj narzędzia
+= nowa funkcja-builder + jedna linia ``register`` w ``default_registry``, bez zmian
+w ``build_tools``. Executor sandboxa, fetcher HTTP i backend RAG są wstrzykiwalne —
+w produkcji domyślne (Docker/httpx/in-memory), w testach mocki.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from husarz.tools.errors import ToolError
 from husarz.tools.file_edit import DEFAULT_MAX_BYTES, FileEditTool
 from husarz.tools.git import GitTool
 from husarz.tools.rag import DEFAULT_TOP_K, InMemoryRagBackend, RagBackend, RagTool
+from husarz.tools.registry import BuildContext, ToolProviderRegistry
 from husarz.tools.run_tests import RunTestsTool
 from husarz.tools.sandbox import DockerSandboxExecutor, SandboxExecutor
 from husarz.tools.shell import ShellTool
@@ -30,6 +34,79 @@ def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
     return default if value is None else int(value)
 
 
+# ---------------------------------------------------------------------------
+# Buildery wbudowanych rodzajów narzędzi (1:1 z dawnym dispatch if/elif).
+# Każdy: BuildContext -> Tool. Zarejestrowane w ``default_registry``.
+# ---------------------------------------------------------------------------
+
+
+def _build_file_edit(ctx: BuildContext) -> Tool:
+    settings = ctx.tool_config.config
+    return FileEditTool(
+        ctx.workspace_path,
+        deny_globs=list(settings.get("deny_globs") or []),
+        max_bytes=_int_setting(settings, "max_file_bytes", DEFAULT_MAX_BYTES),
+    )
+
+
+def _build_shell(ctx: BuildContext) -> Tool:
+    return ShellTool(
+        ctx.executor,
+        command_allowlist=ctx.tool_config.allowlist,
+        sandbox=ctx.security.sandbox,
+        workspace_host_path=ctx.workspace_host,
+    )
+
+
+def _build_git(ctx: BuildContext) -> Tool:
+    settings = ctx.tool_config.config
+    return GitTool(
+        ctx.executor,
+        subcommand_allowlist=ctx.tool_config.allowlist,
+        sandbox=ctx.security.sandbox,
+        allow_push=bool(settings.get("allow_push", False)),
+        workspace_host_path=ctx.workspace_host,
+    )
+
+
+def _build_run_tests(ctx: BuildContext) -> Tool:
+    settings = ctx.tool_config.config
+    return RunTestsTool(
+        ctx.executor,
+        command=shlex.split(str(settings.get("command") or "pytest -q")),
+        sandbox=ctx.security.sandbox,
+        workspace_host_path=ctx.workspace_host,
+    )
+
+
+def _build_web(ctx: BuildContext) -> Tool:
+    settings = ctx.tool_config.config
+    return WebTool(
+        ctx.fetcher,
+        domain_allowlist=ctx.tool_config.allowlist,
+        egress=ctx.security.egress,
+        max_bytes=_int_setting(settings, "max_bytes", WEB_MAX_BYTES),
+        timeout=_int_setting(settings, "timeout_seconds", DEFAULT_TIMEOUT),
+    )
+
+
+def _build_rag(ctx: BuildContext) -> Tool:
+    settings = ctx.tool_config.config
+    return RagTool(ctx.rag_backend, top_k=_int_setting(settings, "top_k", DEFAULT_TOP_K))
+
+
+def default_registry() -> ToolProviderRegistry:
+    """Buduje rejestr z 6 wbudowanymi rodzajami narzędzi (świeża instancja)."""
+    registry = ToolProviderRegistry()
+    registry.register("file_edit", _build_file_edit)
+    registry.register("shell", _build_shell)
+    registry.register("git", _build_git)
+    registry.register("run_tests", _build_run_tests)
+    registry.register("web", _build_web)
+    registry.register("rag", _build_rag)
+    return registry
+
+
 def build_tools(
     config: HusarzConfig,
     *,
@@ -37,15 +114,17 @@ def build_tools(
     executor: SandboxExecutor | None = None,
     fetcher: Fetcher | None = None,
     rag_backend: RagBackend | None = None,
+    registry: ToolProviderRegistry | None = None,
 ) -> dict[str, Tool]:
     """Buduje mapę ``nazwa -> narzędzie`` z konfiguracji.
 
     Narzędzia wyłączone (``enabled: false``) są pomijane. Nieznany ``kind``
-    kończy się ``ToolError``.
+    kończy się ``ToolError``. ``registry`` (opcjonalny) pozwala rozszerzyć lub
+    podmienić zestaw rodzajów (domyślnie ``default_registry``).
     """
     workspace_path = Path(workspace)
     workspace_host = str(workspace_path.resolve())
-    security = config.security
+    active_registry = registry if registry is not None else default_registry()
     active_executor: SandboxExecutor = executor or DockerSandboxExecutor()
     active_fetcher: Fetcher = fetcher or HttpxFetcher()
     active_backend: RagBackend = rag_backend or InMemoryRagBackend()
@@ -54,49 +133,19 @@ def build_tools(
     for name, tool_config in config.tools.items():
         if not tool_config.enabled:
             continue
-        kind = tool_config.kind
-        settings = tool_config.config
-
-        if kind == "file_edit":
-            tools[name] = FileEditTool(
-                workspace_path,
-                deny_globs=list(settings.get("deny_globs") or []),
-                max_bytes=_int_setting(settings, "max_file_bytes", DEFAULT_MAX_BYTES),
+        builder = active_registry.get(tool_config.kind)
+        if builder is None:
+            raise ToolError(f"Nieznany rodzaj narzędzia '{tool_config.kind}' (narzędzie '{name}').")
+        tools[name] = builder(
+            BuildContext(
+                name=name,
+                tool_config=tool_config,
+                workspace_path=workspace_path,
+                workspace_host=workspace_host,
+                security=config.security,
+                executor=active_executor,
+                fetcher=active_fetcher,
+                rag_backend=active_backend,
             )
-        elif kind == "shell":
-            tools[name] = ShellTool(
-                active_executor,
-                command_allowlist=tool_config.allowlist,
-                sandbox=security.sandbox,
-                workspace_host_path=workspace_host,
-            )
-        elif kind == "git":
-            tools[name] = GitTool(
-                active_executor,
-                subcommand_allowlist=tool_config.allowlist,
-                sandbox=security.sandbox,
-                allow_push=bool(settings.get("allow_push", False)),
-                workspace_host_path=workspace_host,
-            )
-        elif kind == "run_tests":
-            tools[name] = RunTestsTool(
-                active_executor,
-                command=shlex.split(str(settings.get("command") or "pytest -q")),
-                sandbox=security.sandbox,
-                workspace_host_path=workspace_host,
-            )
-        elif kind == "web":
-            tools[name] = WebTool(
-                active_fetcher,
-                domain_allowlist=tool_config.allowlist,
-                egress=security.egress,
-                max_bytes=_int_setting(settings, "max_bytes", WEB_MAX_BYTES),
-                timeout=_int_setting(settings, "timeout_seconds", DEFAULT_TIMEOUT),
-            )
-        elif kind == "rag":
-            tools[name] = RagTool(
-                active_backend, top_k=_int_setting(settings, "top_k", DEFAULT_TOP_K)
-            )
-        else:
-            raise ToolError(f"Nieznany rodzaj narzędzia '{kind}' (narzędzie '{name}').")
+        )
     return tools

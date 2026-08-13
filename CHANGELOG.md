@@ -5,6 +5,17 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Zmienione (Etap 12a — rejestr providerów narzędzi)
+- `tools/loader.build_tools` porzuca twardy `if/elif kind` na rzecz
+  `ToolProviderRegistry` (`tools/registry.py`): rodzaj narzędzia = zarejestrowany
+  builder `BuildContext -> Tool`. Nowy rodzaj = builder + jedna linia `register`
+  w `default_registry()`, BEZ zmian w rdzeniu dispatchu („zero hardcode").
+- `build_tools(..., registry=None)` — wstrzykiwalny rejestr (seam do testów i
+  przyszłego konektora MCP); nieznany `kind` daje `ToolError` z zachowanym
+  komunikatem (kontrakt niezmieniony, cały pakiet testów narzędzi zielony).
+- Rejestr jest WYŁĄCZNIE first-party — świadomie bez `entry_points`/`importlib`
+  (obcy kod = RCE/łańcuch dostaw). Testy: +6. Docs: ADR-0014.
+
 ### Dodane (Etap 11 — zdjęcia w czacie / modele wizyjne)
 - Obrazy w `POST /api/chat` (`images: [{name, data}]`, `data` = base64) dla modeli
   **wizyjnych**. Typ rozpoznawany z **magic-bytes** (png/jpeg/gif/webp) — serwer NIE ufa

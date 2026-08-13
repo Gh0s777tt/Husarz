@@ -18,8 +18,9 @@ from husarz.tools.errors import (
 )
 from husarz.tools.file_edit import FileEditTool
 from husarz.tools.git import GitTool
-from husarz.tools.loader import build_tools
+from husarz.tools.loader import build_tools, default_registry
 from husarz.tools.rag import InMemoryRagBackend, RagBackend, RagTool
+from husarz.tools.registry import BuildContext, ToolBuilder, ToolProviderRegistry
 from husarz.tools.run_tests import RunTestsTool
 from husarz.tools.sandbox import (
     DockerSandboxExecutor,
@@ -35,6 +36,7 @@ from husarz.tools.web import Fetcher, HttpxFetcher, WebTool
 from husarz.tools.workspace import glob_match, resolve_within_workspace
 
 __all__ = [
+    "BuildContext",
     "CommandNotAllowedError",
     "DockerSandboxExecutor",
     "EgressNotAllowedError",
@@ -53,12 +55,15 @@ __all__ = [
     "SandboxSpec",
     "ShellTool",
     "Tool",
+    "ToolBuilder",
     "ToolError",
     "ToolNotAllowedError",
+    "ToolProviderRegistry",
     "ToolResult",
     "WebTool",
     "build_docker_argv",
     "build_tools",
+    "default_registry",
     "exec_to_result",
     "glob_match",
     "resolve_within_workspace",
