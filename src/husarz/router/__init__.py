@@ -21,6 +21,7 @@ from husarz.router.client import (
     Transport,
     build_client,
 )
+from husarz.router.egress import EgressError, check_endpoint_allowed
 from husarz.router.errors import (
     AllModelsFailedError,
     ModelBackendError,
@@ -40,6 +41,7 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "ClientFactory",
+    "EgressError",
     "HttpxTransport",
     "MockClient",
     "ModelBackendError",
@@ -54,5 +56,6 @@ __all__ = [
     "TransportError",
     "Usage",
     "build_client",
+    "check_endpoint_allowed",
     "select_candidates",
 ]

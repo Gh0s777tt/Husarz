@@ -9,9 +9,6 @@ from __future__ import annotations
 
 from husarz.config.schema import HusarzConfig
 
-# Zabezpieczenie przed cyklami w łańcuchach fallback.
-_MAX_FALLBACK_DEPTH = 16
-
 
 def select_candidates(
     config: HusarzConfig,
@@ -47,10 +44,12 @@ def select_candidates(
             if mapped is not None and mapped != "auto":
                 ordered.append(mapped)
 
-        # (3) reguły routingu dopasowane po tagach
+        # (3) reguły routingu dopasowane po tagach.
+        # Reguła z pustym match_tags jest pomijana (nie jest łapaczem wszystkiego —
+        # inaczej literówka/pominięcie tagów cicho przejęłoby globalny routing).
         if required_tags:
             for rule in routing.rules:
-                if set(rule.match_tags) <= required_tags:
+                if rule.match_tags and set(rule.match_tags) <= required_tags:
                     ordered.extend(rule.prefer)
             # (4) modele posiadające wszystkie wymagane tagi
             for model_id, spec in registry.items():
@@ -65,14 +64,18 @@ def select_candidates(
 
 
 def _expand(ordered: list[str], config: HusarzConfig) -> list[str]:
-    """Rozwija łańcuchy fallback, filtruje do włączonych i usuwa duplikaty."""
+    """Rozwija łańcuchy fallback, filtruje do włączonych i usuwa duplikaty.
+
+    Ochronę przed cyklami zapewnia zbiór ``processed`` (każdy model odwiedzamy raz),
+    a rejestr jest skończony — rekurencja zawsze się kończy, bez limitu głębokości.
+    """
     registry = config.models.registry
     fallbacks_enabled = config.routing.fallbacks_enabled
     result: list[str] = []
     processed: set[str] = set()
 
-    def add(model_id: str, depth: int) -> None:
-        if depth > _MAX_FALLBACK_DEPTH or model_id in processed:
+    def add(model_id: str) -> None:
+        if model_id in processed:
             return
         processed.add(model_id)
         spec = registry.get(model_id)
@@ -82,8 +85,8 @@ def _expand(ordered: list[str], config: HusarzConfig) -> list[str]:
             result.append(model_id)
         if fallbacks_enabled:
             for fallback_id in spec.fallback:
-                add(fallback_id, depth + 1)
+                add(fallback_id)
 
     for model_id in ordered:
-        add(model_id, 0)
+        add(model_id)
     return result

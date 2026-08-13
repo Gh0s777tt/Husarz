@@ -51,7 +51,7 @@ class HttpxTransport:
         url: str,
         headers: dict[str, str],
         payload: dict[str, Any],
-        timeout: int,
+        timeout: int | None = None,
     ) -> dict[str, Any]:
         try:
             import httpx
@@ -59,12 +59,17 @@ class HttpxTransport:
             raise TransportError(
                 "Pakiet 'httpx' nie jest zainstalowany — wymagany przez HttpxTransport."
             ) from exc
+        effective_timeout = (
+            timeout if timeout is not None else (self._timeout or DEFAULT_TIMEOUT_SECONDS)
+        )
         try:
-            response = httpx.post(url, headers=headers, json=payload, timeout=timeout)
+            response = httpx.post(url, headers=headers, json=payload, timeout=effective_timeout)
             response.raise_for_status()
+            # ValueError (json.JSONDecodeError) nie jest httpx.HTTPError — też opakowujemy,
+            # by dotrzymać kontraktu transportu (zwraca JSON albo rzuca TransportError).
             data: dict[str, Any] = response.json()
             return data
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             raise TransportError(f"Błąd HTTP przy {url}: {exc}") from exc
 
 
@@ -75,6 +80,14 @@ def _parse_openai_response(data: dict[str, Any], model_id: str) -> ChatResponse:
         content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise ModelBackendError(model_id, f"Nieprawidłowa odpowiedź backendu: {exc}") from exc
+
+    # content może być JSON null (np. odpowiedź tool-call) lub typem nie-tekstowym —
+    # ChatResponse.content jest typu str, więc odrzucamy to jawnym błędem backendu.
+    if not isinstance(content, str):
+        got = type(content).__name__
+        raise ModelBackendError(
+            model_id, f"Odpowiedź nie zawiera tekstowego pola 'content' (otrzymano {got})."
+        )
 
     usage: Usage | None = None
     raw_usage = data.get("usage")
@@ -108,27 +121,27 @@ class OpenAICompatClient:
         self.model_id = model_id
         self._api_key = api_key
         self._transport = transport
-        self._timeout = spec.request_timeout_seconds or DEFAULT_TIMEOUT_SECONDS
+        timeout = spec.request_timeout_seconds
+        self._timeout = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
 
     def chat(self, request: ChatRequest) -> ChatResponse:
         if self.spec.endpoint is None:
             raise ModelBackendError(self.model_id, "Model nie ma skonfigurowanego endpointu.")
 
         url = self.spec.endpoint.rstrip("/") + "/chat/completions"
-        payload: dict[str, Any] = {
-            "model": self.spec.model,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
-        }
-        # Parametry: domyślne z modelu, potem nadpisania z żądania.
-        merged: dict[str, Any] = dict(self.spec.params)
+        # Priorytet parametrów (rosnąco): params modelu -> extra (escape hatch) ->
+        # jawne pola żądania. Kanoniczne 'model'/'messages' ustawiamy NA KOŃCU,
+        # aby params/extra nie mogły ich nadpisać (integralność routingu i treści).
+        payload: dict[str, Any] = dict(self.spec.params)
+        payload.update(request.extra)
         if request.temperature is not None:
-            merged["temperature"] = request.temperature
+            payload["temperature"] = request.temperature
         if request.max_tokens is not None:
-            merged["max_tokens"] = request.max_tokens
+            payload["max_tokens"] = request.max_tokens
         if request.stop:
-            merged["stop"] = request.stop
-        merged.update(request.extra)
-        payload.update(merged)
+            payload["stop"] = request.stop
+        payload["model"] = self.spec.model
+        payload["messages"] = [{"role": m.role, "content": m.content} for m in request.messages]
 
         headers = {"Content-Type": "application/json"}
         if self._api_key:
@@ -176,7 +189,15 @@ def build_client(
     api_key: str | None = None
     if spec.api_key_ref:
         provider = secrets or NullSecretsProvider()
-        api_key = provider.resolve(spec.api_key_ref)
+        resolved = provider.resolve(spec.api_key_ref)
+        # Fail-closed: skoro model wymaga klucza (api_key_ref), brak sekretu jest
+        # błędem konfiguracji, a nie cichą, nieuwierzytelnioną próbą połączenia.
+        if resolved is None or not resolved.strip():
+            raise ModelBackendError(
+                model_id,
+                f"Nie udało się rozwiązać sekretu klucza API (api_key_ref='{spec.api_key_ref}').",
+            )
+        api_key = resolved.strip()
 
     active_transport = transport or HttpxTransport(timeout=spec.request_timeout_seconds)
     return OpenAICompatClient(spec, model_id, api_key=api_key, transport=active_transport)

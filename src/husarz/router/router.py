@@ -12,6 +12,7 @@ from dataclasses import replace
 from husarz.config.schema import HusarzConfig, ModelSpec
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
 from husarz.router.client import ModelClient, build_client
+from husarz.router.egress import EgressError, check_endpoint_allowed
 from husarz.router.errors import (
     AllModelsFailedError,
     ModelBackendError,
@@ -39,7 +40,7 @@ class ModelRouter:
         self._secrets = secrets or NullSecretsProvider()
         self._client_factory = client_factory or self._default_factory
         max_rpm = config.routing.cost_controls.max_requests_per_minute
-        self._rate_limiter = RateLimiter(max_rpm) if max_rpm else None
+        self._rate_limiter = RateLimiter(max_rpm) if max_rpm is not None else None
 
     def _default_factory(self, spec: ModelSpec, model_id: str) -> ModelClient:
         return build_client(spec, model_id, secrets=self._secrets)
@@ -80,9 +81,16 @@ class ModelRouter:
 
         request = self._apply_cost_controls(request)
 
+        egress = self._config.security.egress
         failures: list[tuple[str, str]] = []
         for model_id in candidates:
             spec = self._config.models.registry[model_id]
+            # Bramka egress (deny-all): nie łączymy się ze zdalnym hostem spoza allowlisty.
+            try:
+                check_endpoint_allowed(spec.endpoint, egress)
+            except EgressError as exc:
+                failures.append((model_id, str(exc)))
+                continue
             client = self._client_factory(spec, model_id)
             try:
                 return client.chat(request)

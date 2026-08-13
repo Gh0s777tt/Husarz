@@ -30,7 +30,24 @@ Kolejność preferencji (pierwszy wygrywa; reszta to fallbacki):
 Do każdego wybranego modelu dołączany jest jego łańcuch `fallback` (o ile
 `routing.fallbacks_enabled`). Zwracane są wyłącznie modele **włączone**
 (`enabled: true`); model wyłączony jest pomijany, ale jego fallbacki nadal
-działają. Rozwijanie fallbacków jest odporne na cykle (limit głębokości).
+działają. Rozwijanie fallbacków jest odporne na cykle (każdy model odwiedzany raz).
+
+> Uwaga: pole `routing.strategy` ma obecnie aktywną wyłącznie wartość `tags`
+> (opisany wyżej wybór). Wartości `cost`/`latency` to placeholdery na kolejne etapy.
+
+## Bramka egress (deny-all)
+
+Przed połączeniem z modelem router sprawdza endpoint względem `security.egress`
+([egress.py](../src/husarz/router/egress.py)):
+
+- endpointy **lokalne/prywatne** (loopback, RFC 1918, `.local`) są zawsze dozwolone
+  (lokalny vLLM/Ollama nie jest ruchem do WAN),
+- host **zdalny** wymaga `default_policy: allow` albo obecności na `egress.allowlist`
+  (dokładnie lub jako subdomena); w przeciwnym razie kandydat jest pomijany
+  (`EgressError`) i router próbuje kolejnego (np. lokalnego fallbacku).
+
+To kontrola na poziomie aplikacji (defense-in-depth). Pełne wymuszenie sieciowe
+(NetworkPolicy, sandbox) należy do Etapu 4/6.
 
 ## Kontrola kosztów
 
@@ -75,6 +92,11 @@ resp = router.complete(
 )
 print(resp.model, resp.content)
 ```
+
+> Ten przykład wymaga **działającego endpointu** modelu (vLLM/Ollama/SGLang pod
+> adresem z `models.yaml`). Do pracy bez sieci użyj modelu z `backend: mock`
+> (wtedy `MockClient` zwraca deterministyczną odpowiedź) albo wstrzyknij własną
+> `client_factory`.
 
 ## Testowanie
 

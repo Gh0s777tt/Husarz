@@ -5,7 +5,8 @@
 # Zmiana modelu agenta = edycja tego pliku, bez zmian w kodzie.
 # ============================================================================
 
-# Strategia doboru: tags | cost | latency
+# Strategia doboru. Aktywna jest wyłącznie 'tags' (wybór po tagach/agencie/modelu).
+# 'cost' i 'latency' to placeholdery na kolejne etapy — jeszcze nieaktywne.
 strategy: tags
 
 # Domyślny model per agent (nazwa agenta -> id modelu z registry, lub "auto").

@@ -20,6 +20,20 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   na realnej konfiguracji repo (łącznie 103 testy zielone).
 - Dokumentacja: `docs/ROUTER.md`, ADR-0003 (router modeli); aktualizacja ARCHITEKTURA/ROADMAP.
 
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 1)
+- **Bramka egress routera** (`husarz.router.egress`): deny-all na ścieżce wywołania
+  modelu — zdalny host spoza `security.egress.allowlist` jest pomijany (endpointy
+  lokalne/prywatne zawsze dozwolone). Wspólny helper `husarz.config.net`.
+- Klient: kanoniczne `model`/`messages` nie mogą być nadpisane przez `params`/`extra`;
+  `extra` nie obchodzi już clampa `max_tokens` (kontrola kosztów); `content=null`/nie-tekst
+  → jasny `ModelBackendError`; `response.json()` (ValueError) opakowany w `TransportError`;
+  brakujący sekret `api_key_ref` → fail-closed; klucz API `strip()`-owany.
+- Selekcja: usunięto błąd obcięcia łańcucha fallback (ochrona przed cyklami przez
+  zbiór odwiedzonych); reguła z pustym `match_tags` nie jest już łapaczem wszystkiego.
+- Walidacja: `CostControls.*` i `ModelSpec.request_timeout_seconds` wymuszają `>= 1`
+  (koniec cichego wyłączenia limitu przez 0); walidacja ról wiadomości.
+- +29 testów regresyjnych (razem 132 zielone).
+
 ### Dodane (Etap 0 — szkielet + loader konfiguracji)
 - Struktura repozytorium (src-layout: `src/husarz/{config,core,router,orchestrator,agents,tools,memory,security,api,launcher}`).
 - System konfiguracji „zero hardcode":

@@ -43,6 +43,8 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ⬜ Dostawcy sekretów Vault i SOPS/age.
 - ⬜ Runtime egzekwuje dwuwarstwowy egress (allowlisty narzędzi ⊆ globalna allowlista)
   oraz izolację sandboxa; audyt każdego `runtime_override` sekcji `security`.
+  (Router ma już bramkę egress na poziomie aplikacji — Etap 1; tu domykamy warstwę sieciową.)
+- ⬜ Aktywować strategie routingu `cost`/`latency` (obecnie placeholdery; aktywne `tags`).
 - ⬜ Testy: blokada celu spoza ROE, wymóg `--authorized`, audyt kompletny.
 
 ## ⬜ Etap 5 — API + Launcher + Web

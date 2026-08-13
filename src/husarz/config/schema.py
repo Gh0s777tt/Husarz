@@ -10,37 +10,14 @@ czytelny komunikat, a nie ciche, błędne zachowanie.
 
 from __future__ import annotations
 
-import ipaddress
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
-def _is_local_endpoint(endpoint: str | None) -> bool:
-    """Zwraca ``True``, gdy endpoint jest lokalny/prywatny (albo ``None`` = brak zdalnego).
-
-    Za lokalne uznajemy: brak endpointu, ``localhost``, domeny ``.local``/``.internal``
-    oraz adresy loopback i prywatne (RFC 1918 / ULA). Używane przez walidację
-    profilu ``airgap`` — modele nie mogą wtedy wskazywać hostów w WAN.
-    """
-    if endpoint is None:
-        return True
-    parsed = urlparse(endpoint if "://" in endpoint else f"//{endpoint}")
-    host = parsed.hostname
-    if not host:
-        return False
-    if host == "localhost" or host.endswith(".local") or host.endswith(".internal"):
-        return True
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return ip.is_loopback or ip.is_private
-
+from husarz.config.net import is_local_endpoint
 
 # ---------------------------------------------------------------------------
 # Typy wyliczeniowe (enumy)
@@ -168,7 +145,7 @@ class ModelSpec(_StrictModel):
     # Referencja do sekretu z kluczem API (np. "env:GLM_API_KEY", "vault:...").
     # Sekret rozwiązywany w runtime przez dostawcę — NIGDY nie trzymany w pliku ani w params.
     api_key_ref: str | None = None
-    request_timeout_seconds: int | None = None
+    request_timeout_seconds: int | None = Field(default=None, ge=1)
     tags: list[str] = Field(default_factory=list)
     context_length: int = 8192
     max_tokens: int | None = None
@@ -217,11 +194,11 @@ class RoutingRule(_StrictModel):
 
 
 class CostControls(_StrictModel):
-    """Kontrola kosztów i limitów."""
+    """Kontrola kosztów i limitów. Wartości liczbowe (gdy podane) muszą być >= 1."""
 
-    max_tokens_per_request: int | None = None
-    max_cost_per_task: float | None = None
-    max_requests_per_minute: int | None = None
+    max_tokens_per_request: int | None = Field(default=None, ge=1)
+    max_cost_per_task: float | None = Field(default=None, gt=0)
+    max_requests_per_minute: int | None = Field(default=None, ge=1)
 
 
 class RoutingConfig(_StrictModel):
@@ -513,7 +490,7 @@ class HusarzConfig(_StrictModel):
             if self.security.sandbox.network:
                 errors.append("Profil airgap wymaga security.sandbox.network=false.")
             for model_id, spec in self.models.registry.items():
-                if spec.enabled and not _is_local_endpoint(spec.endpoint):
+                if spec.enabled and not is_local_endpoint(spec.endpoint):
                     errors.append(
                         f"Profil airgap: model '{model_id}' ma nielokalny endpoint "
                         f"'{spec.endpoint}'. Dozwolone są tylko adresy lokalne/prywatne."

@@ -20,6 +20,12 @@ class ChatMessage:
     role: str
     content: str
 
+    def __post_init__(self) -> None:
+        if self.role not in ROLES:
+            raise ValueError(
+                f"Nieprawidłowa rola wiadomości: {self.role!r}. Dozwolone: {', '.join(ROLES)}."
+            )
+
 
 @dataclass(slots=True)
 class ChatRequest:
