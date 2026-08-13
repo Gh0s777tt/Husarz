@@ -31,19 +31,26 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 - ROE (`config/roe/*.yaml`): właściciel, `authorized_by`, zakres (CIDR/domeny +
   `out_of_scope`), okno czasowe, dozwolone/zabronione techniki, `consent`,
   `signature`, `dry_run_default`.
-- `RoeConfig.is_active == (consent AND signature != null)`. Przykładowe ROE w
-  repo jest **nieaktywne** (szablon).
-- Twarda bramka runtime (Etap 4) przepuści WSZYSTKIE narzędzia Puszkarza tylko
-  po sprawdzeniu: cel w zakresie, okno aktywne, technika dozwolona, tryb
-  (dry-run/authorized). Każda akcja → wpis w audit logu z odniesieniem do ROE.
+- `RoeConfig.is_active == (consent AND niepusty signature)`. Przykładowe ROE w
+  repo jest **nieaktywne** (szablon). Kryptograficzną weryfikację podpisu wykonuje
+  ROE-gate przez **wstrzykiwalny weryfikator** (`RoeGate(..., signature_verifier=...)`).
+- Twarda bramka runtime (`RoeGate`) przepuszcza WSZYSTKIE narzędzia Puszkarza tylko
+  po sprawdzeniu: aktywność ROE, (opcjonalnie) weryfikacja podpisu, okno czasowe,
+  cel w zakresie (CIDR wyrównany, strict), technika (bez rozróżniania wielkości liter),
+  tryb (dry-run/authorized). Każda decyzja → wpis w audit logu z odniesieniem do ROE.
 - Puszkarz **nie generuje** malware/exploitów — zwraca odmowę i propozycję
   działań defensywnych.
 
 ## Zarządzanie sekretami
 
-- Dostawcy: `none` (domyślny, nic nie zwraca), `env` (ze zmiennych),
-  `vault`/`sops` (Etap 4 — obecnie jawny `NotImplementedError`).
-- Konfiguracja przechowuje wyłącznie referencje; wartości rozwiązywane w runtime.
+- Dostawcy: `none` (domyślny, nic nie zwraca), `env` (`env:NAZWA`),
+  `file` (`file:nazwa` z konfinowanego katalogu), `sops` (`sops:plik#klucz`) i
+  `vault` (`vault:mount/ścieżka#klucz`). `sops`/`vault` mają wstrzykiwalny backend
+  (dekryptor/odczyt) i wymagają jawnej konstrukcji z parametrami — `get_secrets_provider`
+  dla nich rzuca `ValueError` (nie `NotImplementedError`). Błąd backendu = fail-closed
+  (zwraca `None`, nie propaguje — wyjątek mógłby nieść odszyfrowaną treść).
+- Konfiguracja przechowuje wyłącznie referencje; wartości (z env/file/SOPS/Vault)
+  rozwiązywane w runtime — w repo pozostają tylko referencje.
 - `.gitignore` wyklucza `.env`, `*.key`, `*.pem`, `secrets/`, `models/`, `*.age`.
 - `gitleaks` (pre-commit + CI) blokuje wyciek sekretów; `.gitleaks.toml`
   dopuszcza jedynie jawne placeholdery (`CHANGE_ME`, `PLACEHOLDER`, referencje `vault:`/`sops:`).
@@ -151,6 +158,19 @@ Wdrożone poprawki bezpieczeństwa:
 | RBAC: role→uprawnienia (wildcardy), odmowa domyślna           | `test_operator_has_tool_wildcard_but_not_config_write` |
 | Sekrety: File konfinowany, SOPS/Vault po kluczu               | `test_file_secrets_provider_is_confined`, `test_sops_provider_navigates_key` |
 
-**Ograniczenia (Etap 5/6):** podpis ROE sprawdzany jako obecność referencji
-(kryptograficzna weryfikacja przez dostawcę sekretów — do dołożenia); uwierzytelnienie
-(OIDC), mTLS oraz runtime egress/sandbox enforcement — API (Etap 5) i deploy (Etap 6).
+### Etap 4 — hardening po przeglądzie adwersaryjnym (data: 2026-08-13)
+
+| Poprawka                                                      | Test |
+|---------------------------------------------------------------|------|
+| Techniki bez rozróżniania wielkości liter (koniec obejścia `SQLI`) | `test_forbidden_technique_case_insensitive` |
+| CIDR wyrównany (strict) — koniec cichego poszerzania zakresu   | `test_cidr_with_host_bits_rejected` |
+| Okno ROE i `now` normalizowane do UTC (koniec TypeError naive/aware) | `test_naive_now_does_not_crash` |
+| Wstrzykiwalny weryfikator podpisu ROE; puste pola rozliczalności odrzucane | `test_signature_verifier_can_block`, `test_empty_accountability_fields_rejected` |
+| Audyt: zapis-przed-pamięcią, deep-copy detail, opcjonalny HMAC, `load()`+`verify()` z pliku | `test_record_persist_first_no_divergence`, `test_load_from_file_and_detect_tampering`, `test_hmac_key_changes_hash_and_verifies` |
+| Puszkarz: mniej fałszywych pozytywów (kontekst defensywny), audyt loguje skrót nie treść | `test_puszkarz_allows_defensive_yara_rule`, `test_puszkarz_refuses_infinitive_verb_exploit` |
+| Sekrety SOPS/Vault: błąd backendu = fail-closed (bez wycieku)  | `test_vault_provider_handles_backend_error` |
+
+**Ograniczenia (Etap 5/6):** pełna kryptograficzna weryfikacja podpisu ROE (domyślnie
+tylko obecność; weryfikator jest wstrzykiwalny); audyt bez `hmac_key` jest tamper-evident
+wobec przypadkowej korekty, z kluczem — wobec zmotywowanego edytora (zalecane w prod);
+uwierzytelnienie (OIDC), mTLS oraz runtime egress/sandbox enforcement — API (Etap 5) i deploy (Etap 6).

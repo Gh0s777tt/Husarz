@@ -95,7 +95,9 @@ class SopsSecretsProvider:
             return None
         try:
             data = self._decrypt(path)
-        except (OSError, ValueError):
+        except (
+            Exception
+        ):  # noqa: BLE001 - fail-closed; nie propaguj (wyjątek może nieść odszyfrowaną treść)
             return None
         return _navigate(data, key)
 
@@ -113,7 +115,7 @@ class VaultSecretsProvider:
             return None
         try:
             data = self._read(path)
-        except (OSError, ValueError):
+        except Exception:  # noqa: BLE001 - fail-closed; nie propaguj (wyjątek może nieść sekret)
             return None
         return _navigate(data, key)
 

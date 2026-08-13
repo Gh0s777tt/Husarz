@@ -22,6 +22,22 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   RBAC, dostawcy sekretów + osobne niezmienniki bezpieczeństwa.
 - Dokumentacja: ADR-0006; aktualizacja ARCHITEKTURA/BEZPIECZENSTWO/ROADMAP.
 
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 4)
+- **ROE-gate:** techniki porównywane bez rozróżniania wielkości liter/spacji (koniec
+  obejścia `SQLI` vs `sqli`); `RoeScope.targets_cidr` wymaga wyrównanego CIDR (strict —
+  koniec cichego poszerzania zakresu); okno ROE i `now` normalizowane do UTC (koniec
+  `TypeError` naive vs aware); wstrzykiwalny `signature_verifier`; `engagement_id/owner/
+  authorized_by` wymagają niepustych wartości; host celu obsługuje `scheme://`.
+- **Audyt:** zapis do pliku PRZED mutacją pamięci (brak rozjazdu przy błędzie I/O);
+  deep-copy `detail` (niezmienność po zahashowaniu); nieserializowalny `detail` → `AuditError`;
+  opcjonalny **HMAC** (`hmac_key`) dla odporności na zmotywowanego edytora; `AuditLog.load()`
+  + `verify()` z pliku; `build_audit_log` odtwarza łańcuch po restarcie (ciągłość).
+- **Puszkarz:** rozszerzone markery + **kontekst defensywny** (mniej fałszywych pozytywów,
+  np. reguły YARA); audyt loguje **skrót** żądania, nie surową treść (ochrona PII/sekretów).
+- **Sekrety:** SOPS/Vault fail-closed przy błędzie backendu (bez propagacji wyjątku
+  mogącego nieść odszyfrowaną treść).
+- +20 testów regresyjnych (razem 294).
+
 ### Dodane (Etap 3 — narzędzia + sandbox)
 - Pakiet `husarz.tools`: `file_edit`, `shell`, `git`, `run_tests`, `web`, `rag`.
   - Konfinacja plików do workspace + deny-globi (`resolve_within_workspace`,

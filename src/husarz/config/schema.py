@@ -10,7 +10,8 @@ czytelny komunikat, a nie ciche, błędne zachowanie.
 
 from __future__ import annotations
 
-from datetime import datetime
+import ipaddress
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -355,22 +356,41 @@ class RoeScope(_StrictModel):
     out_of_scope: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _require_targets(self) -> RoeScope:
+    def _validate(self) -> RoeScope:
         if not self.targets_cidr and not self.targets_domains:
             raise ValueError(
                 "ROE musi definiować co najmniej jeden cel (targets_cidr lub targets_domains)."
             )
+        # CIDR muszą być poprawne i wyrównane (strict) — inaczej '203.0.113.5/24'
+        # cicho poszerzałby zakres do całej sieci (nadmierna autoryzacja).
+        for entry in self.targets_cidr:
+            try:
+                ipaddress.ip_network(entry, strict=True)
+            except ValueError as exc:
+                raise ValueError(
+                    f"targets_cidr: '{entry}' nie jest poprawną, wyrównaną siecią CIDR "
+                    f"(dla pojedynczego hosta użyj /32 lub /128)."
+                ) from exc
         return self
 
 
+def _to_utc(value: datetime) -> datetime:
+    """Normalizuje datetime do UTC-aware (naive traktujemy jako UTC)."""
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return aware.astimezone(UTC)
+
+
 class RoeWindow(_StrictModel):
-    """Okno czasowe autoryzacji."""
+    """Okno czasowe autoryzacji (normalizowane do UTC-aware)."""
 
     start: datetime
     end: datetime
 
     @model_validator(mode="after")
-    def _validate_order(self) -> RoeWindow:
+    def _normalize_and_validate(self) -> RoeWindow:
+        # object.__setattr__ omija validate_assignment (inaczej rekurencja walidatora).
+        object.__setattr__(self, "start", _to_utc(self.start))
+        object.__setattr__(self, "end", _to_utc(self.end))
         if self.end <= self.start:
             raise ValueError("ROE window: 'end' musi być późniejsze niż 'start'.")
         return self
@@ -379,9 +399,9 @@ class RoeWindow(_StrictModel):
 class RoeConfig(_StrictModel):
     """Podpisany plik ROE. Domyślnie dry-run; akcje aktywne wymagają zgody operatora."""
 
-    engagement_id: str
-    owner: str
-    authorized_by: str
+    engagement_id: str = Field(min_length=1)
+    owner: str = Field(min_length=1)
+    authorized_by: str = Field(min_length=1)
     scope: RoeScope
     window: RoeWindow
     allowed_techniques: list[str] = Field(default_factory=list)
@@ -392,18 +412,21 @@ class RoeConfig(_StrictModel):
 
     @property
     def is_active(self) -> bool:
-        """Statyczna bramka ważności ROE: zgoda + niepusta referencja podpisu.
+        """Statyczna bramka ważności ROE: zgoda + niepusta (nie-biała) referencja podpisu.
 
-        Uwaga: nie sprawdza okna czasowego — do tego służy ``is_active_at``
-        (używane przez ROE-gate w runtime, Etap 4). Kryptograficzną weryfikację
-        podpisu wykona dostawca sekretów w Etapie 4; tu wymagamy jedynie, by
-        referencja podpisu była obecna i niepusta.
+        Uwaga: nie sprawdza okna czasowego — do tego służy ``is_active_at``.
+        Kryptograficzną weryfikację podpisu wykonuje ROE-gate przez wstrzykiwalny
+        weryfikator (Etap 4+); tu wymagamy jedynie, by referencja podpisu była obecna.
         """
-        return self.consent and bool(self.signature)
+        return self.consent and bool(self.signature and self.signature.strip())
 
     def is_active_at(self, now: datetime) -> bool:
-        """ROE jest aktywne (``is_active``) i mieści się w oknie czasowym w chwili ``now``."""
-        return self.is_active and self.window.start <= now < self.window.end
+        """ROE jest aktywne (``is_active``) i mieści się w oknie czasowym w chwili ``now``.
+
+        ``now`` naive jest traktowane jako UTC — porównanie jest zawsze w jednej strefie.
+        """
+        moment = _to_utc(now)
+        return self.is_active and self.window.start <= moment < self.window.end
 
 
 # ---------------------------------------------------------------------------

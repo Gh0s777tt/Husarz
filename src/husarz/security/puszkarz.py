@@ -9,6 +9,7 @@ Dwie twarde zasady:
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -21,13 +22,19 @@ DEFENSIVE_ALTERNATIVE = (
     "reakcji na incydent."
 )
 
-# Czasowniki wytwarzania (PL/EN) i rzeczowniki ofensywne — odmowa gdy oba obecne.
+# Czasowniki wytwarzania (PL/EN) i rzeczowniki ofensywne — odmowa gdy oba obecne
+# i BRAK kontekstu defensywnego. To sygnał heurystyczny, nie pełny klasyfikator
+# intencji — ostateczną ocenę może wzmocnić model (Etap dalszy).
 _GENERATION_VERBS = (
     "napisz",
+    "napisać",
+    "przygotuj",
     "wygeneruj",
     "stwórz",
     "stworz",
     "zbuduj",
+    "zaimplementuj",
+    "skompiluj",
     "opracuj",
     "zakoduj",
     "dostarcz",
@@ -36,6 +43,8 @@ _GENERATION_VERBS = (
     "create",
     "build",
     "develop",
+    "implement",
+    "compile",
     "code",
 )
 _OFFENSIVE_NOUNS = (
@@ -49,10 +58,13 @@ _OFFENSIVE_NOUNS = (
     "wirus",
     "worm",
     "stealer",
+    "shellcode",
+    "webshell",
+    "payload",
     "reverse shell",
     "meterpreter",
 )
-# Jawne prośby o omijanie zabezpieczeń — odmowa niezależnie od czasownika.
+# Jawne prośby o omijanie zabezpieczeń — silny sygnał ofensywny.
 _EVASION_MARKERS = (
     "omiń antywirus",
     "obejście antywirusa",
@@ -64,14 +76,33 @@ _EVASION_MARKERS = (
     "omiń edr",
     "ukryj przed edr",
 )
+# Kontekst defensywny — nie odmawiamy analizy/detekcji/obrony (redukcja false-positive).
+_DEFENSIVE_MARKERS = (
+    "wykry",
+    "detekcj",
+    "yara",
+    "sigma",
+    "hardening",
+    "audyt",
+    "analiz",
+    "ioc",
+    "obron",
+    "monitor",
+    "łatani",
+    "reguł",
+)
 
 
-def _is_offensive_generation(lowered: str) -> bool:
-    if any(marker in lowered for marker in _EVASION_MARKERS):
-        return True
+def _classify(lowered: str) -> str:
+    """Zwraca sygnał: 'evasion' | 'offensive-generation' | '' (dozwolone)."""
+    is_defensive = any(marker in lowered for marker in _DEFENSIVE_MARKERS)
+    if any(marker in lowered for marker in _EVASION_MARKERS) and not is_defensive:
+        return "evasion"
     has_verb = any(verb in lowered for verb in _GENERATION_VERBS)
     has_noun = any(noun in lowered for noun in _OFFENSIVE_NOUNS)
-    return has_verb and has_noun
+    if has_verb and has_noun and not is_defensive:
+        return "offensive-generation"
+    return ""
 
 
 @dataclass(slots=True, frozen=True)
@@ -93,8 +124,14 @@ class Puszkarz:
 
     def review_request(self, text: str) -> PuszkarzReview:
         """Ocenia żądanie. Odmawia wytwarzania narzędzi ofensywnych."""
-        if _is_offensive_generation(text.lower()):
-            self._audit.record(self._actor, "puszkarz.refuse", {"snippet": text[:200]})
+        signal = _classify(text.lower())
+        if signal:
+            # Do audytu trafia SKRÓT żądania i sygnał — nigdy surowa treść
+            # (mogłaby zawierać sekrety/PII w niemodyfikowalnym logu).
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            self._audit.record(
+                self._actor, "puszkarz.refuse", {"request_sha256": digest, "signal": signal}
+            )
             return PuszkarzReview(
                 refused=True,
                 reason="Żądanie dotyczy wytworzenia narzędzia ofensywnego — odmowa.",
