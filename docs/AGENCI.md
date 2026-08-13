@@ -9,6 +9,11 @@ Dodanie/wymiana agenta nie wymaga zmian w rdzeniu.
 - **Towarzysz** — agent pełny (własny model, narzędzia, pętla rozumowania).
 - **Pocztowy** — lekki podwykonawca (wąskie, tanie zadania).
 
+Implementacja (Etap 2): `husarz.agents` — `BaseAgent`, `Towarzysz`, `Pocztowy`,
+`build_agents(config, prompts_dir)`. Agenci są dobierani do modelu przez router
+(`agent=<nazwa>`), a hetmanem dowodzi orkiestrator — patrz [ORKIESTRATOR.md](ORKIESTRATOR.md).
+Pętla narzędziowa (function-calling) dla Towarzysza dojdzie w Etapie 3.
+
 ## Roster
 
 | Agent      | Klasa     | Model (domyślny) | Narzędzia                         | ROE |

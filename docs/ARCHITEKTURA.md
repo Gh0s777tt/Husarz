@@ -40,10 +40,14 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
 - **Pakiet `husarz.config`** (Etap 0) — schematy, loader, dostawcy sekretów.
 - **Launcher CLI** (`husarz.launcher.cli`) — `validate`, `version`.
 - **Pakiet `husarz.router`** (Etap 1) — warstwa OpenAI-compat (vLLM/Ollama/SGLang),
-  wybór modelu po tagach/agencie, fallbacki, kontrola kosztów. Szczegóły:
-  [ROUTER.md](ROUTER.md), [ADR-0003](adr/0003-router-modeli.md).
-- Pozostałe pakiety (`core`, `orchestrator`, `agents`, `tools`, `memory`,
-  `security`, `api`) to na razie zaślepki z opisem roli i etapu wdrożenia.
+  wybór modelu po tagach/agencie, fallbacki, kontrola kosztów, bramka egress.
+  Szczegóły: [ROUTER.md](ROUTER.md), [ADR-0003](adr/0003-router-modeli.md).
+- **Pakiety `husarz.agents` i `husarz.orchestrator`** (Etap 2) — klasy
+  Towarzysz/Pocztowy, ładowarka agentów, hetman „Husarz" (plan → deleguj →
+  obserwuj → refleksja → synteza). Szczegóły: [ORKIESTRATOR.md](ORKIESTRATOR.md),
+  [ADR-0004](adr/0004-orkiestrator-agenci.md).
+- Pozostałe pakiety (`core`, `tools`, `memory`, `security`, `api`) to na razie
+  zaślepki z opisem roli i etapu wdrożenia.
 
 ## Hierarchia konfiguracji (zaimplementowana)
 

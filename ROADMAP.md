@@ -18,11 +18,11 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Konsumpcja `ModelSpec.api_key_ref` (dostawca sekretów) i `request_timeout_seconds`.
 - ✅ Testy: selekcja, klient (mock transport), rate-limit, e2e fallback, integracja.
 
-## ⬜ Etap 2 — Rdzeń agentów i orkiestrator
-- ⬜ Ładowarka agentów z `config/agents/*.yaml`; klasy `Towarzysz`/`Pocztowy`.
-- ⬜ Orkiestrator „Husarz": pętla plan → deleguj → obserwuj → refleksja → synteza.
-- ⬜ Agenci: Bielik, Kopijnik, Zwiadowca (na mockach modeli).
-- ⬜ Testy: e2e prostego zadania wieloagentowego.
+## ✅ Etap 2 — Rdzeń agentów i orkiestrator
+- ✅ Ładowarka agentów z `config/agents/*.yaml`; klasy `Towarzysz`/`Pocztowy`.
+- ✅ Orkiestrator „Husarz": pętla plan → deleguj → obserwuj → refleksja → synteza.
+- ✅ Agenci wołani przez router (Bielik/Kopijnik/Zwiadowca itd.) na mockach modeli.
+- ✅ Testy: e2e zadania wieloagentowego + integracja `build_orchestrator`.
 
 ## ⬜ Etap 3 — Narzędzia + sandbox
 - ⬜ `file_edit`, `shell` (Docker+gVisor, allowlist), `git`, `run_tests`,

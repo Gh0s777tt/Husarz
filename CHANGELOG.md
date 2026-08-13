@@ -5,6 +5,20 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 2 — rdzeń agentów i orkiestrator „Husarz")
+- Pakiet `husarz.agents`: `BaseAgent`, `Towarzysz`, `Pocztowy`, `AgentResult`,
+  protokół `SupportsComplete` oraz `build_agents(config, prompts_dir)` — ładowarka
+  agentów z `config/agents/*.yaml` + prompty z `prompts/*.md` (agent wyłączony
+  pomijany, brak promptu = czytelny błąd).
+- Pakiet `husarz.orchestrator`: hetman `Orchestrator` z pętlą plan → deleguj →
+  obserwuj → refleksja → synteza; `build_orchestrator(config, router, prompts_dir)`;
+  odporne parsowanie planu/refleksji (`parse_plan`/`parse_reflection`); znaczniki
+  i instrukcje faz. Nieznany agent w planie jest pomijany z adnotacją.
+- Testy (łącznie 151 zielone): agent + kontekst, ładowarka (repo + brak promptu +
+  wyłączony), parsowanie planu/refleksji, e2e wieloagentowe na skryptowanym
+  routerze, integracja `build_orchestrator` na realnej konfiguracji i promptach.
+- Dokumentacja: `docs/ORKIESTRATOR.md`, ADR-0004; aktualizacja ARCHITEKTURA/AGENCI/ROADMAP.
+
 ### Dodane (Etap 1 — router modeli)
 - Pakiet `husarz.router` — warstwa OpenAI-compat (vLLM/Ollama/SGLang):
   - `select_candidates` — wybór modelu po tagach/agencie/jawnym modelu + rozwijanie
