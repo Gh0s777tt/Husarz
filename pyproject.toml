@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "husarz"
-version = "0.1.0"
+version = "0.14.0"
 description = "Husarz — suwerenna, samodzielnie hostowana, wieloagentowa platforma AI (Chorągiew)."
 readme = "README.md"
 requires-python = ">=3.11"

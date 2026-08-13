@@ -5,6 +5,8 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-14
+
 ### Zmienione (standard prowadzenia projektu)
 - `CLAUDE.md`: doprecyzowany standard prowadzenia projektu (wymóg użytkownika) — aktualizacja
   na bieżąco README/CHANGELOG/ROADMAP/`docs/`/wiki/PDF w tym samym kroku co kod; wiki/PDF ze
@@ -577,4 +579,5 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   referencja do sekretu, nie w `params`); allowlista `gitleaks` zawężona
   (koniec ślepej plamy na `docs/` i `prompts/`).
 
-[Unreleased]: https://github.com/Gh0s777tt/Husarz/commits/main
+[Unreleased]: https://github.com/Gh0s777tt/Husarz/compare/v0.14.0...main
+[0.14.0]: https://github.com/Gh0s777tt/Husarz/releases/tag/v0.14.0
