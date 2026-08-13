@@ -29,6 +29,8 @@ from husarz.api.schemas import (
     AgentInfo,
     AuditEntryView,
     AuditView,
+    ChatReply,
+    ChatRequest,
     ConfigSummary,
     HealthResponse,
     ModelInfo,
@@ -43,6 +45,8 @@ from husarz.api.schemas import (
 from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
 from husarz.orchestrator import Orchestrator, build_orchestrator
+from husarz.router import ChatMessage
+from husarz.router import ChatRequest as RouterChatRequest
 from husarz.router.errors import (
     NoModelAvailableError,
     RateLimitExceededError,
@@ -81,19 +85,21 @@ def create_app(
     config_dir: str | Path | None = None,
     audit: AuditLog | None = None,
     router: SupportsComplete | None = None,
+    router_factory: Callable[[HusarzConfig], SupportsComplete] | None = None,
     prompts_dir: str | Path = "./prompts",
     api_token: str | None = None,
     api_role: str | None = None,
     rbac: Rbac | None = None,
-    orchestrator_factory: Callable[[HusarzConfig], Orchestrator | None] | None = None,
+    chat_model: str | None = None,
     trusted_hosts: list[str] | None = None,
 ) -> FastAPI:
     """Buduje aplikację FastAPI dla podanej konfiguracji.
 
     ``api_token`` (opcjonalny) włącza uwierzytelnianie Bearer + RBAC. ``api_role``
     to rola przypisywana ważnemu tokenowi (domyślnie z ``security.auth.api_role``).
-    ``orchestrator_factory`` pozwala PRZEBUDOWAĆ orkiestrator po nadpisaniu configu
-    w runtime — bez niego ``/api/orchestrate`` działałby dalej na starej konfiguracji.
+    ``router_factory`` pozwala PRZEBUDOWAĆ router+orkiestrator po nadpisaniu configu
+    w runtime — bez niego ``/api/orchestrate`` i ``/api/chat`` działałyby na starej
+    konfiguracji. ``chat_model`` nadpisuje model trybu czatu (domyślnie z configu).
     """
     app = FastAPI(title="Husarz API", version=__version__)
     if trusted_hosts:
@@ -103,19 +109,23 @@ def create_app(
     role = api_role if api_role is not None else config.security.auth.api_role
     authz = rbac if rbac is not None else Rbac()
 
-    def _build_orch(cfg: HusarzConfig) -> Orchestrator | None:
-        if orchestrator_factory is not None:
-            return orchestrator_factory(cfg)
-        if router is not None:
-            return build_orchestrator(cfg, router, prompts_dir=prompts_dir)
-        return None
+    def _build_stack(cfg: HusarzConfig) -> tuple[SupportsComplete | None, Orchestrator | None]:
+        active = router_factory(cfg) if router_factory is not None else router
+        orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir) if active else None
+        return active, orch
 
+    def _resolve_chat_model(cfg: HusarzConfig) -> str:
+        return chat_model or cfg.models.chat or cfg.models.default
+
+    initial_router, initial_orch = _build_stack(config)
     state: dict[str, Any] = {
         "config": config,
         "config_dir": config_dir,
-        "orchestrator": _build_orch(config),
+        "router": initial_router,
+        "orchestrator": initial_orch,
         "runtime_overrides": {},
         "orchestrations": 0,
+        "chats": 0,
         "failures": 0,
     }
     counter_lock = threading.Lock()
@@ -247,6 +257,7 @@ def create_app(
         cost = current.routing.cost_controls
         return UsageResponse(
             orchestrations=state["orchestrations"],
+            chats=state["chats"],
             failures=state["failures"],
             max_tokens_per_request=cost.max_tokens_per_request,
             max_requests_per_minute=cost.max_requests_per_minute,
@@ -291,6 +302,46 @@ def create_app(
         )
 
     @app.post(
+        "/api/chat",
+        response_model=ChatReply,
+        dependencies=[Depends(_require(_PERM_AGENT_RUN))],
+    )
+    def chat(request: ChatRequest) -> ChatReply:
+        # Tryb bezpośredni: jeden model, bez orkiestracji wieloagentowej (szybki czat
+        # + kodowanie). Persona jest zaszyta w customowym modelu (ollama/Husarz.Modelfile).
+        # Spójny snapshot pod zamkiem — inaczej równoległe /api/config/runtime mogłoby
+        # sparować NOWY models.chat ze STARYM routerem (przejściowy 503).
+        with counter_lock:
+            active_router: SupportsComplete | None = state["router"]
+            current_config: HusarzConfig = state["config"]
+        if active_router is None:
+            raise HTTPException(status_code=503, detail="Model czatu niedostępny (brak routera).")
+        model_id = request.model or _resolve_chat_model(current_config)
+        chat_request = RouterChatRequest(
+            messages=[ChatMessage(role=m.role, content=m.content) for m in request.messages],
+            temperature=request.temperature,
+        )
+        audit_log.record("api", "chat", {"model": model_id, "turns": len(request.messages)})
+        with counter_lock:
+            state["chats"] += 1
+        try:
+            result = active_router.complete(chat_request, model=model_id)
+        except RateLimitExceededError as exc:
+            _record_failure(state, counter_lock, audit_log, "rate_limit", action="chat.error")
+            raise HTTPException(
+                status_code=429, detail="Przekroczono limit żądań (kontrola kosztów)."
+            ) from exc
+        except NoModelAvailableError as exc:
+            _record_failure(state, counter_lock, audit_log, "no_model", action="chat.error")
+            raise HTTPException(
+                status_code=503, detail=f"Model czatu '{model_id}' niedostępny."
+            ) from exc
+        except RouterError as exc:
+            _record_failure(state, counter_lock, audit_log, "backend", action="chat.error")
+            raise HTTPException(status_code=502, detail="Backend modelu zawiódł.") from exc
+        return ChatReply(model=result.model, content=result.content)
+
+    @app.post(
         "/api/config/validate",
         response_model=ValidateResponse,
         dependencies=[Depends(_require(_PERM_CONFIG_READ))],
@@ -318,10 +369,15 @@ def create_app(
             merged = load_config(cdir, runtime_overrides=request.overrides)
         except ConfigError as exc:
             return ValidateResponse(ok=False, error=str(exc))
-        state["config"] = merged
-        state["runtime_overrides"] = request.overrides
-        # Przebuduj orkiestrator, by /api/orchestrate używał NOWEJ konfiguracji.
-        state["orchestrator"] = _build_orch(merged)
+        # Przebuduj router+orkiestrator, by /api/orchestrate i /api/chat używały
+        # NOWEJ konfiguracji (a nie starej sprzed nadpisania). Budowa poza zamkiem,
+        # atomowa podmiana pod zamkiem — spójna para (config, router) dla /api/chat.
+        new_router, new_orch = _build_stack(merged)
+        with counter_lock:
+            state["config"] = merged
+            state["runtime_overrides"] = request.overrides
+            state["router"] = new_router
+            state["orchestrator"] = new_orch
         audit_log.record("api", "config.runtime_override", {"keys": sorted(request.overrides)})
         return ValidateResponse(ok=True, summary=_summary(merged))
 
@@ -337,8 +393,14 @@ def _record_failure(
     counter_lock: threading.Lock,
     audit_log: AuditLog,
     reason: str,
+    *,
+    action: str = "orchestrate.error",
 ) -> None:
-    """Liczy porażkę i zapisuje audyt (bez surowej treści błędu — tylko kategoria)."""
+    """Liczy porażkę i zapisuje audyt (bez surowej treści błędu — tylko kategoria).
+
+    ``action`` odróżnia powierzchnię błędu (``orchestrate.error`` / ``chat.error``),
+    by wpis w niemodyfikowalnym dzienniku wiernie wskazywał źródło porażki.
+    """
     with counter_lock:
         state["failures"] += 1
-    audit_log.record("api", "orchestrate.error", {"error": reason})
+    audit_log.record("api", action, {"error": reason})

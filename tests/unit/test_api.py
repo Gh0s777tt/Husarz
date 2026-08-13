@@ -91,6 +91,35 @@ def test_audit_reflects_orchestration(client: TestClient) -> None:
     assert any(e["action"] == "orchestrate" for e in audit["entries"])
 
 
+def test_chat(client: TestClient) -> None:
+    response = client.post(
+        "/api/chat", json={"messages": [{"role": "user", "content": "Napisz funkcję w Pythonie."}]}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["content"]  # niepusta odpowiedź modelu
+    assert body["model"]
+
+
+def test_chat_increments_usage(client: TestClient) -> None:
+    assert client.get("/api/usage").json()["chats"] == 0
+    client.post("/api/chat", json={"messages": [{"role": "user", "content": "Cześć"}]})
+    assert client.get("/api/usage").json()["chats"] == 1
+
+
+def test_chat_rejects_empty_messages(client: TestClient) -> None:
+    assert client.post("/api/chat", json={"messages": []}).status_code == 422
+
+
+def test_chat_unavailable_without_router(repo_config_dir: Path) -> None:
+    config = load_config(repo_config_dir)
+    app = create_app(config, audit=AuditLog())  # brak routera
+    response = TestClient(app).post(
+        "/api/chat", json={"messages": [{"role": "user", "content": "x"}]}
+    )
+    assert response.status_code == 503
+
+
 def test_config_validate(client: TestClient) -> None:
     ok = client.post(
         "/api/config/validate", json={"overrides": {"platform": {"log_level": "DEBUG"}}}

@@ -39,7 +39,39 @@
     th { color: var(--muted); font-weight: 600; }
     .ok { color: var(--ok); } .err { color: var(--err); }
     .muted { color: var(--muted); font-size: 13px; }
-    code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+    code { background: var(--bg); padding: 1px 5px; border-radius: 4px;
+           font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
+
+    /* --- Czat (styl husarski) --- */
+    .chat { display: flex; flex-direction: column; height: calc(100vh - 190px); }
+    .chat-log { flex: 1; overflow-y: auto; padding: 4px 2px 12px; }
+    .msg { display: flex; margin: 12px 0; }
+    .msg.user { justify-content: flex-end; }
+    .bubble { max-width: 86%; padding: 10px 14px; border-radius: 12px; line-height: 1.5;
+              border: 1px solid var(--border); background: var(--panel); }
+    .msg.user .bubble { background: var(--accent); color: #fff; border-color: transparent;
+                        border-bottom-right-radius: 4px; }
+    .msg.assistant .bubble { border-bottom-left-radius: 4px; }
+    .bubble p { margin: 0 0 8px; } .bubble p:last-child { margin-bottom: 0; }
+    .bubble h1, .bubble h2, .bubble h3 { margin: 10px 0 6px; font-size: 15px; }
+    .bubble ul, .bubble ol { margin: 6px 0; padding-left: 22px; }
+    .bubble .who { font-size: 11px; color: var(--muted); margin: 0 6px 4px; }
+    .msg.user .who { text-align: right; }
+    .code { margin: 8px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .code-h { display: flex; justify-content: space-between; align-items: center;
+              padding: 4px 10px; background: var(--bg); border-bottom: 1px solid var(--border);
+              font-size: 11px; color: var(--muted); }
+    .code-h .copy { background: transparent; border: 1px solid var(--border); color: var(--muted);
+                    border-radius: 5px; padding: 2px 8px; cursor: pointer; font-size: 11px; }
+    .code pre { margin: 0; border: none; border-radius: 0; }
+    .chat-input { border-top: 1px solid var(--border); padding-top: 10px; }
+    .chat-mode { display: flex; align-items: center; gap: 14px; margin-bottom: 6px;
+                 font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+    .chat-mode label { cursor: pointer; }
+    .chat-row { display: flex; gap: 8px; align-items: flex-end; }
+    .chat-row textarea { resize: vertical; }
+    .chat-row button { margin-top: 0; white-space: nowrap; }
+    .typing { color: var(--muted); font-style: italic; }
   </style>
 </head>
 <body>
@@ -59,11 +91,21 @@
   </nav>
   <main>
     <section class="tab active" id="tab-chat">
-      <div class="card">
-        <p class="muted">Zleć zadanie hetmanowi (orkiestrator „Husarz"). Wymaga skonfigurowanego routera.</p>
-        <textarea id="task" rows="3" placeholder="Np. Napisz i przetłumacz krótki moduł w Pythonie."></textarea>
-        <button class="primary" id="send">Wyślij</button>
-        <pre id="chat-out" hidden></pre>
+      <div class="chat">
+        <div class="chat-log" id="chat-log"></div>
+        <div class="chat-input">
+          <div class="chat-mode">
+            <label><input type="radio" name="mode" value="chat" checked /> Czat (bezpośredni)</label>
+            <label><input type="radio" name="mode" value="orchestrate" /> Orkiestracja (hetman)</label>
+            <span style="flex:1"></span>
+            <span id="chat-model"></span>
+            <button id="chat-clear" class="copy" type="button" style="border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:5px;padding:2px 8px;cursor:pointer;">wyczyść</button>
+          </div>
+          <div class="chat-row">
+            <textarea id="msg" rows="2" placeholder="Napisz wiadomość…  (Enter wysyła, Shift+Enter — nowa linia)"></textarea>
+            <button class="primary" id="send">Wyślij</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -138,7 +180,7 @@
         const h = await api("health");
         $("badge").textContent = `v${h.version} · profil: ${h.profile}`;
       } catch { $("badge").textContent = "API niedostępne"; }
-      load("chat");
+      resetChat();
     }
 
     async function load(tab) {
@@ -159,15 +201,138 @@
       }
     }
 
-    $("send").onclick = async () => {
-      $("chat-out").hidden = false; $("chat-out").textContent = "…";
-      const r = await fetch("/api/orchestrate", { method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ task: $("task").value }) });
-      const d = await r.json();
-      $("chat-out").textContent = r.ok ? `Odpowiedź: ${d.answer}\n\nObserwacje:\n` +
-        d.observations.map((o) => `- ${o.agent} (${o.model}): ${o.output}`).join("\n") : `Błąd: ${d.detail || JSON.stringify(d)}`;
-    };
+    // --- Minimalny renderer Markdown (bez zależności; NAJPIERW escapowanie HTML) ---
+    function renderInline(text) {
+      let h = esc(text);
+      h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
+      h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      h = h.replace(/(^|[^*])\*(?!\s)([^*]+?)\*/g, "$1<em>$2</em>");
+      return h;
+    }
+    function renderTextBlock(text) {
+      const lines = text.split("\n");
+      let html = "", list = null, para = [];
+      const closeList = () => { if (list) { html += "</" + list + ">"; list = null; } };
+      const flushPara = () => { if (para.length) { html += "<p>" + para.join("<br>") + "</p>"; para = []; } };
+      for (const raw of lines) {
+        const line = raw.replace(/\s+$/, "");
+        let m;
+        if (!line.trim()) { flushPara(); closeList(); continue; }
+        if ((m = line.match(/^(#{1,3})\s+(.*)$/))) {
+          flushPara(); closeList();
+          html += `<h${m[1].length}>${renderInline(m[2])}</h${m[1].length}>`;
+        } else if ((m = line.match(/^[-*]\s+(.*)$/))) {
+          flushPara(); if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; }
+          html += `<li>${renderInline(m[1])}</li>`;
+        } else if ((m = line.match(/^\d+\.\s+(.*)$/))) {
+          flushPara(); if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; }
+          html += `<li>${renderInline(m[1])}</li>`;
+        } else { closeList(); para.push(renderInline(line)); }
+      }
+      flushPara(); closeList();
+      return html;
+    }
+    function renderMarkdown(md) {
+      const fence = /```(\w*)\r?\n?([\s\S]*?)```/g;
+      let out = "", last = 0, m;
+      while ((m = fence.exec(md))) {
+        out += renderTextBlock(md.slice(last, m.index));
+        const code = m[2].replace(/\n$/, "");
+        out += `<div class="code"><div class="code-h"><span>${esc(m[1] || "kod")}</span>` +
+               `<button class="copy" type="button">kopiuj</button></div>` +
+               `<pre><code>${esc(code)}</code></pre></div>`;
+        last = fence.lastIndex;
+      }
+      out += renderTextBlock(md.slice(last));
+      return out;
+    }
+
+    // Przyciski „kopiuj" czytają tekst z sąsiedniego <pre> (bez trzymania kodu w atrybutach).
+    function wireCopy(scope) {
+      scope.querySelectorAll(".copy").forEach((btn) => {
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = "1";
+        btn.onclick = () => {
+          const pre = btn.closest(".code").querySelector("pre");
+          navigator.clipboard && navigator.clipboard.writeText(pre.textContent);
+          btn.textContent = "skopiowano"; setTimeout(() => (btn.textContent = "kopiuj"), 1200);
+        };
+      });
+    }
+
+    const log = () => $("chat-log");
+    function bubble(role, html, who) {
+      const wrap = document.createElement("div");
+      wrap.className = "msg " + role;
+      const inner = document.createElement("div");
+      inner.style.maxWidth = "86%";
+      inner.innerHTML = (who ? `<div class="who">${esc(who)}</div>` : "") + '<div class="bubble"></div>';
+      const b = inner.querySelector(".bubble");
+      b.innerHTML = html;
+      wrap.appendChild(inner);
+      log().appendChild(wrap);
+      wireCopy(wrap);
+      log().scrollTop = log().scrollHeight;
+      return b;
+    }
+    const addUser = (text) => bubble("user", esc(text).replace(/\n/g, "<br>"), null);
+
+    const history = [];
+    function resetChat() {
+      history.length = 0;
+      log().innerHTML = "";
+      bubble("assistant",
+        "Cześć! Jestem <strong>Husarz</strong> — pomogę w rozmowie i kodowaniu. " +
+        "Tryb <em>Czat</em> rozmawia bezpośrednio z lokalnym modelem; " +
+        "<em>Orkiestracja</em> uruchamia hetmana wieloagentowego.", "Husarz");
+    }
+
+    async function send() {
+      const text = $("msg").value.trim();
+      if (!text) return;
+      const mode = document.querySelector("input[name=mode]:checked").value;
+      $("msg").value = "";
+      addUser(text);
+      const out = bubble("assistant", '<span class="typing">Husarz pisze…</span>', "Husarz");
+      try {
+        if (mode === "chat") {
+          history.push({ role: "user", content: text });
+          const d = await api("chat", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messages: history }),
+          });
+          if (d && d.content !== undefined) {
+            out.innerHTML = renderMarkdown(d.content); wireCopy(out.parentElement);
+            history.push({ role: "assistant", content: d.content });
+            if (d.model) $("chat-model").textContent = "model: " + d.model;
+          } else {
+            history.pop();
+            out.innerHTML = `<span class="err">Błąd: ${esc((d && d.detail) || JSON.stringify(d))}</span>`;
+          }
+        } else {
+          const d = await api("orchestrate", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task: text }),
+          });
+          if (d && d.answer !== undefined) {
+            const obs = (d.observations || []).map((o) => `- ${o.agent} (${o.model})`).join("\n");
+            out.innerHTML = renderMarkdown(d.answer + (obs ? "\n\n*Obserwacje:*\n" + obs : ""));
+            wireCopy(out.parentElement);
+          } else {
+            out.innerHTML = `<span class="err">Błąd: ${esc((d && d.detail) || JSON.stringify(d))}</span>`;
+          }
+        }
+      } catch (e) {
+        out.innerHTML = `<span class="err">Błąd sieci: ${esc(e.message || e)}</span>`;
+      }
+      log().scrollTop = log().scrollHeight;
+    }
+
+    $("send").onclick = send;
+    $("chat-clear").onclick = resetChat;
+    $("msg").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    });
 
     $("validate").onclick = async () => {
       $("validate-out").hidden = false;

@@ -98,6 +98,24 @@ Konfiguracja Husarza wczytana poprawnie.
   sandbox:           docker+gvisor (sieć: nie)
 ```
 
+## Lokalny czat i kodowanie (Ollama)
+
+Husarz ma **customowy model lokalny** (persona hetmana, PL, czat + kodowanie) budowany
+w [Ollamie](https://ollama.com) — dane nie opuszczają Twojej maszyny:
+
+```bash
+# 1) Zbuduj customowy model 'husarz' (baza wymienna w ollama/Husarz.Modelfile)
+ollama pull qwen2.5-coder:7b
+ollama create husarz -f ollama/Husarz.Modelfile
+
+# 2) Uruchom platformę i wejdź do konsoli
+python -m husarz.launcher.cli up --profile dev      # http://127.0.0.1:8000/
+```
+
+Zakładka **Czat** rozmawia bezpośrednio z modelem (`POST /api/chat`) — dymki, Markdown,
+bloki kodu z „kopiuj". Przełącznik **Orkiestracja** uruchamia hetmana wieloagentowego.
+Szczegóły: [ollama/README.md](ollama/README.md), [docs/API.md](docs/API.md).
+
 ## Konfiguracja
 
 | Plik                         | Zawartość |

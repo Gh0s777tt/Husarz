@@ -118,15 +118,15 @@ def _cmd_up(args: argparse.Namespace) -> int:
     import uvicorn  # noqa: PLC0415
 
     from husarz.api import create_app  # noqa: PLC0415
-    from husarz.orchestrator import build_orchestrator  # noqa: PLC0415
     from husarz.router import ModelRouter  # noqa: PLC0415
 
     prompts = args.prompts
 
-    def _orchestrator_factory(cfg: HusarzConfig) -> Any:
-        # Router budowany z aktualnej konfiguracji — po nadpisaniu runtime orkiestrator
-        # jest przebudowywany, więc /api/orchestrate używa NOWYCH ustawień (nie starych).
-        return build_orchestrator(cfg, ModelRouter(cfg), prompts_dir=prompts)
+    def _router_factory(cfg: HusarzConfig) -> Any:
+        # Router budowany z aktualnej konfiguracji — po nadpisaniu runtime router
+        # i orkiestrator są przebudowywane (create_app), więc /api/orchestrate i
+        # /api/chat używają NOWYCH ustawień (nie starych).
+        return ModelRouter(cfg)
 
     # TrustedHost tylko dla loopbacku (obrona przed DNS-rebindingiem na localhost).
     trusted = ["localhost", "127.0.0.1"] if _is_loopback(args.host) else None
@@ -135,7 +135,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         config,
         config_dir=args.config,
         api_token=api_token,
-        orchestrator_factory=_orchestrator_factory,
+        router_factory=_router_factory,
         trusted_hosts=trusted,
         prompts_dir=prompts,
     )

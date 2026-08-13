@@ -161,6 +161,10 @@ class ModelsConfig(_StrictModel):
     """Rejestr modeli i domyślny wybór."""
 
     default: str
+    # Model trybu bezpośredniego czatu (endpoint /api/chat). Gdy pusty — używany
+    # jest ``default``. Pozwala oddzielić szybki model konwersacyjny/kodowy od
+    # modelu orkiestracji, bez zmian w kodzie.
+    chat: str | None = None
     registry: dict[str, ModelSpec] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -168,6 +172,11 @@ class ModelsConfig(_StrictModel):
         if self.default not in self.registry:
             raise ValueError(
                 f"models.default='{self.default}' nie istnieje w models.registry "
+                f"(dostępne: {sorted(self.registry)})."
+            )
+        if self.chat is not None and self.chat not in self.registry:
+            raise ValueError(
+                f"models.chat='{self.chat}' nie istnieje w models.registry "
                 f"(dostępne: {sorted(self.registry)})."
             )
         for model_id, spec in self.registry.items():

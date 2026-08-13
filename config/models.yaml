@@ -11,8 +11,24 @@
 
 # Domyślny model orkiestracji (musi istnieć w registry).
 default: glm-main
+# Model trybu bezpośredniego czatu (/api/chat, „zwykły czat + kodowanie"). Wskazuje
+# na lokalny, customowy model Husarza budowany z ollama/Husarz.Modelfile.
+chat: husarz-local
 
 registry:
+  # --- Customowy model lokalny Husarza (czat + kodowanie), budowany w Ollamie ---
+  # Zbuduj: `ollama create husarz -f ollama/Husarz.Modelfile` (patrz ollama/README.md).
+  # Persona (hetman, PL, kod w blokach) jest zaszyta w Modelfile (SYSTEM).
+  husarz-local:
+    backend: ollama
+    model: husarz # nazwa modelu w Ollamie po `ollama create husarz ...`
+    endpoint: http://localhost:11434/v1
+    tags: [chat, code, general, polish]
+    context_length: 8192
+    params:
+      temperature: 0.3
+    fallback: [bielik]
+
   # --- Model główny: GLM-5.2 (orkiestracja, rozumowanie, kod) ---
   glm-main:
     backend: openai_compat

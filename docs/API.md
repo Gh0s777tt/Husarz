@@ -44,8 +44,9 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 | `GET /api/models`         | rejestr modeli | `config:read` |
 | `GET /api/tools`          | narzędzia (kind, egress) | `config:read` |
 | `GET /api/audit?limit=N`  | wpisy audytu + `verified`; `limit` w zakresie `0..10000` (`0` → pusto) | `audit:read` |
-| `GET /api/usage`          | monitor: liczba prób (`orchestrations`), `failures`, limity kosztów | `config:read` |
-| `POST /api/orchestrate`   | `{task}` → hetman. Brak routera → 503; błąd routera → 429/502/503 (nie 500) | `agent:run` |
+| `GET /api/usage`          | monitor: `orchestrations`, `chats`, `failures`, limity kosztów | `config:read` |
+| `POST /api/chat`          | `{messages, model?, temperature?}` → **bezpośredni czat** z jednym modelem (szybki, konwersacyjny + kodowanie). Model z `models.chat` lub `default` | `agent:run` |
+| `POST /api/orchestrate`   | `{task}` → hetman wieloagentowy. Brak routera → 503; błąd routera → 429/502/503 (nie 500) | `agent:run` |
 | `POST /api/config/validate` | `{overrides}` → walidacja nadpisań runtime (tylko odczyt) | `config:read` |
 | `POST /api/config/runtime`  | `{overrides}` → walidacja + zastosowanie w pamięci; **przebudowuje orkiestrator** (audytowane) | `config:write` |
 | `GET /`                   | konsola WWW (HTML) | — (otwarte) |
@@ -53,14 +54,27 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 Błędy backendu routera są mapowane na kody HTTP: przekroczony limit → `429`,
 brak modelu → `503`, awaria wszystkich modeli → `502` (surowa treść błędu nie wycieka).
 
+## Dwa tryby rozmowy
+
+- **Czat bezpośredni** (`POST /api/chat`) — rozmowa z JEDNYM modelem (`models.chat`,
+  domyślnie lokalny `husarz-local` z Ollamy). Szybki, konwersacyjny, do kodowania.
+  Ciało: `{"messages": [{"role": "user", "content": "…"}], "model"?: "...", "temperature"?: 0.3}`.
+  Persona (hetman, PL, kod w blokach) jest zaszyta w modelu — patrz [ollama/README.md](../ollama/README.md).
+- **Orkiestracja** (`POST /api/orchestrate`) — pełna pętla wieloagentowa (plan → deleguj
+  → synteza) hetmana „Husarz". Cięższa; do złożonych, wieloetapowych zadań.
+
+Konsola (`/`) przełącza się między nimi w zakładce **Czat**.
+
 ## Konsola WWW
 
 Jednoplikowa konsola (`api/static/console.html`, vanilla JS, theme-aware) z zakładkami:
-**Czat** (orkiestracja), **Konfiguracja** (podgląd + walidacja nadpisań), **Agenci**,
-**Audyt** (status łańcucha), **Monitor** (koszty/tokeny). Bez kroku budowania.
-Wszystkie dane z API renderowane w tabelach są **escapowane HTML** (ochrona przed XSS),
-a pole „token API" (nagłówek) pozwala korzystać z konsoli przy włączonym uwierzytelnianiu.
-Pełny frontend Next.js pozostaje ścieżką produkcyjną (`web/`).
+**Czat** (dymki, Markdown + bloki kodu z „kopiuj", przełącznik Czat/Orkiestracja),
+**Konfiguracja** (podgląd + walidacja nadpisań), **Agenci**, **Audyt** (status łańcucha),
+**Monitor** (koszty/tokeny). Bez kroku budowania i **bez zależności z CDN** (airgap-safe:
+własny mini-renderer Markdown). Wszystkie dane z API są **escapowane HTML** (ochrona przed
+XSS — renderer najpierw escapuje, potem formatuje), a pole „token API" (nagłówek) pozwala
+korzystać z konsoli przy włączonym uwierzytelnianiu. Pełny frontend Next.js pozostaje
+ścieżką produkcyjną (`web/`).
 
 ## Programowo
 

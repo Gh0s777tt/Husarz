@@ -5,6 +5,29 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Czat lokalny + customowy model Ollama)
+- **Customowy model Ollama** `husarz` (`ollama/Husarz.Modelfile`): persona hetmana
+  (PL, czat + kodowanie) zaszyta w `SYSTEM`, baza wymienna przez `FROM` (domyślnie
+  `qwen2.5-coder:7b`). Instrukcja: `ollama/README.md`.
+- **Tryb bezpośredniego czatu** `POST /api/chat` — rozmowa z jednym modelem (szybka,
+  konwersacyjna + kodowanie), obok ciężkiej orkiestracji wieloagentowej. Model z
+  `models.chat` (nowe pole configu) lub `models.default`. Błędy routera mapowane na
+  429/502/503; licznik `usage.chats`.
+- **Model lokalny w rejestrze**: `config/models.yaml` → `husarz-local` (backend
+  `ollama`, endpoint `http://localhost:11434/v1`), ustawiony jako `models.chat`.
+- **Konsola — czat jak w nowoczesnym asystencie**: dymki (użytkownik/asystent),
+  własny mini-renderer Markdown (nagłówki, listy, **pogrubienia**, `inline code`,
+  bloki kodu ```lang``` z przyciskiem „kopiuj"), przełącznik Czat/Orkiestracja,
+  historia rozmowy, Enter=wyślij. Bez zależności z CDN (airgap-safe), motyw husarski.
+- `create_app`: router jest teraz przebudowywalny (`router_factory`) i dostępny dla
+  `/api/chat`; przebudowa po nadpisaniu configu w runtime obejmuje router+orkiestrator.
+- Testy: `/api/chat` (odpowiedź, licznik, walidacja pustych wiadomości, brak routera).
+- Poprawki z przeglądu: porażka czatu audytowana jako `chat.error` (nie
+  `orchestrate.error`); spójny snapshot (config, router) pod zamkiem w `/api/chat`
+  i atomowa podmiana w `/api/config/runtime` (koniec przejściowego 503 przy
+  równoległym przeładowaniu); testy mapowania błędów czatu (429/503/502) + RBAC
+  (viewer bez `agent:run`); uwaga o stop-tokenach/parametrach w `ollama/`.
+
 ### Dodane (Etap 6 — deploy i profile)
 - Obrazy: `Dockerfile` (`husarz-api`, wieloetapowy, non-root, healthcheck) oraz
   `docker/husarz-sandbox.Dockerfile` (obraz narzędzi); `.dockerignore` bez wag/sekretów.

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -86,9 +86,33 @@ class UsageResponse(BaseModel):
     """
 
     orchestrations: int
+    chats: int = 0
     failures: int = 0
     max_tokens_per_request: int | None
     max_requests_per_minute: int | None
+
+
+class ChatMessageIn(BaseModel):
+    """Pojedyncza wiadomość konwersacji (tryb bezpośredniego czatu)."""
+
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(min_length=1)
+
+
+class ChatRequest(BaseModel):
+    """Żądanie bezpośredniego czatu (jeden model, bez orkiestracji wieloagentowej)."""
+
+    messages: list[ChatMessageIn] = Field(min_length=1)
+    # Nadpisanie modelu (opcjonalne). Domyślnie ``models.chat`` lub ``models.default``.
+    model: str | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+
+
+class ChatReply(BaseModel):
+    """Odpowiedź modelu w trybie bezpośredniego czatu."""
+
+    model: str
+    content: str
 
 
 class OrchestrateRequest(BaseModel):

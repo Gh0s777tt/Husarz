@@ -22,7 +22,6 @@ from husarz.orchestrator import (
     PHASE_PLAN,
     PHASE_REFLECT,
     PHASE_SYNTH,
-    build_orchestrator,
 )
 from husarz.router import ChatResponse
 from husarz.router.errors import (
@@ -134,6 +133,38 @@ def test_orchestrate_maps_router_errors(repo_config_dir: Path, exc: Exception, s
     assert client.post("/api/orchestrate", json={"task": "x"}).status_code == status
 
 
+@pytest.mark.parametrize(
+    ("exc", "status"),
+    [
+        (RateLimitExceededError("limit"), 429),
+        (NoModelAvailableError("brak"), 503),
+        (AllModelsFailedError([]), 502),
+    ],
+)
+def test_chat_maps_router_errors(repo_config_dir: Path, exc: Exception, status: int) -> None:
+    client = TestClient(_app(repo_config_dir, router=RaisingRouter(exc)))
+    body = {"messages": [{"role": "user", "content": "x"}]}
+    assert client.post("/api/chat", json=body).status_code == status
+
+
+def test_chat_failure_audited_as_chat_error(repo_config_dir: Path) -> None:
+    # Porażka czatu musi trafić do audytu jako 'chat.error', NIE 'orchestrate.error'.
+    client = TestClient(_app(repo_config_dir, router=RaisingRouter(RateLimitExceededError("x"))))
+    client.post("/api/chat", json={"messages": [{"role": "user", "content": "x"}]})
+    actions = [e["action"] for e in client.get("/api/audit").json()["entries"]]
+    assert "chat.error" in actions
+    assert "orchestrate.error" not in actions
+
+
+def test_rbac_viewer_cannot_chat(repo_config_dir: Path) -> None:
+    client = TestClient(_app(repo_config_dir, api_token="s3cret", api_role="viewer"))
+    hdr = {"Authorization": "Bearer s3cret"}
+    resp = client.post(
+        "/api/chat", json={"messages": [{"role": "user", "content": "x"}]}, headers=hdr
+    )
+    assert resp.status_code == 403
+
+
 # --- Liczniki usage/audyt spójne przy porażce (major) ----------------------
 
 
@@ -164,13 +195,13 @@ def test_config_runtime_rebuilds_orchestrator(repo_config_dir: Path) -> None:
 
     def factory(cfg):  # noqa: ANN001
         calls["n"] += 1
-        return build_orchestrator(cfg, ScriptedRouter(), prompts_dir=prompts)
+        return ScriptedRouter()
 
     app = create_app(
         config,
         config_dir=repo_config_dir,
         audit=AuditLog(),
-        orchestrator_factory=factory,
+        router_factory=factory,
         prompts_dir=prompts,
     )
     client = TestClient(app)
