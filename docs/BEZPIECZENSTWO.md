@@ -74,8 +74,28 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 **Wynik:** wszystkie niezmienniki Etapu 0 spełnione. Komponenty runtime
 (sandbox, mTLS, OIDC, ROE-gate, hash-chain) — do weryfikacji w Etapach 3–4.
 
+### Etap 0 — hardening po przeglądzie adwersaryjnym (data: 2026-08-13)
+
+**Kontekst:** wieloagentowy, adwersaryjny przegląd Etapu 0 (5 wymiarów, każdy
+finding weryfikowany osobno względem plików). Wdrożone utwardzenia warstwy
+konfiguracji (jedynego obecnie strażnika, dopóki runtime to zaślepki):
+
+| Nowy niezmiennik / poprawka                                   | Test |
+|---------------------------------------------------------------|------|
+| Bazowa linia bezpieczeństwa `prod`/`airgap`: sandbox włączony, audyt włączony+niemodyfikowalny, szyfrowanie at-rest | `test_prod_baseline_forbids_disabling_protections` |
+| `airgap`: modele muszą mieć lokalne endpointy (loopback/prywatne/`.local`) | `test_airgap_rejects_remote_model_endpoint`, `test_airgap_allows_local_model_endpoint` |
+| `airgap`: egress `allow` odrzucony (osobna gałąź)             | `test_airgap_forbids_egress_allow_policy` |
+| ROE: `is_active_at(now)` egzekwuje okno czasowe; `is_active` wymaga niepustego podpisu | `test_roe_is_active_at_respects_window`, `test_roe_empty_signature_is_inactive` |
+| Walidacja narzędzi agenta działa przy pustym rejestrze        | `test_agent_tool_validated_even_with_empty_registry` |
+| `gitleaks`: zawężona allowlista (bez ślepej plamy na `docs/`, `prompts/`) | — (skan CI) |
+| `ModelSpec.api_key_ref`: klucz API jako referencja do sekretu, nie w `params` | — (schemat) |
+
 **Ograniczenia (świadome, do domknięcia w kolejnych etapach):**
-- Egzekwowanie egress/sandbox/ROE to na razie *konfiguracja i walidacja*, nie
-  wymuszenie w czasie działania (brak jeszcze warstwy runtime).
-- `weights_path` i endpointy nie są jeszcze sprawdzane pod kątem lokalności w
-  `airgap` (dodać walidację w Etapie 1 wraz z routerem).
+- Egzekwowanie egress/sandbox/ROE to nadal *konfiguracja i walidacja*, nie
+  wymuszenie w czasie działania — warstwa runtime powstaje w Etapach 3–4.
+- Podpis ROE jest sprawdzany jako obecność niepustej referencji; kryptograficzna
+  weryfikacja przez dostawcę sekretów — Etap 4.
+- Dwuwarstwowy egress (allowlisty narzędzi ⊆ globalna allowlista) i audyt
+  `runtime_override` sekcji `security` — Etap 4.
+- Pola bezpieczeństwa w opaque `config`/`params` narzędzi (`network`, `allow_push`)
+  do wypromowania na typowane pola — Etap 3.

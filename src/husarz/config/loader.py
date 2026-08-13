@@ -103,17 +103,12 @@ def _load_raw_from_dir(config_dir: Path) -> dict[str, Any]:
 
     raw: dict[str, Any] = {}
 
-    # Sekcje jednoplikowe.
+    # Sekcje jednoplikowe (wszystkie opcjonalne na tym etapie — wymóg 'models'
+    # jest sprawdzany po scaleniu warstw, zgodnie z hierarchią nadpisań).
     for section, filename in _SINGLE_FILES.items():
         path = config_dir / filename
         if path.is_file():
             raw[section] = _read_yaml(path)
-        elif section == "models":
-            # models.yaml jest wymagany — bez rejestru modeli platforma nie ruszy.
-            raise ConfigFileNotFoundError(
-                f"Wymagany plik nie istnieje: {path}. "
-                f"Zdefiniuj rejestr modeli w config/models.yaml."
-            )
 
     # Sekcje wieloplikowe (agents/tools/roe).
     for section, (subdir, key_field) in _MULTI_DIRS.items():
@@ -123,13 +118,15 @@ def _load_raw_from_dir(config_dir: Path) -> dict[str, Any]:
         collected: dict[str, Any] = {}
         for path in sorted([*directory.glob("*.yaml"), *directory.glob("*.yml")]):
             entry = _read_yaml(path)
-            key = entry.get(key_field) or path.stem
+            # Normalizacja do str przed sprawdzeniem duplikatu i zapisem — inaczej
+            # klucz liczbowy (np. engagement_id: 42) ominąłby detekcję duplikatów.
+            key = str(entry.get(key_field) or path.stem)
             if key in collected:
                 raise ConfigValidationError(
                     f"Zduplikowany klucz '{key}' w sekcji '{section}' "
                     f"(plik {path.name}). Klucze muszą być unikalne."
                 )
-            collected[str(key)] = entry
+            collected[key] = entry
         if collected:
             raw[section] = collected
 
@@ -141,8 +138,23 @@ def _load_raw_from_dir(config_dir: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# Znane sekcje najwyższego poziomu — tylko one są przyjmowane z ENV.
+_KNOWN_SECTIONS: frozenset[str] = frozenset(_SINGLE_FILES) | frozenset(_MULTI_DIRS)
+# Pola-kolekcje: segment BEZPOŚREDNIO po nich to klucz mapy (id modelu / nazwa
+# agenta itd.) i zachowuje oryginalną wielkość liter zamiast być zapisany małymi.
+_COLLECTION_FIELDS: frozenset[str] = frozenset(
+    {"registry", "agents", "tools", "roe", "agent_models"}
+)
+
+
 def _coerce_env_value(value: str) -> Any:
-    """Rozpoznaje wartości JSON (listy/obiekty/liczby/bool); resztę zostawia jako string."""
+    """Parsuje wartość ENV będącą listą/obiektem JSON (prefiks ``[`` lub ``{``).
+
+    Pozostałe wartości pozostają stringiem — typowanie skalarów (int/bool/enum)
+    wykonuje Pydantic przy walidacji. Celowo NIE konwertujemy gołych liczb/bool,
+    aby nie psuć pól tekstowych (np. ``cpu_limit: "2"``). Niepoprawny JSON w
+    nawiasie jest zwracany jako surowy string (czytelny błąd da dopiero walidacja).
+    """
     stripped = value.strip()
     if stripped[:1] in ("[", "{"):
         try:
@@ -152,22 +164,39 @@ def _coerce_env_value(value: str) -> Any:
     return value
 
 
-def _env_overrides(env: Mapping[str, str]) -> dict[str, Any]:
-    """Buduje słownik nadpisań z ENV o prefiksie ``HUSARZ_``.
+def _normalize_env_segments(parts: list[str]) -> list[str]:
+    """Normalizuje segmenty ścieżki ENV.
 
-    Ścieżkę zagnieżdżenia wyznacza delimiter ``__``; segmenty są zapisywane
-    małymi literami (dopasowanie do nazw pól schematu).
-    ``HUSARZ_CONFIG_DIR`` jest pomijane — steruje lokalizacją, nie treścią.
+    Nazwy pól schematu zapisujemy małymi literami; klucze map (segment po polu-
+    kolekcji, np. po ``registry``) zachowują oryginalną wielkość liter, aby dało
+    się nadpisać wpis o identyfikatorze zawierającym wielkie litery.
+    """
+    segments: list[str] = []
+    prev: str | None = None
+    for part in parts:
+        if part == "":
+            continue
+        seg = part if prev in _COLLECTION_FIELDS else part.lower()
+        segments.append(seg)
+        prev = seg
+    return segments
+
+
+def _env_overrides(env: Mapping[str, str]) -> dict[str, Any]:
+    """Buduje słownik nadpisań ze zmiennych ENV o prefiksie ``HUSARZ_``.
+
+    Ścieżkę zagnieżdżenia wyznacza delimiter ``__``. Przyjmowane są wyłącznie
+    zmienne, których pierwszy segment jest znaną sekcją (patrz ``_KNOWN_SECTIONS``)
+    — dzięki temu obca zmienna jak ``HUSARZ_HOME`` jest ignorowana, a nie wywraca
+    startu. ``HUSARZ_CONFIG_DIR`` steruje lokalizacją, nie treścią, więc jest pomijane.
     """
     result: dict[str, Any] = {}
     for raw_key, raw_value in env.items():
-        if not raw_key.startswith(ENV_PREFIX):
+        if not raw_key.startswith(ENV_PREFIX) or raw_key == CONFIG_DIR_ENV:
             continue
-        if raw_key == CONFIG_DIR_ENV:
-            continue
-        path = raw_key[len(ENV_PREFIX) :].split(NESTED_DELIMITER)
-        segments = [seg.lower() for seg in path if seg != ""]
-        if not segments:
+        parts = raw_key[len(ENV_PREFIX) :].split(NESTED_DELIMITER)
+        segments = _normalize_env_segments(parts)
+        if not segments or segments[0] not in _KNOWN_SECTIONS:
             continue
         cursor = result
         for seg in segments[:-1]:
@@ -231,6 +260,14 @@ def load_config(
     # 3) nadpisania runtime (panel) — najwyższy priorytet
     if runtime_overrides:
         raw = _deep_merge(raw, runtime_overrides)
+
+    # Rejestr modeli jest wymagany, ale może pochodzić z DOWOLNEJ warstwy
+    # (plik, ENV lub runtime) — dlatego sprawdzamy dopiero po scaleniu.
+    if "models" not in raw:
+        raise ConfigFileNotFoundError(
+            f"Brak rejestru modeli. Utwórz {resolved_dir / 'models.yaml'} "
+            f"albo dostarcz sekcję 'models' przez ENV/runtime."
+        )
 
     # 4) walidacja schematem
     try:

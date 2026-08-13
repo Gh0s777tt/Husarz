@@ -76,10 +76,11 @@ mają wartości domyślne.
 Po złożeniu całości `HusarzConfig` sprawdza spójność:
 
 1. `models.default` istnieje w rejestrze; `fallback` wskazują istniejące modele (bez cykli własnych).
-2. `routing.agent_models` i `routing.rules[].prefer` wskazują istniejące modele (lub `auto`).
-3. `agents[].model` istnieje (lub `auto`); `agents[].tools` istnieją w rejestrze narzędzi.
-4. Profil `airgap`: egress `deny`, pusta allowlista, brak sieci w sandboxie.
-5. Narzędzie z `requires_egress` musi mieć niepustą allowlistę.
+2. `routing.agent_models` wskazuje istniejące modele lub `auto`; `routing.rules[].prefer` musi wskazywać istniejące modele (bez `auto`).
+3. `agents[].model` istnieje (lub `auto`); `agents[].tools` istnieją w rejestrze narzędzi (pusty rejestr = każde odwołanie to błąd).
+4. Bazowa linia bezpieczeństwa dla profili `prod` i `airgap`: sandbox włączony (`engine != none`), audyt włączony i niemodyfikowalny, szyfrowanie at-rest — nie można ich cicho wyłączyć.
+5. Profil `airgap`: egress `deny`, pusta allowlista, brak sieci w sandboxie oraz **lokalne endpointy modeli** (loopback/prywatne/`.local`).
+6. Narzędzie z `requires_egress` musi mieć niepustą allowlistę.
 
 Błąd walidacji jest zbierany i prezentowany jako czytelny komunikat po polsku
 (`ConfigValidationError`), nie jako surowy stack trace.

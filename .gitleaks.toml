@@ -5,13 +5,14 @@ title = "Husarz gitleaks config"
 [extend]
 useDefault = true
 
-# Ścieżki wykluczone ze skanu (przykłady, dokumentacja, fikstury testowe).
+# Ścieżki wykluczone ze skanu — wyłącznie pliki jawnie przykładowe.
+# UWAGA: NIE wykluczamy całych drzew docs/ ani prompts/ — inaczej powstałaby
+# ślepa plama (sekret wklejony do dokumentacji nie zostałby wykryty). Przykładowe
+# referencje w docs/prompts (sops:, vault:, CHANGE_ME) pokrywają regexy poniżej.
 [allowlist]
 description = "Wykluczenia globalne — wyłącznie wartości jawnie przykładowe."
 paths = [
   '''\.env\.example$''',
-  '''docs/.*\.md$''',
-  '''prompts/.*\.md$''',
   '''config/roe/example-.*\.yaml$''',
 ]
 # Znaczniki jawnych placeholderów, które NIE są prawdziwymi sekretami.

@@ -84,8 +84,12 @@ Oczekiwany wynik `validate`:
 ```
 Konfiguracja Husarza wczytana poprawnie.
   profil:            dev
+  log_level:         INFO
   model domyślny:    glm-main
+  modele (rejestr):  bielik, glm-main, hermes
   agenci:            bielik, chorazy, husarz, kanclerz, kopijnik, puszkarz, zwiadowca
+  narzędzia:         file_edit, git, rag, run_tests, shell, web
+  ROE (zlecenia):    example-zlecenie
   egress:            deny
   sandbox:           docker+gvisor (sieć: nie)
 ```

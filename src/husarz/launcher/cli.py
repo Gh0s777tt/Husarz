@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from husarz import __version__
 from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
+from husarz.config.schema import Profile
 
 
 def _summarize(config: HusarzConfig) -> str:
@@ -83,7 +84,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_version.set_defaults(func=_cmd_version)
 
     p_up = sub.add_parser("up", help="[Etap 5] Uruchom platformę w danym profilu.")
-    p_up.add_argument("--profile", default="dev", choices=["dev", "prod", "airgap"])
+    # Źródło prawdy o profilach to enum Profile — bez duplikowania listy w CLI.
+    p_up.add_argument(
+        "--profile",
+        default=Profile.DEV.value,
+        choices=[p.value for p in Profile],
+    )
     p_up.set_defaults(func=_cmd_up)
 
     return parser

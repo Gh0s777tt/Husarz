@@ -10,12 +10,37 @@ czytelny komunikat, a nie ciche, błędne zachowanie.
 
 from __future__ import annotations
 
+import ipaddress
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+def _is_local_endpoint(endpoint: str | None) -> bool:
+    """Zwraca ``True``, gdy endpoint jest lokalny/prywatny (albo ``None`` = brak zdalnego).
+
+    Za lokalne uznajemy: brak endpointu, ``localhost``, domeny ``.local``/``.internal``
+    oraz adresy loopback i prywatne (RFC 1918 / ULA). Używane przez walidację
+    profilu ``airgap`` — modele nie mogą wtedy wskazywać hostów w WAN.
+    """
+    if endpoint is None:
+        return True
+    parsed = urlparse(endpoint if "://" in endpoint else f"//{endpoint}")
+    host = parsed.hostname
+    if not host:
+        return False
+    if host == "localhost" or host.endswith(".local") or host.endswith(".internal"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private
+
 
 # ---------------------------------------------------------------------------
 # Typy wyliczeniowe (enumy)
@@ -138,8 +163,12 @@ class ModelSpec(_StrictModel):
     backend: ModelBackend
     # Nazwa/ścieżka modelu przekazywana do backendu (np. tag Ollama lub repo HF).
     model: str
-    # Endpoint OpenAI-compat. Dla profilu airgap musi być lokalny (walidacja globalna).
+    # Endpoint OpenAI-compat. W profilu airgap musi być lokalny (egzekwuje _cross_validate).
     endpoint: str | None = None
+    # Referencja do sekretu z kluczem API (np. "env:GLM_API_KEY", "vault:...").
+    # Sekret rozwiązywany w runtime przez dostawcę — NIGDY nie trzymany w pliku ani w params.
+    api_key_ref: str | None = None
+    request_timeout_seconds: int | None = None
     tags: list[str] = Field(default_factory=list)
     context_length: int = 8192
     max_tokens: int | None = None
@@ -377,8 +406,18 @@ class RoeConfig(_StrictModel):
 
     @property
     def is_active(self) -> bool:
-        """ROE jest aktywne tylko gdy zgoda została udzielona."""
-        return self.consent and self.signature is not None
+        """Statyczna bramka ważności ROE: zgoda + niepusta referencja podpisu.
+
+        Uwaga: nie sprawdza okna czasowego — do tego służy ``is_active_at``
+        (używane przez ROE-gate w runtime, Etap 4). Kryptograficzną weryfikację
+        podpisu wykona dostawca sekretów w Etapie 4; tu wymagamy jedynie, by
+        referencja podpisu była obecna i niepusta.
+        """
+        return self.consent and bool(self.signature)
+
+    def is_active_at(self, now: datetime) -> bool:
+        """ROE jest aktywne (``is_active``) i mieści się w oknie czasowym w chwili ``now``."""
+        return self.is_active and self.window.start <= now < self.window.end
 
 
 # ---------------------------------------------------------------------------
@@ -428,15 +467,41 @@ class HusarzConfig(_StrictModel):
                     f"agents['{agent_name}'].model -> '{agent.model}' "
                     f"nie istnieje w models.registry."
                 )
-            if known_tools:
-                for tool_name in agent.tools:
-                    if tool_name not in known_tools:
-                        errors.append(
-                            f"agents['{agent_name}'].tools -> '{tool_name}' "
-                            f"nie jest zdefiniowane w config/tools/."
-                        )
+            # Pusty rejestr narzędzi NIE wyłącza walidacji — wtedy KAŻDE odwołanie
+            # do narzędzia jest błędem (agent nie może używać nieistniejącego narzędzia).
+            for tool_name in agent.tools:
+                if tool_name not in known_tools:
+                    errors.append(
+                        f"agents['{agent_name}'].tools -> '{tool_name}' "
+                        f"nie jest zdefiniowane w config/tools/."
+                    )
 
-        # 4) Profil airgap: brak egress.
+        # 4) Bazowa linia bezpieczeństwa dla profili nieodwołalnych (prod, airgap):
+        #    twardych wymagań nie wolno cicho wyłączyć. W dev zostawiamy elastyczność.
+        if self.platform.profile in (Profile.PROD, Profile.AIRGAP):
+            profile_name = self.platform.profile.value
+            if self.security.sandbox.engine is SandboxEngine.NONE:
+                errors.append(
+                    f"Profil '{profile_name}' wymaga sandboxa "
+                    f"(security.sandbox.engine != none)."
+                )
+            if not self.security.audit.enabled:
+                errors.append(
+                    f"Profil '{profile_name}' wymaga włączonego audytu "
+                    f"(security.audit.enabled=true)."
+                )
+            if not self.security.audit.immutable:
+                errors.append(
+                    f"Profil '{profile_name}' wymaga niemodyfikowalnego audytu "
+                    f"(security.audit.immutable=true)."
+                )
+            if not self.security.encryption.at_rest:
+                errors.append(
+                    f"Profil '{profile_name}' wymaga szyfrowania at-rest "
+                    f"(security.encryption.at_rest=true)."
+                )
+
+        # 5) Profil airgap: brak egress i brak zdalnych endpointów modeli.
         if self.platform.profile is Profile.AIRGAP:
             if self.security.egress.default_policy is not EgressPolicy.DENY:
                 errors.append("Profil airgap wymaga security.egress.default_policy=deny.")
@@ -447,6 +512,12 @@ class HusarzConfig(_StrictModel):
                 )
             if self.security.sandbox.network:
                 errors.append("Profil airgap wymaga security.sandbox.network=false.")
+            for model_id, spec in self.models.registry.items():
+                if spec.enabled and not _is_local_endpoint(spec.endpoint):
+                    errors.append(
+                        f"Profil airgap: model '{model_id}' ma nielokalny endpoint "
+                        f"'{spec.endpoint}'. Dozwolone są tylko adresy lokalne/prywatne."
+                    )
 
         if errors:
             raise ValueError("Błędy walidacji krzyżowej konfiguracji:\n- " + "\n- ".join(errors))
