@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from husarz.config.schema import SecurityConfig, ToolConfig
+from husarz.config.secrets import SecretsProvider
 from husarz.tools.base import Tool
 from husarz.tools.errors import ToolError
 from husarz.tools.rag import RagBackend
@@ -33,8 +34,11 @@ class BuildContext:
     """Komplet zależności do zbudowania jednego narzędzia z konfiguracji.
 
     Przekazywany do buildera zarejestrowanego pod danym ``kind``. Zależności
-    (executor sandboxa, fetcher HTTP, backend RAG) są współdzielone między
-    narzędziami i wstrzykiwalne — w testach mockowane, bez sieci/dockera.
+    (executor sandboxa, fetcher HTTP, backend RAG, dostawca sekretów) są współdzielone
+    między narzędziami i wstrzykiwalne — w testach mockowane, bez sieci/dockera.
+
+    ``rag_backend`` jawnie wstrzyknięty (nie ``None``) ma pierwszeństwo (back-compat/testy);
+    gdy ``None``, narzędzie rag buduje backend z własnej konfiguracji (``memory``/``embedding``).
     """
 
     name: str
@@ -44,7 +48,8 @@ class BuildContext:
     security: SecurityConfig
     executor: SandboxExecutor
     fetcher: Fetcher
-    rag_backend: RagBackend
+    rag_backend: RagBackend | None
+    secrets: SecretsProvider
 
 
 # Builder: z kontekstu buduje gotowe narzędzie.

@@ -435,3 +435,26 @@ twardą barierą jest allowlista + sandbox); `shell` z `python` = RCE-w-sandboxi
 agentów granicą jest sandbox); `web` model-sterowane bez pinowania IP (DNS-rebinding — jak Git);
 audyt wiąże agenta, nie użytkownika (korelacja principal↔wywołanie — follow-up). Pętla jest
 **opt-in** (`tool_loop_enabled`, domyślnie false) — w dostarczonej konfiguracji wyłączona.
+
+### Etap 14 — pamięć długoterminowa (RAG) (data: 2026-08-13)
+
+**Zakres:** produkcyjny `EmbeddingRagBackend` (wektorowa pamięć). Powierzchnia: treść
+NIEZAUFANA (trwały kanał injekcji cross-agent), embeddingi ~ PII (odwracalne). Projekt z
+panelu + krytyki suwerenności; at-rest/trwałość świadomie odłożone do 14b (bez teatru).
+
+| Niezmiennik | Test |
+|---|---|
+| Izolacja cross-agent: `add` w kolekcji A nie wypływa w `search` B (namespace) | `test_cross_agent_memory_no_leak`, `test_store_namespace_isolation` |
+| Rozłączne kolekcje wymuszone przy starcie (kolizja namespace → błąd) | `test_rag_collections_must_be_disjoint` |
+| Suwerenność embeddingów: WAN pod deny-all → `EgressError` PRZED wysłaniem wektora | `test_embedder_egress_blocks_wan` |
+| Airgap: nielokalny endpoint embeddera → błąd startu (embeddingi ~ PII) | `test_airgap_rejects_nonlocal_embedder_endpoint` |
+| Klucz embeddera WYŁĄCZNIE jako referencja (surowy → odrzucony) | `test_embedder_key_must_be_reference` |
+| Wymiar wektora walidowany fail-closed (anty-korupcja magazynu) | `test_ollama_embedder_dim_mismatch_fails_closed`, `test_embedding_backend_dim_mismatch_rejected` |
+| Wzrost bounded: `max_items` + ewikcja FIFO (model-sterowany `add`) | `test_store_growth_capped`, `test_store_cap_and_fifo_eviction` |
+| Wynik `search` re-injektowany jako ogrodzone DANE (pętla) | `test_embedding_memory_add_then_search_in_loop` |
+
+**Ograniczenia (świadome, odłożone do 14b):** MVP jest ulotny (RAM) — trwałość
+(`SqliteVectorStore`) + szyfrowanie at-rest (`AesGcmCipher`) wchodzą RAZEM z przewleczeniem
+`SecretsProvider` do produkcji (inaczej klucz nierozwiązywalny = teatr). `FakeEmbedder` to
+test-double, nie realne wyszukiwanie — produkcja wymaga Ollamy; domyślny backend `memory`
+(słowny) zapewnia brak regresji. Deszyfruj-przed-scoringiem (14b) → koszt O(N), stąd `max_items`.

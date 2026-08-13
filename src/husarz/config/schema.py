@@ -454,6 +454,45 @@ class ToolConfig(_StrictModel):
 _SECRET_REF_SCHEMES = ("env:", "file:", "vault:", "sops:")
 
 
+class EmbedderConfig(_StrictModel):
+    """Konfiguracja embeddera (tekst → wektor) dla backendu pamięci ``embedding``.
+
+    Suwerennie: domyślnie lokalny Ollama. ``fake`` służy WYŁĄCZNIE dev/testom (deterministyczny
+    test-double, nie realne wyszukiwanie semantyczne). Klucz tylko jako referencja do sekretu.
+    """
+
+    kind: Literal["fake", "ollama"] = "ollama"
+    endpoint: str | None = None  # domyślnie loopback http://127.0.0.1:11434
+    model: str | None = None  # domyślnie nomic-embed-text (768D)
+    api_key_ref: str | None = None  # referencja env:/file:/vault:/sops: (embedder za proxy)
+    # Wymiar wektora — MUSI pasować do modelu (nomic-embed-text=768, mxbai-embed-large=1024).
+    # Niezgodność blokuje się fail-closed przy pierwszym wywołaniu (anty-korupcja magazynu).
+    dim: int = Field(default=768, ge=1)
+
+    @model_validator(mode="after")
+    def _validate(self) -> EmbedderConfig:
+        if self.api_key_ref is not None and not self.api_key_ref.startswith(_SECRET_REF_SCHEMES):
+            raise ValueError(
+                "embedder.api_key_ref musi być referencją do sekretu "
+                "(env:/file:/vault:/sops:), a nie samą wartością."
+            )
+        return self
+
+
+class RagBackendConfig(_StrictModel):
+    """Konfiguracja backendu pamięci (RAG) parsowana z ``ToolConfig.config`` narzędzia rag.
+
+    ``memory`` — obecny backend słowny (zero zależności, domyślny). ``embedding`` — wektorowy
+    (embedder + magazyn wektorów). Trwałość (SQLite) i szyfrowanie at-rest wchodzą w Etapie 14b.
+    """
+
+    backend: Literal["memory", "embedding"] = "memory"
+    collection: str = "husarz_memory"  # namespace — izolacja pamięci między agentami/kolekcjami
+    top_k: int = Field(default=8, ge=1)
+    max_items: int = Field(default=5000, ge=1)  # cap magazynu + ewikcja FIFO (anty-OOM)
+    embedder: EmbedderConfig = Field(default_factory=EmbedderConfig)
+
+
 class PluginConfig(_StrictModel):
     """Konektor wtyczki (serwer narzędzi MCP przez HTTP JSON-RPC).
 
@@ -734,6 +773,33 @@ class HusarzConfig(_StrictModel):
                 errors.append(
                     f"platform.workspace_dir ({workspace}) nie może pokrywać się z "
                     f"platform.{label} ({other}) — rozdziel katalogi."
+                )
+
+        # 7) Pamięć (RAG): kolekcje narzędzi rag muszą być rozłączne (izolacja pamięci między
+        #    agentami — zderzenie namespace = kanał trwałej injekcji cross-agent, ADR-0017),
+        #    a endpoint embeddera musi być lokalny w profilu airgap (embeddingi ~ PII).
+        seen_collections: dict[str, str] = {}
+        for name, tc in self.tools.items():
+            if tc.kind != "rag" or not tc.enabled:
+                continue
+            collection = str(tc.config.get("collection") or "husarz_memory")
+            if collection in seen_collections:
+                errors.append(
+                    f"Narzędzia rag '{seen_collections[collection]}' i '{name}' współdzielą "
+                    f"kolekcję '{collection}' — rozłączne kolekcje izolują pamięć agentów."
+                )
+            else:
+                seen_collections[collection] = name
+            embedder = tc.config.get("embedder")
+            endpoint = embedder.get("endpoint") if isinstance(embedder, dict) else None
+            if (
+                self.platform.profile is Profile.AIRGAP
+                and isinstance(endpoint, str)
+                and not is_local_endpoint(endpoint)
+            ):
+                errors.append(
+                    f"Profil airgap: embedder narzędzia rag '{name}' ma nielokalny endpoint "
+                    f"'{endpoint}'. Embeddingi (odwracalne do PII) muszą pozostać lokalne."
                 )
 
         if errors:

@@ -15,11 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from husarz.config.schema import HusarzConfig
+from husarz.config.secrets import NullSecretsProvider, SecretsProvider
 from husarz.tools.base import Tool
 from husarz.tools.errors import ToolError
 from husarz.tools.file_edit import DEFAULT_MAX_BYTES, FileEditTool
 from husarz.tools.git import GitTool
-from husarz.tools.rag import DEFAULT_TOP_K, InMemoryRagBackend, RagBackend, RagTool
+from husarz.tools.rag import DEFAULT_TOP_K, RagBackend, RagTool
 from husarz.tools.registry import BuildContext, ToolProviderRegistry
 from husarz.tools.run_tests import RunTestsTool
 from husarz.tools.sandbox import DockerSandboxExecutor, SandboxExecutor
@@ -91,8 +92,20 @@ def _build_web(ctx: BuildContext) -> Tool:
 
 
 def _build_rag(ctx: BuildContext) -> Tool:
-    settings = ctx.tool_config.config
-    return RagTool(ctx.rag_backend, top_k=_int_setting(settings, "top_k", DEFAULT_TOP_K))
+    # Jawnie wstrzyknięty backend (testy/back-compat) ma pierwszeństwo.
+    if ctx.rag_backend is not None:
+        top_k = _int_setting(ctx.tool_config.config, "top_k", DEFAULT_TOP_K)
+        return RagTool(ctx.rag_backend, top_k=top_k)
+    # Inaczej buduj backend z konfiguracji narzędzia (memory/embedding) — import leniwy,
+    # by rdzeń nie ciągnął zależności pamięci (embedder/store) bez potrzeby.
+    from husarz.config.schema import RagBackendConfig  # noqa: PLC0415
+    from husarz.memory import build_rag_backend  # noqa: PLC0415
+
+    # Klucze o wartości null traktujemy jak brak (jak dawne _int_setting) → domyślne z schematu.
+    settings = {key: value for key, value in ctx.tool_config.config.items() if value is not None}
+    rag_config = RagBackendConfig(**settings)
+    backend = build_rag_backend(rag_config, ctx.security.egress, secrets=ctx.secrets)
+    return RagTool(backend, top_k=rag_config.top_k)
 
 
 def default_registry() -> ToolProviderRegistry:
@@ -114,20 +127,23 @@ def build_tools(
     executor: SandboxExecutor | None = None,
     fetcher: Fetcher | None = None,
     rag_backend: RagBackend | None = None,
+    secrets: SecretsProvider | None = None,
     registry: ToolProviderRegistry | None = None,
 ) -> dict[str, Tool]:
     """Buduje mapę ``nazwa -> narzędzie`` z konfiguracji.
 
     Narzędzia wyłączone (``enabled: false``) są pomijane. Nieznany ``kind``
     kończy się ``ToolError``. ``registry`` (opcjonalny) pozwala rozszerzyć lub
-    podmienić zestaw rodzajów (domyślnie ``default_registry``).
+    podmienić zestaw rodzajów (domyślnie ``default_registry``). ``rag_backend``
+    jawnie wstrzyknięty ma pierwszeństwo; gdy ``None`` — narzędzie rag buduje backend
+    z własnej konfiguracji (``memory``/``embedding``).
     """
     workspace_path = Path(workspace)
     workspace_host = str(workspace_path.resolve())
     active_registry = registry if registry is not None else default_registry()
     active_executor: SandboxExecutor = executor or DockerSandboxExecutor()
     active_fetcher: Fetcher = fetcher or HttpxFetcher()
-    active_backend: RagBackend = rag_backend or InMemoryRagBackend()
+    active_secrets: SecretsProvider = secrets if secrets is not None else NullSecretsProvider()
 
     tools: dict[str, Tool] = {}
     for name, tool_config in config.tools.items():
@@ -145,7 +161,8 @@ def build_tools(
                 security=config.security,
                 executor=active_executor,
                 fetcher=active_fetcher,
-                rag_backend=active_backend,
+                rag_backend=rag_backend,
+                secrets=active_secrets,
             )
         )
     return tools

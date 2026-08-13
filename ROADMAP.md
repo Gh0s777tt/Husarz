@@ -85,6 +85,18 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
   `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
 
+## ✅ Etap 14 — Pamięć długoterminowa (RAG)
+- ✅ `husarz.memory.EmbeddingRagBackend` (wektorowa) za NIEZMIENIONYM `RagBackend`;
+  wstrzykiwalne szwy `Embedder` + `VectorStore`. Domyślny backend słowny `memory`
+  (zero regresji), wektorowy `embedding` opt-in.
+- ✅ `OllamaEmbedder` (lokalny, egress-gated per call, walidacja dim) + `FakeEmbedder`
+  (testy). `InMemoryVectorStore` (cosine, namespace, cap+FIFO, dedup). Zero nowych deps rdzenia.
+- ✅ Izolacja cross-agent (rozłączne kolekcje — walidacja), airgap na endpoint embeddera,
+  wynik `search` ogradzany w pętli. Config typowany (`RagBackendConfig`). Testy: +25 (offline).
+  Docs: ADR-0017.
+- ⬜ Etap 14b: trwałość (`SqliteVectorStore`) + szyfrowanie at-rest (`AesGcmCipher`) +
+  przewleczenie sekretów do produkcji; pgvector/mem0/graphiti jako adaptery za `RagBackend`.
+
 ## ✅ Etap 13 — Pętla narzędziowa (function-calling)
 - ✅ Pętla ReAct (`agents/tool_loop.py`) — pierwszy egzekutor narzędzi; prompt-based
   (przenośne na lokalne modele), zero zmian w routerze. Dispatch (`tools/dispatch.py`)

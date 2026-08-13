@@ -5,6 +5,37 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 14 — pamięć długoterminowa / RAG)
+- Pakiet `husarz.memory`: produkcyjny `EmbeddingRagBackend` (wektorowa pamięć semantyczna)
+  za NIEZMIENIONYM `Protocol RagBackend` — drop-in za `InMemoryRagBackend`, `RagTool` bez zmian.
+  Kompozycja wstrzykiwalnych szwów: `Embedder` (tekst→wektor) + `VectorStore` (cosine).
+- Embedder suwerennie: `FakeEmbedder` (deterministyczny, TYLKO dev/test) + `OllamaEmbedder`
+  (lokalny `/api/embeddings`, transport wstrzykiwalny, bramka `check_endpoint_allowed` PRZED
+  każdym wywołaniem, walidacja wymiaru fail-closed, klucz jako secret-ref).
+- `InMemoryVectorStore` (cosine czysty Python, izolacja namespace, cap `max_items`+FIFO,
+  dedup po `sha256(text)`). Zero nowych zależności rdzenia.
+- Config: `RagBackendConfig`/`EmbedderConfig` (typowane, `extra=forbid`) parsowane z
+  `config/tools/rag.yaml`; domyślny backend `memory` (słowny, zero regresji), wektorowy
+  `embedding` opt-in. `_build_rag` buduje backend z configu (wstrzyknięty backend ma pierwszeństwo).
+- Bezpieczeństwo: izolacja cross-agent przez rozłączne kolekcje (walidacja `_cross_validate`
+  odrzuca kolizję namespace); airgap odrzuca nielokalny endpoint embeddera (embeddingi ~ PII);
+  wynik `search` re-injektowany zawsze jako ogrodzone DANE (pętla, ADR-0016).
+- Testy: +25 (unit + security izolacja/egress + integracja przez pętlę), wszystko OFFLINE.
+  Docs: ADR-0017.
+- ODŁOŻONE do Etapu 14b (świadomie): trwałość (`SqliteVectorStore`) + szyfrowanie at-rest
+  (`AesGcmCipher`) RAZEM z przewleczeniem `SecretsProvider` do produkcji — bez tego
+  szyfrowanie byłoby teatrem (klucz nierozwiązywalny). pgvector/mem0/graphiti jako przyszłe
+  adaptery za `RagBackend`.
+
+### Poprawione (adwersaryjny przegląd Etapu 14)
+- Przegląd (3 wymiary, 3 potwierdzone findingi z 7) i utwardzenia:
+- **Łagodna degradacja**: `ToolDispatcher.dispatch` łapie też `MemoryError_`/`EgressError`
+  (awaria embeddera RAG, egress) → `ToolResult(ok=False)` zamiast crashu całej orkiestracji.
+- **Spójne domyślne**: `embedder.dim` domyślnie 768 (pasuje do `nomic-embed-text`) — koniec
+  fail-closed out-of-the-box na udokumentowanej ścieżce ollama (768 ≠ 1024).
+- **Docs↔kod**: docstringi `rag.py` (pgvector→EmbeddingRagBackend jako produkcyjny wektorowy).
+- Testy: +2 (degradacja dispatchu, spójność domyślnego dim).
+
 ### Dodane (Etap 13 — pętla narzędziowa / function-calling)
 - **Pętla ReAct** (`husarz.agents.tool_loop`): PIERWSZY egzekutor narzędzi. Model emituje
   ogrodzony blok akcji `[[HUSARZ_ACTION]]{tool,action,args}[[/HUSARZ_ACTION]]`; pętla parsuje,

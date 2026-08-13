@@ -17,6 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from husarz.memory.errors import MemoryError_
+from husarz.router.egress import EgressError
 from husarz.tools.base import Tool, ToolResult
 from husarz.tools.errors import ToolError
 from husarz.tools.file_edit import FileEditTool
@@ -257,6 +259,10 @@ class ToolDispatcher:
             # Kontrakt „nigdy nie rzuca": niespójny kind_of (instancja innego rodzaju niż
             # deklarowany kind) → cast trafia w brakującą metodę. Zwracamy błąd, nie wyjątek.
             return _err(tool, f"Narzędzie '{tool}' nie pasuje do rodzaju '{kind}'.")
+        except (MemoryError_, EgressError) as exc:
+            # Awaria backendu (np. niedostępny embedder RAG, egress) degraduje się do wyniku,
+            # a NIE wywala pętli/orkiestracji — model dostaje ok=False i może się odbić.
+            return _err(tool, str(exc))
 
     def manual(self, allowed_names: list[str]) -> str:
         """Buduje deterministyczny „man" narzędzi TYLKO z allowlisty (nazwa/opis/akcje).

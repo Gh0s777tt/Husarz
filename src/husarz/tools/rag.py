@@ -1,8 +1,12 @@
-"""Narzędzie rag — pamięć i wyszukiwanie semantyczne.
+"""Narzędzie rag — pamięć i wyszukiwanie.
 
-Backend jest wstrzykiwalny. ``InMemoryRagBackend`` (proste dopasowanie słów) służy
-do testów i dev bez bazy; produkcyjny backend pgvector + embeddingi dojdzie, gdy
-dostępna będzie baza (wymaga PostgreSQL/pgvector i modelu embeddingów).
+Backend jest wstrzykiwalny. ``InMemoryRagBackend`` (dopasowanie słów) to domyślny,
+zero-zależnościowy backend (``memory``); produkcyjny wektorowy backend to
+``husarz.memory.EmbeddingRagBackend`` (``embedding``) za TYM SAMYM protokołem
+(lokalny embedder + magazyn cosine). pgvector/mem0 to przyszłe adaptery (ADR-0017).
+
+Awarie backendu (np. niedostępny embedder, egress) są degradowane do
+``ToolResult(ok=False)`` w warstwie dispatchu — nie wywalają pętli narzędziowej.
 """
 
 from __future__ import annotations
@@ -45,7 +49,7 @@ class InMemoryRagBackend:
 
 
 class RagTool:
-    """Zapis i wyszukiwanie w pamięci (pgvector w produkcji, in-memory w testach)."""
+    """Zapis i wyszukiwanie w pamięci (backend wstrzykiwalny: słowny lub wektorowy)."""
 
     name = "rag"
 

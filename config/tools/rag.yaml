@@ -1,14 +1,20 @@
-# rag — pamięć i wyszukiwanie semantyczne (PostgreSQL + pgvector).
+# rag — pamięć i wyszukiwanie. Backend słowny 'memory' (domyślny, zero-dep) lub wektorowy
+# 'embedding' (semantyczny, wymaga lokalnego embeddera). Trwałość + szyfrowanie at-rest: Etap 14b.
 name: rag
 kind: rag
-description: Zapis/odczyt pamięci i wyszukiwanie semantyczne (pgvector).
+description: Zapis/odczyt pamięci i wyszukiwanie (słowne lub semantyczne wektorowe).
 enabled: true
 requires_sandbox: false      # usługa wewnętrzna, nie polecenie w sandboxie
-requires_egress: false       # baza lokalna, brak ruchu na zewnątrz
+requires_egress: false       # in-memory/lokalny embedder loopback — brak ruchu na zewnątrz
 allowlist: []
 config:
-  backend: pgvector
-  collection: husarz_memory
-  embedding_dim: 1024
+  backend: memory            # 'memory' (słowny, domyślny) lub 'embedding' (wektorowy, opt-in)
+  collection: husarz_memory  # namespace — izolacja pamięci między agentami/kolekcjami
   top_k: 8
-  encrypt_at_rest: true
+  max_items: 5000            # cap magazynu wektorowego + ewikcja FIFO (anty-OOM)
+  # Backend wektorowy (opt-in): ustaw backend: embedding i skonfiguruj embedder.
+  # embedder:
+  #   kind: ollama           # 'ollama' (lokalny /api/embeddings) lub 'fake' (WYŁĄCZNIE dev/test)
+  #   endpoint: http://127.0.0.1:11434
+  #   model: nomic-embed-text  # dim MUSI pasować do modelu: nomic-embed-text=768
+  #   dim: 768

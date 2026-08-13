@@ -19,7 +19,7 @@ Kod: `husarz.tools`.
 | `git`       | `GitTool`        | allowlista podkomend; `push` tylko gdy `allow_push` |
 | `run_tests` | `RunTestsTool`   | skonfigurowane polecenie testów w sandboxie |
 | `web`       | `WebTool`        | allowlista domen narzędzia **oraz** globalny egress + blok wewnętrznych IP |
-| `rag`       | `RagTool`        | pamięć/wyszukiwanie (obecnie in-memory także w prod; pgvector planowany, Etap 6) |
+| `rag`       | `RagTool`        | pamięć/wyszukiwanie; backend `memory` (słowny, domyślny) lub `embedding` (wektorowy, `husarz.memory`) — patrz niżej i ADR-0017 |
 
 ## Sandbox
 
@@ -88,6 +88,15 @@ tools = build_tools(config, workspace="./workspace", registry=registry)
 Rejestr obsługuje wyłącznie providerów **first-party** — świadomie NIE ładuje obcych
 modułów (`entry_points`/`importlib`), bo import = wykonanie kodu (RCE/łańcuch dostaw).
 Rozszerzalność zewnętrzną realizują **wtyczki/konektory MCP** (data-driven, `husarz.plugins`).
+
+### Pamięć długoterminowa / RAG (Etap 14, ADR-0017)
+
+Narzędzie `rag` ma dwa backendy (`config/tools/rag.yaml`, pole `config.backend`):
+`memory` — słowny (domyślny, zero zależności) i `embedding` — wektorowy (`husarz.memory.
+EmbeddingRagBackend`: lokalny embedder Ollama, egress-gated + magazyn cosine w pamięci,
+izolacja `collection`/namespace, cap `max_items`). Trwałość i szyfrowanie at-rest wchodzą
+w Etapie 14b. Nowy backend = gałąź w `build_rag_backend` + plik. Izolacja między agentami:
+rozłączne `collection` (walidacja odrzuca kolizję). Patrz [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md).
 
 ### Wykonanie w pętli narzędziowej (Etap 13, ADR-0016)
 
