@@ -491,6 +491,21 @@ class RoeConfig(_StrictModel):
 # ---------------------------------------------------------------------------
 
 
+class AttachmentsConfig(_StrictModel):
+    """Limity załączników czatu (pliki/foldery jako kontekst). Ochrona przed DoS."""
+
+    enabled: bool = True
+    max_files: int = Field(default=20, ge=1)
+    max_bytes_per_file: int = Field(default=256_000, ge=1)  # ~256 kB tekstu / plik
+    max_total_bytes: int = Field(default=1_000_000, ge=1)  # ~1 MB łącznego kontekstu
+
+
+class ChatConfig(_StrictModel):
+    """Ustawienia trybu czatu (config/chat.yaml). Opcjonalny — działają wartości domyślne."""
+
+    attachments: AttachmentsConfig = Field(default_factory=AttachmentsConfig)
+
+
 class HusarzConfig(_StrictModel):
     """Kompletna, zwalidowana konfiguracja platformy Husarz."""
 
@@ -498,6 +513,7 @@ class HusarzConfig(_StrictModel):
     models: ModelsConfig
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    chat: ChatConfig = Field(default_factory=ChatConfig)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     tools: dict[str, ToolConfig] = Field(default_factory=dict)
     roe: dict[str, RoeConfig] = Field(default_factory=dict)

@@ -99,6 +99,13 @@ class ChatMessageIn(BaseModel):
     content: str = Field(min_length=1)
 
 
+class AttachmentIn(BaseModel):
+    """Załącznik czatu: nazwa + treść tekstowa (limity egzekwuje serwer)."""
+
+    name: str = Field(min_length=1, max_length=256)
+    content: str
+
+
 class ChatRequest(BaseModel):
     """Żądanie bezpośredniego czatu (jeden model, bez orkiestracji wieloagentowej)."""
 
@@ -106,6 +113,8 @@ class ChatRequest(BaseModel):
     # Nadpisanie modelu (opcjonalne). Domyślnie ``models.chat`` lub ``models.default``.
     model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    # Załączniki (pliki/foldery) dołączane jako ogrodzony kontekst NIEZAUFANY.
+    attachments: list[AttachmentIn] = Field(default_factory=list)
 
 
 class ChatReply(BaseModel):

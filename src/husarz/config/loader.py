@@ -42,6 +42,7 @@ _SINGLE_FILES: dict[str, str] = {
     "models": "models.yaml",
     "routing": "routing.yaml",
     "security": "security.yaml",
+    "chat": "chat.yaml",
 }
 # Sekcje wieloplikowe: nazwa sekcji -> (podkatalog, pole-klucz).
 _MULTI_DIRS: dict[str, tuple[str, str]] = {

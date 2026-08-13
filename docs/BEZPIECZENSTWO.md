@@ -261,3 +261,20 @@ auth w dostarczanej ścieżce) i wdrożone utwardzenia:
 **Ograniczenia (świadome):** limit tokenów jest miękki (rozliczanie po odpowiedzi);
 throttling logowania jest per-konto/in-proces (per-IP i współdzielony magazyn sesji —
 przy skalowaniu poziomym); rozliczanie tokenów orkiestracji — po zsumowaniu `usage`.
+
+### Etap 8 — załączniki do czatu (data: 2026-08-13)
+
+**Zakres:** `husarz.attachments` — treść załączników jest NIEZAUFANA.
+
+| Niezmiennik | Test |
+|---|---|
+| Limit liczby plików (DoS) | `test_reject_too_many_files` |
+| Przycięcie per plik + odrzucenie łącznego rozmiaru | `test_truncate_per_file`, `test_reject_total_too_large` |
+| Odrzucenie danych binarnych (tylko tekst) | `test_reject_binary_content` |
+| Konfinacja nazwy (tylko basename, koniec traversalu) | `test_clean_name_strips_path_traversal` |
+| Ogrodzenie jako dane + neutralizacja domknięcia z treści (anti-injection) | `test_context_block_fences_and_defangs` |
+| Wyłączenie przez config | `test_reject_when_disabled` |
+| API: kontekst doklejony; binaria/limit → 400 | `test_chat_prepends_attachment_context`, `test_chat_rejects_binary_attachment`, `test_chat_rejects_too_many_attachments` |
+
+**Ograniczenia:** zdjęcia wymagają modelu wizyjnego (poza wersją); brak chunkowania/RAG
+dużych folderów (limity twarde); ścieżki serwera nie są przyjmowane od klienta.

@@ -1,0 +1,12 @@
+# ============================================================================
+# config/chat.yaml — ustawienia trybu czatu (sekcja "chat"). Plik OPCJONALNY:
+# gdy go brak, działają wartości domyślne. Nadpisania przez ENV: HUSARZ_CHAT__...
+# ============================================================================
+
+# Załączniki czatu (pliki/foldery jako kontekst). Treść jest NIEZAUFANA — serwer
+# egzekwuje limity i ogradza ją jako dane referencyjne (anty-prompt-injection).
+attachments:
+  enabled: true
+  max_files: 20            # maks. liczba plików w jednym żądaniu
+  max_bytes_per_file: 256000   # ~256 kB tekstu na plik (nadmiar → przycięcie)
+  max_total_bytes: 1000000     # ~1 MB łącznego kontekstu (nadmiar → odrzucenie)

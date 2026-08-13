@@ -5,6 +5,20 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 8 — załączniki do czatu)
+- Moduł `husarz.attachments`: pliki/foldery jako kontekst czatu. Treść NIEZAUFANA —
+  twarde limity (liczba, rozmiar per plik/łączny → DoS), czyszczenie nazw (basename),
+  odrzucanie danych binarnych, **ogrodzony** blok oznaczony jako dane (anty-prompt-injection,
+  neutralizacja prób domknięcia ogrodzenia z wnętrza treści).
+- `POST /api/chat` przyjmuje `attachments: [{name, content}]`; kontekst doklejany do
+  bieżącej wiadomości; przekroczenie limitu/binaria → `400`. Zużycie tokenów obejmuje kontekst.
+- Nowa sekcja konfiguracji `chat` (`config/chat.yaml`, opcjonalna): `chat.attachments`
+  (`enabled`, `max_files`, `max_bytes_per_file`, `max_total_bytes`). ENV: `HUSARZ_CHAT__…`.
+- Konsola: przyciski 📎 (pliki) i 📁 (folder), odczyt po stronie klienta (FileReader),
+  chipy załączników z usuwaniem; foldery przez `webkitdirectory`. Bez CDN.
+- Testy: sanityzacja (limity, binaria, konfinacja nazw, ogrodzenie+defang) + integracja
+  `/api/chat` (kontekst doklejony, odrzucenia 400). Docs: `docs/API.md`, ADR-0010.
+
 ### Dodane (Etap 7 — konta, sesje i limity tokenów)
 - Pakiet `husarz.accounts`: hashowanie haseł `scrypt` (biblioteka standardowa, bez
   zależności), magazyn kont wstrzykiwalny (`InMemory`/`File` JSON), `AccountService`

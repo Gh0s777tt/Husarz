@@ -54,6 +54,7 @@ from husarz.api.schemas import (
     ValidateRequest,
     ValidateResponse,
 )
+from husarz.attachments import AttachmentError, build_context_block, sanitize_attachments
 from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
 from husarz.orchestrator import Orchestrator, build_orchestrator
@@ -358,11 +359,29 @@ def create_app(
             raise HTTPException(status_code=503, detail="Model czatu niedostępny (brak routera).")
         _enforce_quota(accounts, principal)
         model_id = request.model or _resolve_chat_model(current_config)
-        chat_request = RouterChatRequest(
-            messages=[ChatMessage(role=m.role, content=m.content) for m in request.messages],
-            temperature=request.temperature,
+        messages = [ChatMessage(role=m.role, content=m.content) for m in request.messages]
+        # Załączniki (NIEZAUFANE) → ogrodzony blok doklejany do bieżącej wiadomości.
+        if request.attachments:
+            try:
+                atts = sanitize_attachments(
+                    [(a.name, a.content) for a in request.attachments],
+                    current_config.chat.attachments,
+                )
+            except AttachmentError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            context = build_context_block(atts)
+            if context and messages:
+                messages[-1].content = f"{context}\n\n{messages[-1].content}"
+        chat_request = RouterChatRequest(messages=messages, temperature=request.temperature)
+        audit_log.record(
+            "api",
+            "chat",
+            {
+                "model": model_id,
+                "turns": len(request.messages),
+                "attachments": len(request.attachments),
+            },
         )
-        audit_log.record("api", "chat", {"model": model_id, "turns": len(request.messages)})
         with counter_lock:
             state["chats"] += 1
         try:

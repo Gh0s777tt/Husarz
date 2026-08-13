@@ -58,8 +58,13 @@ brak modelu → `503`, awaria wszystkich modeli → `502` (surowa treść błęd
 
 - **Czat bezpośredni** (`POST /api/chat`) — rozmowa z JEDNYM modelem (`models.chat`,
   domyślnie lokalny `husarz-local` z Ollamy). Szybki, konwersacyjny, do kodowania.
-  Ciało: `{"messages": [{"role": "user", "content": "…"}], "model"?: "...", "temperature"?: 0.3}`.
+  Ciało: `{"messages": [...], "model"?: "...", "temperature"?: 0.3, "attachments"?: [...]}`.
   Persona (hetman, PL, kod w blokach) jest zaszyta w modelu — patrz [ollama/README.md](../ollama/README.md).
+  **Załączniki** (`attachments: [{name, content}]`) — pliki/foldery jako kontekst.
+  Treść jest NIEZAUFANA: serwer egzekwuje limity (`chat.attachments` — liczba, rozmiar
+  per plik/łączny), czyści nazwy (basename), odrzuca dane binarne i **ogradza** blok
+  jako dane referencyjne (anty-prompt-injection). Przekroczenie/binaria → `400`.
+  Obrazy wymagają modelu wizyjnego (poza tą wersją). Limit tokenów obejmuje też kontekst.
 - **Orkiestracja** (`POST /api/orchestrate`) — pełna pętla wieloagentowa (plan → deleguj
   → synteza) hetmana „Husarz". Cięższa; do złożonych, wieloetapowych zadań.
 

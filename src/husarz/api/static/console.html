@@ -72,6 +72,17 @@
     .chat-row textarea { resize: vertical; }
     .chat-row button { margin-top: 0; white-space: nowrap; }
     .typing { color: var(--muted); font-style: italic; }
+    .chat-row .link { font-size: 18px; padding: 4px 8px; }
+
+    /* --- Załączniki (chipy plików) --- */
+    .attach-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+    .attach-bar:empty { display: none; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+            background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
+            padding: 3px 10px; color: var(--muted); max-width: 260px; }
+    .chip span.nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chip .chip-x { background: transparent; border: none; color: var(--muted);
+                    cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
 
     /* --- Konto: pasek użytkownika + modal logowania --- */
     .userbox { font-size: 12px; color: var(--muted); }
@@ -116,10 +127,15 @@
             <span id="chat-model"></span>
             <button id="chat-clear" class="copy" type="button" style="border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:5px;padding:2px 8px;cursor:pointer;">wyczyść</button>
           </div>
+          <div id="attach-bar" class="attach-bar"></div>
           <div class="chat-row">
+            <button id="attach-btn" class="link" type="button" title="Dodaj pliki">📎</button>
+            <button id="attach-folder-btn" class="link" type="button" title="Dodaj folder">📁</button>
             <textarea id="msg" rows="2" placeholder="Napisz wiadomość…  (Enter wysyła, Shift+Enter — nowa linia)"></textarea>
             <button class="primary" id="send">Wyślij</button>
           </div>
+          <input id="file-input" type="file" multiple hidden />
+          <input id="folder-input" type="file" webkitdirectory hidden />
         </div>
       </div>
     </section>
@@ -285,6 +301,7 @@
 
     async function boot() {
       wireAuth();
+      wireAttachments();
       try {
         const h = await api("health");
         $("badge").textContent = `v${h.version} · profil: ${h.profile}`;
@@ -390,6 +407,8 @@
     const history = [];
     function resetChat() {
       history.length = 0;
+      attachments = [];
+      renderAttachBar();
       log().innerHTML = "";
       bubble("assistant",
         "Cześć! Jestem <strong>Husarz</strong> — pomogę w rozmowie i kodowaniu. " +
@@ -397,19 +416,50 @@
         "<em>Orkiestracja</em> uruchamia hetmana wieloagentowego.", "Husarz");
     }
 
+    // --- Załączniki (pliki/foldery) czytane po stronie klienta ---
+    let attachments = [];
+    function renderAttachBar() {
+      const bar = $("attach-bar");
+      bar.innerHTML = attachments.map((a, i) =>
+        `<span class="chip"><span class="nm">📄 ${esc(a.name)}</span>` +
+        `<button class="chip-x" type="button" data-i="${i}">×</button></span>`).join("");
+      bar.querySelectorAll(".chip-x").forEach((b) => b.onclick = () => {
+        attachments.splice(+b.dataset.i, 1); renderAttachBar();
+      });
+    }
+    function readFiles(fileList) {
+      Array.from(fileList || []).forEach((f) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const name = f.webkitRelativePath || f.name;
+          attachments.push({ name, content: String(reader.result || "") });
+          renderAttachBar();
+        };
+        reader.readAsText(f);  // tekst; pliki binarne odrzuci serwer
+      });
+    }
+    function wireAttachments() {
+      $("attach-btn").onclick = () => $("file-input").click();
+      $("attach-folder-btn").onclick = () => $("folder-input").click();
+      $("file-input").onchange = (e) => { readFiles(e.target.files); e.target.value = ""; };
+      $("folder-input").onchange = (e) => { readFiles(e.target.files); e.target.value = ""; };
+    }
+
     async function send() {
       const text = $("msg").value.trim();
       if (!text) return;
       const mode = document.querySelector("input[name=mode]:checked").value;
       $("msg").value = "";
-      addUser(text);
+      const sent = mode === "chat" ? attachments.slice() : [];
+      if (sent.length) { attachments = []; renderAttachBar(); }
+      addUser(text + (sent.length ? `\n\n📎 ${sent.length} załącznik(ów)` : ""));
       const out = bubble("assistant", '<span class="typing">Husarz pisze…</span>', "Husarz");
       try {
         if (mode === "chat") {
           history.push({ role: "user", content: text });
           const d = await api("chat", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ messages: history }),
+            body: JSON.stringify({ messages: history, attachments: sent }),
           });
           if (d && d.content !== undefined) {
             out.innerHTML = renderMarkdown(d.content); wireCopy(out.parentElement);

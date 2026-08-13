@@ -85,6 +85,15 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
   `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
 
+## ✅ Etap 8 — Załączniki do czatu
+- ✅ `husarz.attachments`: pliki/foldery jako kontekst; limity (liczba/rozmiar),
+  czyszczenie nazw, odrzucanie binariów, ogrodzony blok anty-prompt-injection.
+- ✅ `POST /api/chat` z `attachments`; sekcja configu `chat` (`config/chat.yaml`).
+- ✅ Konsola: 📎 pliki / 📁 folder (FileReader, webkitdirectory), chipy załączników.
+- ✅ Testy: sanityzacja + integracja z /api/chat. Docs: API.md, ADR-0010.
+- ⬜ Zdjęcia (model wizyjny llava/qwen2-vl); chunkowanie/RAG dużych folderów
+  (pamięć długoterminowa — kandydat MemPalace/pgvector).
+
 ## ✅ Etap 7 — Konta, sesje i limity tokenów
 - ✅ `husarz.accounts`: hasła `scrypt` (bez zależności), magazyn wstrzykiwalny,
   `AccountService` (rejestracja gated, sesje+TTL, logout, limit/zużycie tokenów).
