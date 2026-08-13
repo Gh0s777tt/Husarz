@@ -24,16 +24,21 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Agenci wołani przez router (Bielik/Kopijnik/Zwiadowca itd.) na mockach modeli.
 - ✅ Testy: e2e zadania wieloagentowego + integracja `build_orchestrator`.
 
-## ⬜ Etap 3 — Narzędzia + sandbox
-- ⬜ `file_edit`, `shell` (Docker+gVisor, allowlist), `git`, `run_tests`,
-  `web` (allowlist domen), `rag` (pgvector).
-- ⬜ Rozszerzyć `SandboxConfig` o `image`/`runtime_class`/`pull_policy` (wymagane
-  gdy `engine != none`) — inaczej egzekutor narzędzi musiałby hardcodować obraz.
-- ⬜ Dodać sekcję `MemoryConfig`/`StorageConfig` (referencje `postgres_dsn_ref`,
-  `redis_dsn_ref`, `embeddings_model_id`, `vector_dim`) zamiast hardcode DSN.
-- ⬜ Wypromować przełączniki narzędzi istotne dla bezpieczeństwa (`network`,
-  `allow_push`) z opaque `config` do typowanych pól per-kind (walidacja literówek).
-- ⬜ Testy: izolacja sandbox, blokada spoza allowlisty, brak sieci gdy zabroniona.
+## ✅ Etap 3 — Narzędzia + sandbox
+- ✅ `file_edit`, `shell`, `git`, `run_tests`, `web` (allowlist domen), `rag`
+  (in-memory; pgvector w produkcji) — executor/fetcher/backend wstrzykiwalne.
+- ✅ `SandboxConfig` rozszerzone o `image`/`runtime_class`; `build_docker_argv`
+  egzekwuje `--network none`, limity, `--cap-drop ALL`, montaż tylko workspace.
+- ✅ Testy: izolacja sandbox (argv), konfinacja i deny-globi, blokada spoza
+  allowlisty, dwuwarstwowy egress — wszystko bez Dockera/DB/sieci.
+
+### Pozostałe z Etapu 3 (do domknięcia w środowisku z Dockerem/DB)
+- ⬜ Realne wykonanie `DockerSandboxExecutor` + obraz `husarz-sandbox` (Etap 6).
+- ⬜ Backend RAG pgvector + embeddingi; sekcja `MemoryConfig`/`StorageConfig`
+  (referencje `postgres_dsn_ref`, `redis_dsn_ref`, `embeddings_model_id`, `vector_dim`).
+- ⬜ Wypromować przełączniki narzędzi (`network`, `allow_push`) z opaque `config`
+  na typowane pola per-kind.
+- ⬜ Wpięcie pętli narzędziowej (function-calling) do agenta Towarzysz.
 
 ## ⬜ Etap 4 — Bezpieczeństwo
 - ⬜ Egress deny-all (runtime), mTLS, OIDC+RBAC, audit log niemodyfikowalny (hash-chain), filtry I/O.

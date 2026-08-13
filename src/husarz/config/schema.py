@@ -235,6 +235,9 @@ class SandboxConfig(_StrictModel):
     workspace_only: bool = True
     command_allowlist: list[str] = Field(default_factory=list)
     path_allowlist: list[str] = Field(default_factory=list)
+    # Obraz kontenera i klasa runtime (np. 'runsc' dla gVisor) — bez hardcode w executorze.
+    image: str | None = None
+    runtime_class: str | None = None
 
 
 class MtlsConfig(_StrictModel):

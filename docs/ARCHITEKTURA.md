@@ -46,7 +46,11 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   Towarzysz/Pocztowy, ładowarka agentów, hetman „Husarz" (plan → deleguj →
   obserwuj → refleksja → synteza). Szczegóły: [ORKIESTRATOR.md](ORKIESTRATOR.md),
   [ADR-0004](adr/0004-orkiestrator-agenci.md).
-- Pozostałe pakiety (`core`, `tools`, `memory`, `security`, `api`) to na razie
+- **Pakiet `husarz.tools`** (Etap 3) — narzędzia (`file_edit`, `shell`, `git`,
+  `run_tests`, `web`, `rag`) z konfinacją, allowlistami i sandboxem bez sieci;
+  executor/fetcher/backend wstrzykiwalne. Szczegóły: [NARZEDZIA.md](NARZEDZIA.md),
+  [ADR-0005](adr/0005-narzedzia-sandbox.md).
+- Pozostałe pakiety (`core`, `memory`, `security`, `api`) to na razie
   zaślepki z opisem roli i etapu wdrożenia.
 
 ## Hierarchia konfiguracji (zaimplementowana)

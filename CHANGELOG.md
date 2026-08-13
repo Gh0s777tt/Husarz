@@ -5,6 +5,23 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 3 — narzędzia + sandbox)
+- Pakiet `husarz.tools`: `file_edit`, `shell`, `git`, `run_tests`, `web`, `rag`.
+  - Konfinacja plików do workspace + deny-globi (`resolve_within_workspace`,
+    matcher `**` zgodny z Py 3.11); allowlisty komend (shell), podkomend (git,
+    `push` tylko przy `allow_push`), domen (web).
+  - Sandbox: `SandboxSpec` + `build_docker_argv` (twarda izolacja: `--network none`,
+    limity CPU/RAM, `--cap-drop ALL`, `no-new-privileges`, montaż tylko workspace,
+    `--runtime runsc` dla gVisor); `SandboxExecutor` wstrzykiwalny.
+  - web: dwuwarstwowy egress (allowlista domen narzędzia + globalny `security.egress`);
+    `Fetcher` wstrzykiwalny. rag: `RagBackend` wstrzykiwalny (`InMemoryRagBackend`).
+  - `build_tools(config, workspace, ...)` — ładowarka z `config/tools/*.yaml`.
+- `SandboxConfig` rozszerzone o `image` i `runtime_class` (bez hardcode obrazu).
+- Testy (łącznie 217): konfinacja/deny-globi, argv sandboxa, shell/git/run_tests
+  na mockowym executorze, web (allowlista + egress) na mockowym fetcherze, rag
+  in-memory, ładowarka, osobne testy bezpieczeństwa — wszystko bez Dockera/DB/sieci.
+- Dokumentacja: `docs/NARZEDZIA.md`, ADR-0005; aktualizacja ARCHITEKTURA/ROADMAP.
+
 ### Dodane (Etap 2 — rdzeń agentów i orkiestrator „Husarz")
 - Pakiet `husarz.agents`: `BaseAgent`, `Towarzysz`, `Pocztowy`, `AgentResult`,
   protokół `SupportsComplete` oraz `build_agents(config, prompts_dir)` — ładowarka

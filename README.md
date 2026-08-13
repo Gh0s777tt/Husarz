@@ -7,8 +7,10 @@ husarski), w pełni konfigurowalna, z własnym launcherem i interfejsem WWW,
 zaprojektowana pod **suwerenność danych**: modele i dane **nie opuszczają
 infrastruktury użytkownika bez wyraźnej zgody**. Domyślnie **deny-all egress**.
 
-> Status: **Etapy 0–2 ukończone** — szkielet + loader konfiguracji, router modeli,
-> rdzeń agentów i orkiestrator „Husarz". Kolejne etapy: patrz [ROADMAP.md](ROADMAP.md).
+> Status: **Etapy 0–3 ukończone** — szkielet + loader konfiguracji, router modeli,
+> rdzeń agentów i orkiestrator „Husarz", narzędzia + sandbox. Realne wykonanie
+> sandboxa (Docker+gVisor) i pgvector — w środowisku z tymi zależnościami (Etap 6).
+> Kolejne etapy: patrz [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -126,6 +128,7 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 - [docs/ARCHITEKTURA.md](docs/ARCHITEKTURA.md) — architektura i przepływy.
 - [docs/ROUTER.md](docs/ROUTER.md) — router modeli (wybór, fallbacki, koszty).
 - [docs/ORKIESTRATOR.md](docs/ORKIESTRATOR.md) — rdzeń agentów i hetman „Husarz".
+- [docs/NARZEDZIA.md](docs/NARZEDZIA.md) — narzędzia i sandbox (allowlisty, izolacja).
 - [docs/AGENCI.md](docs/AGENCI.md) — role i konfiguracja agentów.
 - [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) — model bezpieczeństwa i weryfikacje.
 - [docs/adr/](docs/adr/) — rejestr decyzji architektonicznych (ADR).

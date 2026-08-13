@@ -24,6 +24,8 @@ sandbox:
   workspace_only: true       # dostęp wyłącznie do katalogu workspace
   command_allowlist: []      # np. ["python", "pytest", "git"] — ustawiane per profil
   path_allowlist: []         # dodatkowe ścieżki tylko-do-odczytu
+  image: husarz-sandbox:latest   # obraz kontenera narzędzi (budowany lokalnie, Etap 6)
+  runtime_class: runsc           # gVisor; null dla zwykłego Dockera
 
 mtls:
   enabled: false             # włącz w prod; materiały przez sekrety, nie w repo
