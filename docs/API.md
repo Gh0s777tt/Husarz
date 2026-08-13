@@ -45,7 +45,7 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 | `GET /api/tools`          | narzędzia (kind, egress) | `config:read` |
 | `GET /api/audit?limit=N`  | wpisy audytu + `verified`; `limit` w zakresie `0..10000` (`0` → pusto) | `audit:read` |
 | `GET /api/usage`          | monitor: `orchestrations`, `chats`, `failures`, limity kosztów | `config:read` |
-| `POST /api/chat`          | `{messages, model?, temperature?, attachments?}` → **bezpośredni czat** z jednym modelem (szybki, konwersacyjny + kodowanie). Model z `models.chat` lub `default` | `agent:run` |
+| `POST /api/chat`          | `{messages, model?, temperature?, attachments?, images?}` → **bezpośredni czat** z jednym modelem (szybki, konwersacyjny + kodowanie). Model z `models.chat` lub `default` | `agent:run` |
 | `POST /api/orchestrate`   | `{task}` → hetman wieloagentowy. Brak routera → 503; błąd routera → 429/502/503 (nie 500) | `agent:run` |
 | `POST /api/config/validate` | `{overrides}` → walidacja nadpisań runtime (tylko odczyt) | `config:read` |
 | `POST /api/config/runtime`  | `{overrides}` → walidacja + zastosowanie w pamięci; **przebudowuje orkiestrator** (audytowane) | `config:write` |
@@ -60,13 +60,18 @@ brak modelu → `503`, awaria wszystkich modeli → `502` (surowa treść błęd
 
 - **Czat bezpośredni** (`POST /api/chat`) — rozmowa z JEDNYM modelem (`models.chat`,
   domyślnie lokalny `husarz-local` z Ollamy). Szybki, konwersacyjny, do kodowania.
-  Ciało: `{"messages": [...], "model"?: "...", "temperature"?: 0.3, "attachments"?: [...]}`.
+  Ciało: `{"messages": [...], "model"?: "...", "temperature"?: 0.3, "attachments"?: [...], "images"?: [...]}`.
   Persona (hetman, PL, kod w blokach) jest zaszyta w modelu — patrz [ollama/README.md](../ollama/README.md).
   **Załączniki** (`attachments: [{name, content}]`) — pliki/foldery jako kontekst.
   Treść jest NIEZAUFANA: serwer egzekwuje limity (`chat.attachments` — liczba, rozmiar
   per plik/łączny), czyści nazwy (basename), odrzuca dane binarne i **ogradza** blok
   jako dane referencyjne (anty-prompt-injection). Przekroczenie/binaria → `400`.
-  Obrazy wymagają modelu wizyjnego (poza tą wersją). Limit tokenów obejmuje też kontekst.
+  **Obrazy** (`images: [{name, data}]`, `data` = base64) — dla modeli **wizyjnych**
+  (`models: vision: true`, np. `husarz-vision` z llava/qwen2-vl w Ollamie). Serwer
+  rozpoznaje typ z **magic-bytes** (png/jpeg/gif/webp — nie ufa deklarowanemu MIME),
+  egzekwuje limity (`chat.images` — liczba, rozmiar per obraz) i przekazuje obraz jako
+  część multimodalną (`image_url` z data-URI). Model bez `vision` lub dane nie-obraz →
+  `400`. Limit tokenów obejmuje też kontekst.
 - **Orkiestracja** (`POST /api/orchestrate`) — pełna pętla wieloagentowa (plan → deleguj
   → synteza) hetmana „Husarz". Cięższa; do złożonych, wieloetapowych zadań.
 

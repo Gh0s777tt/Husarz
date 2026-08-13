@@ -111,6 +111,13 @@ class AttachmentIn(BaseModel):
     content: str = Field(max_length=8_000_000)
 
 
+class ImageIn(BaseModel):
+    """Obraz do czatu: nazwa + base64 (bez prefiksu ``data:``). Typ sniffowany na serwerze."""
+
+    name: str = Field(min_length=1, max_length=256)
+    data: str = Field(min_length=1, max_length=8_000_000)
+
+
 class ChatRequest(BaseModel):
     """Żądanie bezpośredniego czatu (jeden model, bez orkiestracji wieloagentowej)."""
 
@@ -121,6 +128,8 @@ class ChatRequest(BaseModel):
     # Załączniki (pliki/foldery) dołączane jako ogrodzony kontekst NIEZAUFANY.
     # Twardy sufit liczby na poziomie schematu; precyzyjny limit — z configu.
     attachments: list[AttachmentIn] = Field(default_factory=list, max_length=1000)
+    # Obrazy (modele wizyjne) — twardy sufit liczby; precyzyjne limity z configu.
+    images: list[ImageIn] = Field(default_factory=list, max_length=50)
 
 
 class ChatReply(BaseModel):

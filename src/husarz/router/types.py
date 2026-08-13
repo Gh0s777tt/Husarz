@@ -13,12 +13,22 @@ from typing import Any
 ROLES = ("system", "user", "assistant", "tool")
 
 
+@dataclass(slots=True, frozen=True)
+class ImagePart:
+    """Obraz dołączony do wiadomości (multimodal). ``data_b64`` to base64 BEZ prefiksu
+    ``data:``; ``mime`` jest typem rozpoznanym z bajtów (nie zadeklarowanym przez klienta)."""
+
+    mime: str
+    data_b64: str
+
+
 @dataclass(slots=True)
 class ChatMessage:
-    """Pojedyncza wiadomość w konwersacji."""
+    """Pojedyncza wiadomość w konwersacji (opcjonalnie z obrazami — modele wizyjne)."""
 
     role: str
     content: str
+    images: list[ImagePart] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.role not in ROLES:

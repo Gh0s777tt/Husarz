@@ -332,3 +332,39 @@ Przegląd (3 wymiary, 11 findingów, 11 potwierdzonych — w tym blocker SSRF) i
 
 **Ograniczenia:** ochrona przed DNS-rebinding (walidacja po rozwiązaniu nazwy) —
 do rozważenia; egzekwowanie egress to warstwa aplikacji (pełne wymuszenie: NetworkPolicy).
+
+### Etap 11 — zdjęcia w czacie / modele wizyjne (data: 2026-08-13)
+
+**Zakres:** obrazy jako wejście `POST /api/chat` dla modeli wizyjnych. Wejście
+NIEZAUFANE — weryfikowane z bajtów, bez egressu.
+
+| Niezmiennik | Test |
+|---|---|
+| Typ z magic-bytes (png/jpeg/gif/webp), nie z deklarowanego MIME/rozszerzenia | `test_sniff_recognizes_formats`, `test_chat_rejects_non_image_bytes` |
+| Dane nie-obraz (poprawny base64, ale nie obraz) → odrzucone `400` | `test_reject_non_image`, `test_chat_rejects_non_image_bytes` |
+| Błędny base64 → odrzucony (bez wyjątku niekontrolowanego) | `test_reject_bad_base64` |
+| Limit liczby / rozmiaru per obraz egzekwowany | `test_reject_too_many_images`, `test_reject_too_large_image` |
+| Wyłączone obrazy w configu → odrzucone | `test_reject_when_disabled` |
+| Bramka `vision`: model bez `vision:true` → obraz odrzucony `400` | `test_chat_image_rejected_on_non_vision_model` |
+| Brak egressu: obraz jako data-URI (base64), nie zewnętrzny URL (brak SSRF) | `test_message_payload_with_images_is_multimodal`, `test_client_sends_multimodal_payload` |
+| Treść tekstowa bez obrazów pozostaje `str` (brak zmian dla modeli tekstowych) | `test_message_payload_plain_text` |
+
+**Ograniczenia:** brak głębszej inspekcji zawartości obrazu (np. polyglot PNG/HTML,
+zip-bomby graficzne) — chroni limit rozmiaru i re-enkodowanie; jakość i bezpieczeństwo
+interpretacji obrazu zależą od lokalnego modelu wizyjnego (poza rdzeniem).
+
+### Etap 11 — hardening po przeglądzie adwersaryjnym (data: 2026-08-13)
+
+Przegląd (3 wymiary, 5 potwierdzonych findingów → 3 odrębne przyczyny) i utwardzenia:
+
+| Poprawka | Test |
+|---|---|
+| Bramka vision egzekwowana na KAŻDYM kandydacie routera — po awarii modelu wizyjnego obraz nie trafia do modelu tekstowego przez fallback (ADR-0013 end-to-end) | `test_images_skip_nonvision_fallback`, `test_images_use_vision_fallback` |
+| Brak obrazów → łańcuch fallbacków działa normalnie (bramka nie zawęża) | `test_no_images_still_falls_back_to_text` |
+| Limit ciała odporny na `Transfer-Encoding: chunked` (bez `Content-Length`) — bufor z twardym sufitem, czyste `413`, brak pre-auth OOM | `test_chunked_body_over_limit_returns_413_end_to_end`, `test_body_limit_blocks_chunked_over_limit`, `test_body_limit_single_huge_chunk_not_buffered` |
+| Pojedynczy nadmiarowy chunk nie wchodzi do pamięci (sprawdzenie przed doklejeniem) | `test_body_limit_single_huge_chunk_not_buffered` |
+| Obrazy wiązane z ostatnią wiadomością `user`; brak `user` + obraz → `400` | `test_image_binds_to_last_user_not_assistant`, `test_image_rejected_without_user_message` |
+
+**Ograniczenia:** `BodySizeLimitMiddleware` buforuje ciało (wszystkie endpointy czytają
+JSON w całości — brak strat); dla realnie strumieniowych uploadów wymagałby trybu
+przepływowego. Sufit pamięci ≈ `max_request_bytes` + jeden bufor odczytu serwera.

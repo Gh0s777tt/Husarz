@@ -81,10 +81,21 @@ class ModelRouter:
 
         request = self._apply_cost_controls(request)
 
+        # Bramka wizyjna na poziomie KANDYDATA (nie tylko modelu wybranego w handlerze):
+        # jeśli żądanie niesie obrazy, wykonać je może wyłącznie model z ``vision: true``.
+        # Inaczej łańcuch fallbacków wysłałby treść multimodalną do modelu tekstowego
+        # (cichy błąd/halucynacja) — patrz ADR-0013. Obraz NIE trafia do modelu bez wizji.
+        requires_vision = any(m.images for m in request.messages)
+
         egress = self._config.security.egress
         failures: list[tuple[str, str]] = []
         for model_id in candidates:
             spec = self._config.models.registry[model_id]
+            if requires_vision and not spec.vision:
+                failures.append(
+                    (model_id, "model nie obsługuje obrazów (vision:false) — pominięto")
+                )
+                continue
             # Bramka egress (deny-all): nie łączymy się ze zdalnym hostem spoza allowlisty.
             try:
                 check_endpoint_allowed(spec.endpoint, egress)

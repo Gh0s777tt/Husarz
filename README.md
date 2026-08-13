@@ -114,6 +114,8 @@ python -m husarz.launcher.cli up --profile dev      # http://127.0.0.1:8000/
 
 Zakładka **Czat** rozmawia bezpośrednio z modelem (`POST /api/chat`) — dymki, Markdown,
 bloki kodu z „kopiuj". Przełącznik **Orkiestracja** uruchamia hetmana wieloagentowego.
+Przycisk 📎 dołącza **pliki, foldery i zdjęcia**; obrazy wymagają modelu wizyjnego
+(`models: vision: true`, np. `husarz-vision`) — typ rozpoznawany z bajtów, bez egressu.
 Szczegóły: [ollama/README.md](ollama/README.md), [docs/API.md](docs/API.md).
 
 ## Konfiguracja

@@ -13,7 +13,7 @@ from typing import Any, Protocol, runtime_checkable
 from husarz.config.schema import ModelBackend, ModelSpec
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
 from husarz.router.errors import ModelBackendError, TransportError
-from husarz.router.types import ChatRequest, ChatResponse, Usage
+from husarz.router.types import ChatMessage, ChatRequest, ChatResponse, Usage
 
 DEFAULT_TIMEOUT_SECONDS = 60
 
@@ -106,6 +106,21 @@ def _parse_openai_response(data: dict[str, Any], model_id: str) -> ChatResponse:
     )
 
 
+def _message_payload(m: ChatMessage) -> dict[str, Any]:
+    """Serializuje wiadomość do formatu OpenAI. Z obrazami — treść jako lista części
+    (text + image_url z data-URI), zgodnie ze standardem multimodal chat/completions."""
+    if not m.images:
+        return {"role": m.role, "content": m.content}
+    parts: list[dict[str, Any]] = []
+    if m.content:
+        parts.append({"type": "text", "text": m.content})
+    for img in m.images:
+        parts.append(
+            {"type": "image_url", "image_url": {"url": f"data:{img.mime};base64,{img.data_b64}"}}
+        )
+    return {"role": m.role, "content": parts}
+
+
 class OpenAICompatClient:
     """Klient dowolnego backendu zgodnego z OpenAI (vLLM/Ollama/SGLang)."""
 
@@ -141,7 +156,7 @@ class OpenAICompatClient:
         if request.stop:
             payload["stop"] = request.stop
         payload["model"] = self.spec.model
-        payload["messages"] = [{"role": m.role, "content": m.content} for m in request.messages]
+        payload["messages"] = [_message_payload(m) for m in request.messages]
 
         headers = {"Content-Type": "application/json"}
         if self._api_key:

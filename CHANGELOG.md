@@ -5,6 +5,37 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 11 — zdjęcia w czacie / modele wizyjne)
+- Obrazy w `POST /api/chat` (`images: [{name, data}]`, `data` = base64) dla modeli
+  **wizyjnych**. Typ rozpoznawany z **magic-bytes** (png/jpeg/gif/webp) — serwer NIE ufa
+  deklarowanemu MIME; obraz przekazywany jako część multimodalna OpenAI-compat
+  (`image_url` z data-URI) do backendu (Ollama llava/qwen2-vl).
+- Router: `ChatMessage.images: list[ImagePart]` + `_message_payload` buduje treść
+  multimodalną (`[{type:text}, {type:image_url}]`) tylko gdy są obrazy (inaczej `str`).
+- Konfiguracja: `ModelSpec.vision: bool` (bramka), sekcja `chat.images`
+  (`enabled`, `max_images`, `max_bytes_per_image`), model `husarz-vision` w rejestrze,
+  `chat.max_request_bytes` podniesione do 12 MB (base64 ~+33%).
+- Bezpieczeństwo: `sanitize_images` — limit liczby/rozmiaru, dekodowanie base64 z
+  walidacją, sniff magic-bytes, re-enkodowanie znormalizowanej treści; model bez
+  `vision` lub dane nie-obraz → `400`. Bez egressu (data-URI, brak pobierania z URL).
+- Konsola: przycisk 📎 przyjmuje też obrazy (chip 🖼), wysyłane jako base64; czyszczone
+  po wysłaniu / zmianie trybu / resecie.
+- Testy: +13 (`tests/unit/test_images.py` — sniff, sanityzacja, payload multimodalny,
+  bramka vision w API). Docs: `docs/API.md`, ADR-0013.
+
+### Poprawione (adwersaryjny przegląd Etapu 11)
+- Przegląd (3 wymiary, 5 potwierdzonych findingów, 3 odrębne przyczyny) i utwardzenia:
+- **Bramka vision na łańcuchu fallbacków**: `ModelRouter.complete` pomija kandydatów
+  z `vision:false`, gdy żądanie niesie obrazy — po awarii modelu wizyjnego obraz NIE
+  trafia już do modelu tekstowego przez fallback (cichy błąd/halucynacja). Niezmiennik
+  z ADR-0013 egzekwowany end-to-end, nie tylko na modelu wybranym w handlerze.
+- **Limit ciała odporny na `Transfer-Encoding: chunked`**: `BodySizeLimitMiddleware`
+  (czyste ASGI) buforuje ciało z twardym sufitem i zwraca czyste `413` — żądanie bez
+  `Content-Length` nie omija już kontroli ani nie grozi OOM (pre-auth DoS) przed walidacją.
+- **Obrazy wiązane z ostatnią wiadomością `user`** (nie ślepo z `messages[-1]`) — brak
+  obrazu na wiadomości `assistant`/`system`; konwersacja bez `user` + obraz → `400`.
+- Testy: +10 (`tests/unit/test_etap11_fixes.py`). Docs: ADR-0013, `docs/BEZPIECZENSTWO.md`.
+
 ### Dodane (Etap 10 — pobierany launcher)
 - Launcher desktopowy `husarz-app` (`husarz.launcher.app`): bez argumentów startuje
   serwer na loopbacku i **otwiera konsolę w przeglądarce**; deleguje do `husarz up

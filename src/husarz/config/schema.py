@@ -148,6 +148,8 @@ class ModelSpec(_StrictModel):
     api_key_ref: str | None = None
     request_timeout_seconds: int | None = Field(default=None, ge=1)
     tags: list[str] = Field(default_factory=list)
+    # Model wizyjny (multimodal) — może przyjmować obrazy w czacie.
+    vision: bool = False
     context_length: int = 8192
     max_tokens: int | None = None
     # Ścieżka do lokalnych wag (katalog models/ jest w .gitignore).
@@ -500,13 +502,23 @@ class AttachmentsConfig(_StrictModel):
     max_total_bytes: int = Field(default=1_000_000, ge=1)  # ~1 MB łącznego kontekstu
 
 
+class ImagesConfig(_StrictModel):
+    """Limity obrazów w czacie (modele wizyjne). Treść binarna — sniffowana z bajtów."""
+
+    enabled: bool = True
+    max_images: int = Field(default=4, ge=1)
+    max_bytes_per_image: int = Field(default=2_000_000, ge=1)  # ~2 MB (dekodowane)
+
+
 class ChatConfig(_StrictModel):
     """Ustawienia trybu czatu (config/chat.yaml). Opcjonalny — działają wartości domyślne."""
 
     attachments: AttachmentsConfig = Field(default_factory=AttachmentsConfig)
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
     # Twardy limit rozmiaru ciała żądania (ochrona pamięci przed OOM podczas ingestii,
-    # zanim logika limitów załączników cokolwiek przytnie). Odrzucenie → HTTP 413.
-    max_request_bytes: int = Field(default=8_000_000, ge=1024)
+    # zanim logika limitów cokolwiek przytnie). Podniesiony, by zmieścić kilka obrazów
+    # (base64 ~+33%). Odrzucenie → HTTP 413.
+    max_request_bytes: int = Field(default=12_000_000, ge=1024)
 
 
 class GitConfig(_StrictModel):

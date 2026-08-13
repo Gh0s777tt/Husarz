@@ -130,7 +130,7 @@
           </div>
           <div id="attach-bar" class="attach-bar"></div>
           <div class="chat-row">
-            <button id="attach-btn" class="link" type="button" title="Dodaj pliki">📎</button>
+            <button id="attach-btn" class="link" type="button" title="Dodaj pliki / obrazy">📎</button>
             <button id="attach-folder-btn" class="link" type="button" title="Dodaj folder">📁</button>
             <textarea id="msg" rows="2" placeholder="Napisz wiadomość…  (Enter wysyła, Shift+Enter — nowa linia)"></textarea>
             <button class="primary" id="send">Wyślij</button>
@@ -500,6 +500,7 @@
     function resetChat() {
       history.length = 0;
       attachments = [];
+      chatImages = [];
       renderAttachBar();
       log().innerHTML = "";
       bubble("assistant",
@@ -508,26 +509,40 @@
         "<em>Orkiestracja</em> uruchamia hetmana wieloagentowego.", "Husarz");
     }
 
-    // --- Załączniki (pliki/foldery) czytane po stronie klienta ---
+    // --- Załączniki (pliki tekstowe / foldery) i obrazy — czytane po stronie klienta ---
     let attachments = [];
+    let chatImages = [];
     function renderAttachBar() {
       const bar = $("attach-bar");
-      bar.innerHTML = attachments.map((a, i) =>
+      const fileChips = attachments.map((a, i) =>
         `<span class="chip"><span class="nm">📄 ${esc(a.name)}</span>` +
-        `<button class="chip-x" type="button" data-i="${i}">×</button></span>`).join("");
+        `<button class="chip-x" type="button" data-t="a" data-i="${i}">×</button></span>`);
+      const imgChips = chatImages.map((a, i) =>
+        `<span class="chip"><span class="nm">🖼 ${esc(a.name)}</span>` +
+        `<button class="chip-x" type="button" data-t="i" data-i="${i}">×</button></span>`);
+      bar.innerHTML = fileChips.concat(imgChips).join("");
       bar.querySelectorAll(".chip-x").forEach((b) => b.onclick = () => {
-        attachments.splice(+b.dataset.i, 1); renderAttachBar();
+        (b.dataset.t === "i" ? chatImages : attachments).splice(+b.dataset.i, 1);
+        renderAttachBar();
       });
     }
     function readFiles(fileList) {
       Array.from(fileList || []).forEach((f) => {
         const reader = new FileReader();
-        reader.onload = () => {
-          const name = f.webkitRelativePath || f.name;
-          attachments.push({ name, content: String(reader.result || "") });
-          renderAttachBar();
-        };
-        reader.readAsText(f);  // tekst; pliki binarne odrzuci serwer
+        if (f.type && f.type.startsWith("image/")) {
+          reader.onload = () => {
+            const b64 = String(reader.result || "").split(",")[1] || "";  // po 'data:...;base64,'
+            chatImages.push({ name: f.name, data: b64 });
+            renderAttachBar();
+          };
+          reader.readAsDataURL(f);  // obraz → base64 (typ sniffowany na serwerze)
+        } else {
+          reader.onload = () => {
+            attachments.push({ name: f.webkitRelativePath || f.name, content: String(reader.result || "") });
+            renderAttachBar();
+          };
+          reader.readAsText(f);  // tekst; pliki binarne odrzuci serwer
+        }
       });
     }
     function applyMode() {
@@ -536,7 +551,7 @@
       $("attach-btn").disabled = !chat;
       $("attach-folder-btn").disabled = !chat;
       $("attach-btn").style.opacity = $("attach-folder-btn").style.opacity = chat ? "1" : ".4";
-      if (!chat && attachments.length) { attachments = []; renderAttachBar(); }
+      if (!chat && (attachments.length || chatImages.length)) { attachments = []; chatImages = []; renderAttachBar(); }
     }
     function wireAttachments() {
       $("attach-btn").onclick = () => $("file-input").click();
@@ -552,20 +567,22 @@
       const mode = document.querySelector("input[name=mode]:checked").value;
       $("msg").value = "";
       const sent = mode === "chat" ? attachments.slice() : [];
+      const sentImages = mode === "chat" ? chatImages.slice() : [];
+      const nAtt = sent.length + sentImages.length;
       // Nie czyścimy tu — czyszczenie dopiero po sukcesie (przy błędzie zostają do ponowienia).
-      addUser(text + (sent.length ? `\n\n📎 ${sent.length} załącznik(ów)` : ""));
+      addUser(text + (nAtt ? `\n\n📎 ${nAtt} załącznik(ów)` : ""));
       const out = bubble("assistant", '<span class="typing">Husarz pisze…</span>', "Husarz");
       try {
         if (mode === "chat") {
           history.push({ role: "user", content: text });
           const d = await api("chat", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ messages: history, attachments: sent }),
+            body: JSON.stringify({ messages: history, attachments: sent, images: sentImages }),
           });
           if (d && d.content !== undefined) {
             out.innerHTML = renderMarkdown(d.content); wireCopy(out.parentElement);
             history.push({ role: "assistant", content: d.content });
-            if (sent.length) { attachments = []; renderAttachBar(); }  // czyść po sukcesie
+            if (nAtt) { attachments = []; chatImages = []; renderAttachBar(); }  // czyść po sukcesie
             if (d.model) $("chat-model").textContent = "model: " + d.model;
           } else {
             history.pop();

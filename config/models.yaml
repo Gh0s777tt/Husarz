@@ -41,6 +41,20 @@ registry:
       temperature: 0.3
     fallback: [hermes]
 
+  # --- Model wizyjny (opcjonalny): obrazy w czacie ---
+  # Wymaga modelu multimodalnego w Ollamie, np. `ollama pull llava` lub `qwen2-vl`.
+  # Ustaw models.chat: husarz-vision, aby czat przyjmował zdjęcia.
+  husarz-vision:
+    backend: ollama
+    model: llava # lub inny model wizyjny dostępny w Ollamie
+    endpoint: http://localhost:11434/v1
+    tags: [chat, vision, general]
+    vision: true # zezwala na obrazy w /api/chat
+    context_length: 8192
+    params:
+      temperature: 0.3
+    fallback: [husarz-local]
+
   # --- Model polski: Bielik-11B-v3.0-Instruct (język i zadania PL) ---
   bielik:
     backend: ollama

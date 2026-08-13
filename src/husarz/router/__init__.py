@@ -33,7 +33,7 @@ from husarz.router.errors import (
 from husarz.router.rate_limit import RateLimiter
 from husarz.router.router import ClientFactory, ModelRouter
 from husarz.router.selection import select_candidates
-from husarz.router.types import ChatMessage, ChatRequest, ChatResponse, Usage
+from husarz.router.types import ChatMessage, ChatRequest, ChatResponse, ImagePart, Usage
 
 __all__ = [
     "AllModelsFailedError",
@@ -43,6 +43,7 @@ __all__ = [
     "ClientFactory",
     "EgressError",
     "HttpxTransport",
+    "ImagePart",
     "MockClient",
     "ModelBackendError",
     "ModelClient",

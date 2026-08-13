@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import hmac
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from husarz import __version__
 from husarz.accounts import AccountService, Principal
@@ -59,13 +61,18 @@ from husarz.api.schemas import (
     ValidateRequest,
     ValidateResponse,
 )
-from husarz.attachments import AttachmentError, build_context_block, sanitize_attachments
+from husarz.attachments import (
+    AttachmentError,
+    build_context_block,
+    sanitize_attachments,
+    sanitize_images,
+)
 from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
 from husarz.git import GitConnection, GitProviderKind, GitService
 from husarz.git.errors import GitAuthError, GitConnectionError, GitError
 from husarz.orchestrator import Orchestrator, build_orchestrator
-from husarz.router import ChatMessage, Usage
+from husarz.router import ChatMessage, ImagePart, Usage
 from husarz.router import ChatRequest as RouterChatRequest
 from husarz.router.egress import EgressError
 from husarz.router.errors import (
@@ -78,6 +85,76 @@ from husarz.security.errors import AuditError
 from husarz.security.rbac import Rbac
 
 _STATIC_DIR = Path(__file__).parent / "static"
+
+
+class BodySizeLimitMiddleware:
+    """Twardy limit rozmiaru ciała żądania (ochrona przed OOM/DoS) — czyste ASGI.
+
+    Egzekwuje limit DWUTOROWO, bo kontrola oparta wyłącznie na nagłówku ``Content-Length``
+    jest omijana przez ``Transfer-Encoding: chunked`` (żądanie bez ``Content-Length``):
+
+    1. szybka ścieżka — zadeklarowany ``Content-Length`` ponad limit → ``413`` bez czytania ciała;
+    2. bufor z twardym sufitem — middleware sam czyta ciało, licząc bajty, i przerywa z ``413``
+       PRZED przekazaniem żądania do aplikacji, gdy tylko suma przekroczy limit; działa także
+       dla żądań chunked bez ``Content-Length``. Chunk, który przekroczyłby limit, NIE jest
+       doklejany do bufora (sufit pamięci ≈ ``max_bytes`` + jeden bufor odczytu serwera).
+
+    Ciało jest buforowane i ODTWARZANE dla aplikacji (wszystkie endpointy czytają ciało
+    w całości — JSON — więc utrata strumieniowania nie ma znaczenia). Dzięki temu 413 jest
+    czyste (aplikacja nie zdąży zamienić wyjątku na 400 „error parsing the body").
+    """
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self._app = app
+        self._max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        content_length = Headers(scope=scope).get("content-length")
+        if (
+            content_length is not None
+            and content_length.isdigit()
+            and int(content_length) > self._max_bytes
+        ):
+            await self._reject(scope, send)
+            return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                # http.disconnect (klient zerwał połączenie) — kończymy buforowanie.
+                break
+            chunk = message.get("body", b"")
+            # Sprawdzamy PRZED doklejeniem — pojedynczy nadmiarowy chunk nie wejdzie do pamięci.
+            if len(body) + len(chunk) > self._max_bytes:
+                await self._reject(scope, send)
+                return
+            body += chunk
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay_receive() -> Message:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return {"type": "http.disconnect"}
+
+        await self._app(scope, replay_receive, send)
+
+    async def _reject(self, scope: Scope, send: Send) -> None:
+        response = JSONResponse({"detail": "Żądanie przekracza limit rozmiaru."}, status_code=413)
+        await response(scope, _noop_receive, send)
+
+
+async def _noop_receive() -> Message:
+    """Pusty ``receive`` dla odpowiedzi 413 (odsyłamy bez czytania reszty ciała)."""
+    return {"type": "http.disconnect"}
+
 
 # Uprawnienia RBAC wymagane per endpoint (obszar:akcja — patrz husarz.security.rbac).
 _PERM_CONFIG_READ = "config:read"
@@ -136,18 +213,10 @@ def create_app(
     if trusted_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
 
-    max_request_bytes = config.chat.max_request_bytes
-
-    @app.middleware("http")
-    async def _limit_body_size(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        # Twardy limit rozmiaru ciała (ochrona przed OOM przy dużych załącznikach),
-        # sprawdzany z nagłówka Content-Length ZANIM ciało zostanie zmaterializowane.
-        cl = request.headers.get("content-length")
-        if cl is not None and cl.isdigit() and int(cl) > max_request_bytes:
-            return JSONResponse({"detail": "Żądanie przekracza limit rozmiaru."}, status_code=413)
-        return await call_next(request)
+    # Twardy limit rozmiaru ciała (ochrona OOM/DoS przy dużych załącznikach/obrazach).
+    # Czyste ASGI: egzekwuje limit też strumieniowo, więc 'Transfer-Encoding: chunked'
+    # (żądanie bez Content-Length) NIE omija kontroli — patrz BodySizeLimitMiddleware.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=config.chat.max_request_bytes)
 
     @app.exception_handler(AuditError)
     async def _audit_error_handler(request: Request, exc: AuditError) -> JSONResponse:
@@ -410,6 +479,30 @@ def create_app(
             context = build_context_block(atts)
             if context and messages:
                 messages[-1].content = f"{context}\n\n{messages[-1].content}"
+        # Obrazy (NIEZAUFANE, binarne) → wymagają modelu wizyjnego; sniff typu + limity.
+        if request.images:
+            spec = current_config.models.registry.get(model_id)
+            if spec is None or not spec.vision:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Model '{model_id}' nie obsługuje obrazów — użyj modelu wizyjnego "
+                    "(models: vision: true).",
+                )
+            try:
+                imgs = sanitize_images(
+                    [(im.name, im.data) for im in request.images], current_config.chat.images
+                )
+            except AttachmentError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # Obrazy wiąże się z OSTATNIĄ wiadomością użytkownika (nie ślepo z messages[-1] —
+            # ostatnia mogłaby być 'assistant'/'system', gdzie backend wizyjny obraz zignoruje).
+            target = next((m for m in reversed(messages) if m.role == "user"), None)
+            if target is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Obrazy wymagają wiadomości użytkownika (rola 'user').",
+                )
+            target.images = [ImagePart(mime=i.mime, data_b64=i.data_b64) for i in imgs]
         chat_request = RouterChatRequest(messages=messages, temperature=request.temperature)
         audit_log.record(
             "api",
@@ -418,6 +511,7 @@ def create_app(
                 "model": model_id,
                 "turns": len(request.messages),
                 "attachments": len(request.attachments),
+                "images": len(request.images),
             },
         )
         with counter_lock:

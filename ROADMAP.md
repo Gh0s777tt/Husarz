@@ -85,6 +85,17 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
   `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
 
+## ✅ Etap 11 — Zdjęcia w czacie (modele wizyjne)
+- ✅ `POST /api/chat` z `images` (base64) dla modeli `vision: true`; obraz jako część
+  multimodalna OpenAI-compat (`image_url` z data-URI) — bez pobierania z URL (brak SSRF).
+- ✅ Sniff typu z magic-bytes (png/jpeg/gif/webp; nie ufa MIME), `sanitize_images`
+  (limity liczby/rozmiaru, re-enkodowanie); bramka `vision` na modelu, inaczej `400`.
+- ✅ Config: `ModelSpec.vision`, `chat.images`, model `husarz-vision`, `max_request_bytes` 12 MB.
+- ✅ Konsola: 📎 przyjmuje obrazy (chip 🖼). Testy: +23. Docs: API.md, ADR-0013.
+- ✅ Hardening po przeglądzie (5 findingów): bramka vision na fallbackach routera,
+  limit ciała odporny na chunked (bez OOM), obrazy tylko na wiadomości `user`.
+- ⬜ OCR/kadrowanie po stronie serwera; galeria miniatur w konsoli.
+
 ## ✅ Etap 10 — Pobierany launcher
 - ✅ `husarz-app` (serwer + auto-otwarcie konsoli; deleguje do `husarz up --open`);
   frozen → config/prompts z bundla PyInstaller.
@@ -108,8 +119,8 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `POST /api/chat` z `attachments`; sekcja configu `chat` (`config/chat.yaml`).
 - ✅ Konsola: 📎 pliki / 📁 folder (FileReader, webkitdirectory), chipy załączników.
 - ✅ Testy: sanityzacja + integracja z /api/chat. Docs: API.md, ADR-0010.
-- ⬜ Zdjęcia (model wizyjny llava/qwen2-vl); chunkowanie/RAG dużych folderów
-  (pamięć długoterminowa — kandydat MemPalace/pgvector).
+- ✅ Zdjęcia (model wizyjny llava/qwen2-vl) — zrealizowane w Etapie 11.
+- ⬜ Chunkowanie/RAG dużych folderów (pamięć długoterminowa — kandydat MemPalace/pgvector).
 
 ## ✅ Etap 7 — Konta, sesje i limity tokenów
 - ✅ `husarz.accounts`: hasła `scrypt` (bez zależności), magazyn wstrzykiwalny,

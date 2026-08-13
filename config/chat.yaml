@@ -10,3 +10,13 @@ attachments:
   max_files: 20            # maks. liczba plików w jednym żądaniu
   max_bytes_per_file: 256000   # ~256 kB tekstu na plik (nadmiar → przycięcie)
   max_total_bytes: 1000000     # ~1 MB łącznego kontekstu (nadmiar → odrzucenie)
+
+# Obrazy w czacie (modele wizyjne). Typ rozpoznawany z bajtów (png/jpeg/gif/webp);
+# wymaga modelu z vision: true (patrz config/models.yaml, np. husarz-vision).
+images:
+  enabled: true
+  max_images: 4
+  max_bytes_per_image: 2000000   # ~2 MB na obraz (dekodowane)
+
+# Limit rozmiaru całego żądania (base64 obrazów ~+33%); nadmiar → HTTP 413.
+max_request_bytes: 12000000
