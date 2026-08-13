@@ -40,17 +40,17 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   na typowane pola per-kind.
 - ⬜ Wpięcie pętli narzędziowej (function-calling) do agenta Towarzysz.
 
-## ⬜ Etap 4 — Bezpieczeństwo
-- ⬜ Egress deny-all (runtime), mTLS, OIDC+RBAC, audit log niemodyfikowalny (hash-chain), filtry I/O.
-- ⬜ ROE-gate + agent Puszkarz (dry-run domyślnie, integracja narzędzi, bez generowania exploitów).
-  ROE-gate używa `RoeConfig.is_active_at(now)` (okno czasowe) i weryfikuje podpis
-  kryptograficznie przez dostawcę sekretów (nie tylko obecność referencji).
-- ⬜ Dostawcy sekretów Vault i SOPS/age.
-- ⬜ Runtime egzekwuje dwuwarstwowy egress (allowlisty narzędzi ⊆ globalna allowlista)
-  oraz izolację sandboxa; audyt każdego `runtime_override` sekcji `security`.
-  (Router ma już bramkę egress na poziomie aplikacji — Etap 1; tu domykamy warstwę sieciową.)
+## 🚧 Etap 4 — Bezpieczeństwo (rdzeń decyzyjny ✅; warstwa sieciowa ⬜ Etap 5/6)
+- ✅ Niemodyfikowalny audit log z łańcuchem skrótów (`husarz.security.audit`, `verify`).
+- ✅ ROE-gate + agent Puszkarz (dry-run domyślnie, `--authorized` dla akcji aktywnych,
+  blok celu spoza zakresu/poza oknem/bez aktywnego ROE, odmowa generowania ofensywy).
+- ✅ RBAC (role→uprawnienia z wildcardami).
+- ✅ Dostawcy sekretów File/SOPS/Vault (backendy wstrzykiwalne, testowalne).
+- ✅ Testy: blokada celu spoza ROE, wymóg `--authorized`, audyt kompletny i tamper-evident.
+- ⬜ Kryptograficzna weryfikacja podpisu ROE przez dostawcę sekretów (obecnie: obecność podpisu).
+- ⬜ Runtime egress deny-all na warstwie sieci + izolacja sandboxa (Etap 6), mTLS, OIDC
+  (uwierzytelnienie + przypisanie ról) — Etap 5 (API).
 - ⬜ Aktywować strategie routingu `cost`/`latency` (obecnie placeholdery; aktywne `tags`).
-- ⬜ Testy: blokada celu spoza ROE, wymóg `--authorized`, audyt kompletny.
 
 ## ⬜ Etap 5 — API + Launcher + Web
 - ⬜ REST/WS API rdzenia (FastAPI); launcher `husarz up --profile dev`.

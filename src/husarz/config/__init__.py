@@ -29,8 +29,11 @@ from husarz.config.schema import (
 )
 from husarz.config.secrets import (
     EnvSecretsProvider,
+    FileSecretsProvider,
     NullSecretsProvider,
     SecretsProvider,
+    SopsSecretsProvider,
+    VaultSecretsProvider,
     get_secrets_provider,
 )
 
@@ -43,6 +46,7 @@ __all__ = [
     "ConfigValidationError",
     "EgressPolicy",
     "EnvSecretsProvider",
+    "FileSecretsProvider",
     "HusarzConfig",
     "ModelBackend",
     "ModelSpec",
@@ -51,7 +55,9 @@ __all__ = [
     "RoeConfig",
     "SecretsProvider",
     "SecurityConfig",
+    "SopsSecretsProvider",
     "ToolConfig",
+    "VaultSecretsProvider",
     "get_secrets_provider",
     "load_config",
     "resolve_config_dir",

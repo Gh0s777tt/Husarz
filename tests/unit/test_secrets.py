@@ -32,7 +32,7 @@ def test_factory_none_and_env() -> None:
 
 
 @pytest.mark.parametrize("kind", [SecretsProviderKind.VAULT, SecretsProviderKind.SOPS])
-def test_factory_vault_sops_not_yet_implemented(kind: SecretsProviderKind) -> None:
-    """Vault/SOPS zgłaszają jasny NotImplementedError (Etap 4), nie cichy błąd."""
-    with pytest.raises(NotImplementedError, match="Etapie 4"):
+def test_factory_vault_sops_require_explicit_construction(kind: SecretsProviderKind) -> None:
+    """Vault/SOPS wymagają jawnej konstrukcji z parametrami (nie przez fabrykę kind)."""
+    with pytest.raises(ValueError, match="jawnej konstrukcji"):
         get_secrets_provider(kind)

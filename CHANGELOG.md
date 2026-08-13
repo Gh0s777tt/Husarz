@@ -5,6 +5,23 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 4 — bezpieczeństwo/ROE)
+- Pakiet `husarz.security`:
+  - **Audit log** niemodyfikowalny z łańcuchem skrótów (`AuditLog`, `verify`,
+    zapis append-only, zegar wstrzykiwalny); `build_audit_log(security)`.
+  - **ROE-gate** (`RoeGate`): twarda bramka Puszkarza — aktywność ROE, okno czasowe,
+    zakres (CIDR/domeny + `out_of_scope`), techniki, tryb; **dry-run domyślnie**,
+    akcja aktywna wymaga `authorized=True`. Każda decyzja audytowana.
+  - **Puszkarz** (`Puszkarz`): odmowa wytwarzania narzędzi ofensywnych (z propozycją
+    działania defensywnego); akcje na celach wyłącznie przez ROE-gate.
+  - **RBAC** (`Rbac`): role→uprawnienia z wildcardami `*` / `obszar:*`.
+- Dostawcy sekretów: `FileSecretsProvider` (konfinacja), `SopsSecretsProvider`,
+  `VaultSecretsProvider` (backendy wstrzykiwalne — testowalne bez sops/Vault).
+- Testy (łącznie 274): łańcuch skrótów + wykrywanie manipulacji, ROE-gate (dry-run,
+  `--authorized`, blok spoza zakresu/okna, techniki), odmowa ofensywy Puszkarza,
+  RBAC, dostawcy sekretów + osobne niezmienniki bezpieczeństwa.
+- Dokumentacja: ADR-0006; aktualizacja ARCHITEKTURA/BEZPIECZENSTWO/ROADMAP.
+
 ### Dodane (Etap 3 — narzędzia + sandbox)
 - Pakiet `husarz.tools`: `file_edit`, `shell`, `git`, `run_tests`, `web`, `rag`.
   - Konfinacja plików do workspace + deny-globi (`resolve_within_workspace`,

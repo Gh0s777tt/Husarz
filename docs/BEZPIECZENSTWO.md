@@ -134,3 +134,23 @@ Wdrożone poprawki bezpieczeństwa:
   dlatego sekrety/wagi muszą być POZA montowanym workspace (deny-globi to warstwa dodatkowa).
 - SSRF przez DNS rebinding (allowlistowana domena → adres wewnętrzny) wymaga pinowania IP — Etap 4/6.
 - Realne wykonanie sandboxa (Docker+gVisor) weryfikowane w środowisku z Dockerem — Etap 6.
+
+### Etap 4 — runtime bezpieczeństwa (data: 2026-08-13)
+
+**Zakres:** `husarz.security` — audit log, ROE-gate, Puszkarz, RBAC + dostawcy sekretów.
+
+| Niezmiennik                                                   | Test |
+|---------------------------------------------------------------|------|
+| Audit log tamper-evident (łańcuch skrótów; manipulacja wykryta) | `test_tampering_breaks_verification` |
+| ROE-gate: akcja domyślnie dry-run                             | `test_action_defaults_to_dry_run` |
+| ROE-gate: bez aktywnego ROE — blok nawet z `--authorized`     | `test_inactive_roe_hard_blocks` |
+| ROE-gate: cel spoza zakresu/out_of_scope — twardy blok        | `test_out_of_scope_hard_blocks`, `test_denies_target_outside_scope` |
+| ROE-gate: poza oknem czasowym / zabroniona technika — blok    | `test_denies_outside_time_window`, `test_denies_forbidden_and_unlisted_techniques` |
+| Puszkarz: odmowa generowania ofensywy                         | `test_puszkarz_refuses_offensive_generation` |
+| Każda decyzja audytowana z odniesieniem do ROE                | `test_every_decision_is_audited_and_tamper_evident` |
+| RBAC: role→uprawnienia (wildcardy), odmowa domyślna           | `test_operator_has_tool_wildcard_but_not_config_write` |
+| Sekrety: File konfinowany, SOPS/Vault po kluczu               | `test_file_secrets_provider_is_confined`, `test_sops_provider_navigates_key` |
+
+**Ograniczenia (Etap 5/6):** podpis ROE sprawdzany jako obecność referencji
+(kryptograficzna weryfikacja przez dostawcę sekretów — do dołożenia); uwierzytelnienie
+(OIDC), mTLS oraz runtime egress/sandbox enforcement — API (Etap 5) i deploy (Etap 6).

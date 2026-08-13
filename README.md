@@ -7,10 +7,10 @@ husarski), w pełni konfigurowalna, z własnym launcherem i interfejsem WWW,
 zaprojektowana pod **suwerenność danych**: modele i dane **nie opuszczają
 infrastruktury użytkownika bez wyraźnej zgody**. Domyślnie **deny-all egress**.
 
-> Status: **Etapy 0–3 ukończone** — szkielet + loader konfiguracji, router modeli,
-> rdzeń agentów i orkiestrator „Husarz", narzędzia + sandbox. Realne wykonanie
-> sandboxa (Docker+gVisor) i pgvector — w środowisku z tymi zależnościami (Etap 6).
-> Kolejne etapy: patrz [ROADMAP.md](ROADMAP.md).
+> Status: **Etapy 0–3 ukończone**, **Etap 4 — rdzeń bezpieczeństwa ukończony**
+> (ROE-gate, niemodyfikowalny audit log, Puszkarz, RBAC, dostawcy sekretów).
+> mTLS/OIDC, runtime egress/sandbox oraz realne wykonanie (Docker+gVisor, pgvector)
+> — w środowisku z tymi zależnościami (Etap 5/6). Kolejne: patrz [ROADMAP.md](ROADMAP.md).
 
 ---
 

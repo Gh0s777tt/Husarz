@@ -50,8 +50,12 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   `run_tests`, `web`, `rag`) z konfinacją, allowlistami i sandboxem bez sieci;
   executor/fetcher/backend wstrzykiwalne. Szczegóły: [NARZEDZIA.md](NARZEDZIA.md),
   [ADR-0005](adr/0005-narzedzia-sandbox.md).
-- Pozostałe pakiety (`core`, `memory`, `security`, `api`) to na razie
-  zaślepki z opisem roli i etapu wdrożenia.
+- **Pakiet `husarz.security`** (Etap 4) — niemodyfikowalny audit log (łańcuch
+  skrótów), ROE-gate (twarda bramka Puszkarza, dry-run domyślnie), agent Puszkarz
+  (odmowa ofensywy), RBAC oraz dostawcy sekretów File/SOPS/Vault. Szczegóły:
+  [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md), [ADR-0006](adr/0006-bezpieczenstwo-roe.md).
+- Pozostałe pakiety (`core`, `memory`, `api`) to na razie zaślepki z opisem roli
+  i etapu wdrożenia; mTLS/OIDC oraz runtime egress/sandbox — Etap 5/6.
 
 ## Hierarchia konfiguracji (zaimplementowana)
 
