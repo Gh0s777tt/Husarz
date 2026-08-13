@@ -1,0 +1,28 @@
+# ============================================================================
+# config/plugins/example-mcp.yaml — przykładowy konektor wtyczki (serwer MCP).
+# ----------------------------------------------------------------------------
+# Wtyczka = zewnętrzny serwer narzędzi MCP, z którym Husarz łączy się przez HTTP
+# JSON-RPC. Domyślnie WYŁĄCZONA (enabled: false) — deny-by-default. Nowy konektor
+# = nowy plik w config/plugins/, BEZ zmian w rdzeniu.
+#
+# Bezpieczeństwo (patrz docs/WTYCZKI.md, docs/BEZPIECZENSTWO.md):
+# - endpoint lokalny (loopback) jest dozwolony; host publiczny wymaga https oraz
+#   wpisu w security.egress.allowlist (deny-all). Adresy wewnętrzne/metadanych
+#   (169.254.169.254, 10.x, 192.168.x, ::ffff:… itd.) są TWARDO blokowane (SSRF).
+# - token to WYŁĄCZNIE referencja do sekretu (env:/file:/vault:/sops:), nigdy sama
+#   wartość. Rozwiązywany jest dopiero przy operacji, nie jest logowany.
+# ============================================================================
+
+name: example-mcp
+transport: http
+description: Przykładowy lokalny serwer narzędzi MCP (wyłączony).
+enabled: false
+
+# URL serwera MCP. Loopback (lokalny) — ruch nie opuszcza hosta.
+endpoint: http://127.0.0.1:8808/mcp
+
+# Token (opcjonalny) jako REFERENCJA do sekretu — nie sama wartość.
+token_ref: env:HUSARZ_MCP_TOKEN
+
+timeout_seconds: 30
+max_output_bytes: 1000000     # twardy limit odpowiedzi (ochrona przed OOM)

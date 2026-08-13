@@ -52,9 +52,11 @@ from husarz.api.schemas import (
     ObservationView,
     OrchestrateRequest,
     OrchestrateResponse,
+    PluginView,
     PullRequestIn,
     PullRequestView,
     RegisterRequest,
+    RemoteToolView,
     RepoView,
     ToolInfo,
     UsageResponse,
@@ -72,6 +74,14 @@ from husarz.config.errors import ConfigError
 from husarz.git import GitConnection, GitProviderKind, GitService
 from husarz.git.errors import GitAuthError, GitConnectionError, GitError
 from husarz.orchestrator import Orchestrator, build_orchestrator
+from husarz.plugins import PluginService
+from husarz.plugins.errors import (
+    PluginAuthError,
+    PluginDisabledError,
+    PluginError,
+    PluginNotFoundError,
+    PluginSecretError,
+)
 from husarz.router import ChatMessage, ImagePart, Usage
 from husarz.router import ChatRequest as RouterChatRequest
 from husarz.router.egress import EgressError
@@ -164,6 +174,7 @@ _PERM_AUDIT_READ = "audit:read"
 _PERM_GIT_READ = "git:read"
 _PERM_GIT_WRITE = "git:write"
 _PERM_GIT_PR = "git:pr"
+_PERM_PLUGIN_READ = "plugin:read"
 
 
 def _summary(config: HusarzConfig) -> ConfigSummary:
@@ -194,6 +205,7 @@ def create_app(
     rbac: Rbac | None = None,
     accounts: AccountService | None = None,
     git_service: GitService | None = None,
+    plugin_service: PluginService | None = None,
     chat_model: str | None = None,
     trusted_hosts: list[str] | None = None,
 ) -> FastAPI:
@@ -304,6 +316,7 @@ def create_app(
     dep_git_read = Depends(_require(_PERM_GIT_READ))
     dep_git_write = Depends(_require(_PERM_GIT_WRITE))
     dep_git_pr = Depends(_require(_PERM_GIT_PR))
+    dep_plugin_read = Depends(_require(_PERM_PLUGIN_READ))
 
     # /api/health celowo BEZ uwierzytelniania — sonda liveness (minimalne dane).
     @app.get("/api/health", response_model=HealthResponse)
@@ -761,6 +774,49 @@ def create_app(
             raise _git_http_error(exc) from exc
         return PullRequestView(number=pr.number, url=pr.url, title=pr.title)
 
+    # --- Wtyczki (konektory MCP): lista + odkrywanie narzędzi (discover) ---
+
+    def _require_plugins() -> PluginService:
+        if plugin_service is None:
+            raise HTTPException(status_code=404, detail="Wtyczki nie są włączone.")
+        return plugin_service
+
+    @app.get(
+        "/api/plugins",
+        response_model=list[PluginView],
+        dependencies=[dep_plugin_read],
+    )
+    def plugins_list() -> list[PluginView]:
+        svc = _require_plugins()
+        return [
+            PluginView(
+                name=p.name,
+                transport=p.transport,
+                endpoint=p.endpoint,
+                description=p.description,
+                enabled=p.enabled,
+                token_ref=p.token_ref,
+                timeout_seconds=p.timeout_seconds,
+                max_output_bytes=p.max_output_bytes,
+            )
+            for p in svc.list_plugins()
+        ]
+
+    @app.get(
+        "/api/plugins/{name}/tools",
+        response_model=list[RemoteToolView],
+        dependencies=[dep_plugin_read],
+    )
+    def plugin_tools(name: str) -> list[RemoteToolView]:
+        svc = _require_plugins()
+        # Audyt PRÓBY przed wyjściem na zewnątrz — także odrzucenia egress/nieznana wtyczka.
+        audit_log.record("api", "plugin.discover", {"plugin": name[:64]})
+        try:
+            tools = svc.discover(name)
+        except (PluginError, EgressError) as exc:
+            raise _plugin_http_error(exc) from exc
+        return [RemoteToolView(name=t.name, description=t.description) for t in tools]
+
     @app.get("/")
     def console() -> FileResponse:
         return FileResponse(_STATIC_DIR / "console.html", media_type="text/html")
@@ -824,3 +880,25 @@ def _git_provider(svc: GitService, name: str) -> Any:
         return svc.provider_for(name)
     except (GitError, EgressError) as exc:
         raise _git_http_error(exc) from exc
+
+
+def _plugin_http_error(exc: Exception) -> HTTPException:
+    """Mapuje wyjątki wtyczek na kody HTTP. Błędy transportu → generyczne 502 (bez wnętrzności)."""
+    if isinstance(exc, PluginNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, PluginDisabledError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, EgressError):
+        return HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, PluginSecretError):
+        # Lokalna błędna konfiguracja sekretu (nie wina serwera) → 500 z jasną przyczyną.
+        return HTTPException(
+            status_code=500,
+            detail="Nie udało się rozwiązać referencji sekretu wtyczki (sprawdź token_ref).",
+        )
+    if isinstance(exc, PluginAuthError):
+        return HTTPException(
+            status_code=502, detail="Autoryzacja u serwera wtyczki nie powiodła się."
+        )
+    # PluginTransportError / PluginError (bazowy) — generyczny komunikat, bez URL/wnętrzności.
+    return HTTPException(status_code=502, detail="Błąd serwera wtyczki.")

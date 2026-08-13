@@ -85,6 +85,17 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
   `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
 
+## ✅ Etap 12 — System wtyczek (rejestr narzędzi + konektor MCP)
+- ✅ 12a: `ToolProviderRegistry` (open/closed) zastępuje `if/elif` w `build_tools`;
+  nowy rodzaj = builder + `register`, bez zmian w rdzeniu. Wyłącznie first-party
+  (bez `entry_points`). Testy: +6. Docs: ADR-0014.
+- ✅ 12b: pakiet `husarz.plugins` — konektor MCP (HTTP JSON-RPC, transport wstrzykiwalny),
+  **odkrywanie** narzędzi (`tools/list`); anty-SSRF (loopback OK, metadane/IPv4-mapped
+  blok), token jako referencja, audyt, RBAC `plugin:read`, `config/plugins/*.yaml`.
+  API `/api/plugins*` + zakładka Wtyczki. Testy: +37. Docs: WTYCZKI.md, ADR-0015.
+- ⬜ Wywoływanie narzędzi (`tools/call`) + wpięcie w pętlę function-calling agenta
+  (z autoryzacją per-wywołanie); transport stdio; pełny handshake MCP.
+
 ## ✅ Etap 11 — Zdjęcia w czacie (modele wizyjne)
 - ✅ `POST /api/chat` z `images` (base64) dla modeli `vision: true`; obraz jako część
   multimodalna OpenAI-compat (`image_url` z data-URI) — bez pobierania z URL (brak SSRF).

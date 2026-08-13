@@ -368,3 +368,44 @@ Przegląd (3 wymiary, 5 potwierdzonych findingów → 3 odrębne przyczyny) i ut
 **Ograniczenia:** `BodySizeLimitMiddleware` buforuje ciało (wszystkie endpointy czytają
 JSON w całości — brak strat); dla realnie strumieniowych uploadów wymagałby trybu
 przepływowego. Sufit pamięci ≈ `max_request_bytes` + jeden bufor odczytu serwera.
+
+### Etap 12 — system wtyczek (konektory MCP) (data: 2026-08-13)
+
+**Zakres:** rejestr providerów narzędzi (12a) + konektor MCP z odkrywaniem narzędzi
+(12b). Powierzchnia ataku: zewnętrzny serwer narzędzi (mniej zaufany niż host operatora).
+Projekt z panelu 3 architektur + adwersaryjnej krytyki bezpieczeństwa (zakres zawężony
+do discover-only; domknięte: bypass IPv4-mapped, nietypowany `config`/`allowlist`,
+kolizja ROE, DoS wynikiem, wyciek transportu do audytu).
+
+| Niezmiennik | Test |
+|---|---|
+| Rejestr narzędzi: nieznany `kind` → `ToolError` (komunikat zachowany); rozszerzenie bez zmian w rdzeniu | `test_empty_registry_reports_kind_as_unknown`, `test_injected_registry_extends_without_core_change` |
+| Anty-SSRF: loopback dozwolony, adresy wewnętrzne/metadanych (w tym `::ffff:169.254.169.254`) TWARDY BLOK | `test_loopback_allowed`, `test_internal_and_metadata_hard_blocked` |
+| Host publiczny wymaga https + allowlisty egress; http poza loopbackiem odrzucone; userinfo odrzucone | `test_public_http_rejected_requires_https`, `test_public_https_without_allowlist_denied`, `test_userinfo_rejected` |
+| Odmowa egress/SSRF NIE wychodzi na sieć (transport nietknięty) | `test_blocked_endpoint_never_hits_transport`, `test_discover_blocked_endpoint_returns_403` |
+| Token WYŁĄCZNIE jako referencja; surowy token → walidacja odrzuca | `test_config_rejects_raw_token_reference` |
+| Token rozwiązywany leniwie, NIE wycieka do audytu/API/odpowiedzi; brak tokenu gdy wymagany → fail-closed | `test_discover_audited_without_token`, `test_list_plugins_hides_secret`, `test_service_missing_token_raises_auth` |
+| Audyt `plugin.discover` przed wyjściem; łańcuch niemodyfikowalny | `test_discover_audited_without_token` |
+| RBAC: rola `user` bez `plugin:read` → 403; deny-by-default → 404 | `test_rbac_user_cannot_read_plugins`, `test_plugins_404_when_disabled` |
+| Wynik NIEZAUFANY: limit `max_output_bytes` egzekwowany; koperta JSON-RPC + Bearer | `test_build_connector_uses_plugin_limits`, `test_list_tools_builds_jsonrpc_envelope_and_bearer` |
+
+**Ograniczenia:** brak pinowania IP → DNS-rebinding endpointu możliwy (jak `web`/`git`,
+odłożone). MVP odkrywa narzędzia, nie wywołuje ich — `tools/call` z autoryzacją
+per-wywołanie wchodzi z pętlą function-calling. Transport `stdio` (sandbox) poza MVP.
+Rejestr wtyczek jest first-party (bez `entry_points`) — brak wektora RCE/łańcucha dostaw.
+
+### Etap 12 — hardening po przeglądzie adwersaryjnym (data: 2026-08-13)
+
+Przegląd (3 wymiary, 6 potwierdzonych findingów) i utwardzenia:
+
+| Poprawka | Test |
+|---|---|
+| Anty-DNS-rebinding: nazwa rozwiązywana, każdy adres sprawdzony wobec bloku wewnętrznego; metadane/prywatne mimo allowlisty → blok | `test_domain_resolving_to_metadata_blocked`, `test_domain_resolving_to_private_blocked_under_allow_policy` |
+| Nierozwiązywalna nazwa → fail-closed (odmowa) | `test_unresolvable_domain_fails_closed` |
+| `security.egress.allowlist`: wpis pusty/whitespace/URL odrzucony przy starcie (koniec częściowego wildcardu) | `test_empty_allowlist_entry_rejected_at_config` |
+| Nierozwiązywalny `token_ref` → `PluginSecretError` → HTTP 500 (nie 502 „wina serwera") | `test_service_missing_token_raises_secret_error`, `test_unresolved_token_returns_500_not_502` |
+| Anty-„slow-drip": bezwzględny deadline wall-clock na pętli odczytu transportu | (obrona w kodzie: `HttpxPluginTransport`; brak realnej sieci w testach) |
+| TLS `verify=True` jawnie; martwe pole `protocol_version` usunięte | (spójność docs↔kod; walidacja schematu) |
+
+**Ograniczenia:** pełne pinowanie IP (okno TOCTOU) pozostaje odłożone; „slow-drip"
+deadline jest sprawdzany między chunkami (ograniczenie ~`timeout` + jeden odczyt).

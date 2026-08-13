@@ -154,6 +154,7 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 - [docs/API.md](docs/API.md) — REST API i konsola WWW (`husarz up`).
 - [docs/KONTA.md](docs/KONTA.md) — konta, logowanie/rejestracja, sesje, limity tokenów.
 - [docs/GIT.md](docs/GIT.md) — integracje GitHub/GitLab, połączenia, tworzenie PR/MR.
+- [docs/WTYCZKI.md](docs/WTYCZKI.md) — wtyczki/konektory MCP (rozszerzalność, egress, RBAC).
 - [docs/LAUNCHER.md](docs/LAUNCHER.md) — pobierany launcher (`husarz-app`, PyInstaller, CI).
 - [docs/DEPLOY.md](docs/DEPLOY.md) — wdrożenie: obrazy, compose (dev/prod/airgap), k8s.
 - [docs/AGENCI.md](docs/AGENCI.md) — role i konfiguracja agentów.

@@ -146,6 +146,18 @@ def _build_git(config: HusarzConfig) -> Any:
     return build_git_service(config.git, config.security, secrets=_SchemeSecrets())
 
 
+def _build_plugins(config: HusarzConfig) -> Any:
+    """Buduje usługę wtyczek z configu (lub None, gdy brak włączonych). Import leniwy."""
+    from husarz.plugins import HttpxPluginTransport, build_plugin_service  # noqa: PLC0415
+
+    return build_plugin_service(
+        config.plugins,
+        config.security,
+        secrets=_SchemeSecrets(),
+        transport=HttpxPluginTransport(),
+    )
+
+
 class _SchemeSecrets:
     """Dostawca sekretów rozwiązujący referencje po schemacie (env:/file:)."""
 
@@ -168,6 +180,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         api_token = _resolve_api_token(config)
         accounts = _build_accounts(config)
         git_service = _build_git(config)
+        plugin_service = _build_plugins(config)
     except ConfigError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -216,6 +229,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         api_token=api_token,
         accounts=accounts,
         git_service=git_service,
+        plugin_service=plugin_service,
         router_factory=_router_factory,
         trusted_hosts=trusted,
         prompts_dir=prompts,

@@ -113,6 +113,7 @@
     <button data-tab="config">Konfiguracja</button>
     <button data-tab="agents">Agenci</button>
     <button data-tab="git">Połączenia</button>
+    <button data-tab="plugins">Wtyczki</button>
     <button data-tab="audit">Audyt</button>
     <button data-tab="usage">Monitor</button>
   </nav>
@@ -194,6 +195,18 @@
         <textarea id="pr-body" rows="2" placeholder="opis (opcjonalnie)" style="margin-top:8px"></textarea>
         <button class="primary" id="pr-create">Utwórz PR</button>
         <pre id="pr-out" hidden></pre>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-plugins">
+      <div class="card">
+        <h3>Wtyczki (konektory MCP)</h3>
+        <p class="muted">Wtyczka = zewnętrzny serwer narzędzi MCP. Konfiguracja w <code>config/plugins/*.yaml</code> (źródło prawdy). Token podaj jako <b>referencję</b> (np. <code>env:HUSARZ_MCP_TOKEN</code>). Endpoint lokalny (loopback) jest dozwolony; host publiczny wymaga <code>https</code> i wpisu w <code>security.egress.allowlist</code>. MVP: odkrywanie narzędzi (bez wywoływania).</p>
+        <div id="plugins-list">…</div>
+      </div>
+      <div class="card">
+        <h3>Narzędzia wtyczki <span id="plugin-sel-name" class="muted"></span></h3>
+        <div id="plugin-tools" class="muted">Wybierz „sprawdź narzędzia" przy wtyczce powyżej.</div>
       </div>
     </section>
 
@@ -389,6 +402,31 @@
       };
     }
 
+    // --- Wtyczki (konektory MCP) ---
+    async function loadPlugins() {
+      const r = await fetch("/api/plugins", { headers: authHeaders() });
+      if (r.status === 404) { $("plugins-list").innerHTML = "<p class='muted'>Wtyczki nie są włączone (dodaj konektor w <code>config/plugins/</code> z <code>enabled: true</code>).</p>"; return; }
+      if (!r.ok) { $("plugins-list").innerHTML = `<p class='err'>${esc((await r.json()).detail || "Brak dostępu.")}</p>`; return; }
+      const items = await r.json();
+      $("plugins-list").innerHTML = items.length ? "<table><tr><th>Nazwa</th><th>Endpoint</th><th>token_ref</th><th>Włączona</th><th></th></tr>" +
+        items.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.endpoint)}</td><td>${esc(p.token_ref || "—")}</td><td>${p.enabled ? "tak" : "—"}</td>` +
+          `<td>${p.enabled ? `<button class="link p-tools" type="button" data-n="${esc(p.name)}">sprawdź narzędzia</button>` : "—"}</td></tr>`).join("") + "</table>"
+        : "<p class='muted'>Brak wtyczek.</p>";
+      $("plugins-list").querySelectorAll(".p-tools").forEach((b) => b.onclick = () => discoverPlugin(b.dataset.n));
+    }
+    async function discoverPlugin(name) {
+      $("plugin-sel-name").textContent = "· " + name;
+      $("plugin-tools").textContent = "…";
+      try {
+        const r = await fetch("/api/plugins/" + encodeURIComponent(name) + "/tools", { headers: authHeaders() });
+        const d = await r.json();
+        if (!Array.isArray(d)) { $("plugin-tools").innerHTML = `<span class="err">${esc(d.detail || "Błąd.")}</span>`; return; }
+        $("plugin-tools").innerHTML = d.length ? "<table><tr><th>Narzędzie</th><th>Opis</th></tr>" +
+          d.map((t) => `<tr><td>${esc(t.name)}</td><td>${esc(t.description || "—")}</td></tr>`).join("") + "</table>"
+          : "<span class='muted'>Serwer nie udostępnia narzędzi.</span>";
+      } catch (e) { $("plugin-tools").innerHTML = `<span class="err">Błąd sieci: ${esc(e.message || e)}</span>`; }
+    }
+
     async function boot() {
       wireAuth();
       wireAttachments();
@@ -405,6 +443,7 @@
       if (tab === "config") $("config-out").textContent = JSON.stringify(await api("config/summary"), null, 2);
       if (tab === "usage") $("usage-out").textContent = JSON.stringify(await api("usage"), null, 2);
       if (tab === "git") loadGit();
+      if (tab === "plugins") loadPlugins();
       if (tab === "agents") {
         const a = await api("agents");
         if (!Array.isArray(a)) { $("agents-out").innerHTML = `<p class='err'>${esc(a.detail || "Brak dostępu.")}</p>`; return; }

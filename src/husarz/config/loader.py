@@ -49,6 +49,7 @@ _SINGLE_FILES: dict[str, str] = {
 _MULTI_DIRS: dict[str, tuple[str, str]] = {
     "agents": ("agents", "name"),
     "tools": ("tools", "name"),
+    "plugins": ("plugins", "name"),
     "roe": ("roe", "engagement_id"),
 }
 
@@ -145,7 +146,7 @@ _KNOWN_SECTIONS: frozenset[str] = frozenset(_SINGLE_FILES) | frozenset(_MULTI_DI
 # Pola-kolekcje: segment BEZPOŚREDNIO po nich to klucz mapy (id modelu / nazwa
 # agenta itd.) i zachowuje oryginalną wielkość liter zamiast być zapisany małymi.
 _COLLECTION_FIELDS: frozenset[str] = frozenset(
-    {"registry", "agents", "tools", "roe", "agent_models"}
+    {"registry", "agents", "tools", "plugins", "roe", "agent_models"}
 )
 
 

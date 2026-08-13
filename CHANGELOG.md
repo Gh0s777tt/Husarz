@@ -5,6 +5,40 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 12b — wtyczki / konektory MCP)
+- Pakiet `husarz.plugins` (lustro `husarz.git`): konektor do zewnętrznego serwera
+  narzędzi **MCP** przez HTTP JSON-RPC nad WSTRZYKIWALNYM transportem. MVP:
+  **odkrywanie** narzędzi (`tools/list`); wywołanie wchodzi z pętlą function-calling.
+- Nowa sekcja `config/plugins/*.yaml` (`PluginConfig`): `endpoint`, `token_ref`
+  (referencja do sekretu, nie wartość), `timeout_seconds`, `max_output_bytes`.
+  Nowy konektor = nowy plik, bez zmian w rdzeniu.
+- Bezpieczeństwo: anty-SSRF `_validate_mcp_endpoint` (loopback dozwolony; adresy
+  wewnętrzne/metadanych — także IPv4-mapped IPv6 — twardo blokowane; host publiczny
+  wymaga https + `security.egress.allowlist`), token rozwiązywany leniwie i nigdy
+  nielogowany, wynik NIEZAUFANY z limitem `max_output_bytes` (podczas odczytu),
+  błędy transportu → generyczne 502, audyt `plugin.discover` przed wyjściem.
+- API: `GET /api/plugins`, `GET /api/plugins/{name}/tools` (RBAC `plugin:read`);
+  deny-by-default (brak włączonych wtyczek → 404). Konsola: zakładka **Wtyczki**.
+- Launcher: `_build_plugins` (HttpxPluginTransport + `_SchemeSecrets`). Przykład:
+  `config/plugins/example-mcp.yaml` (`enabled: false`).
+- Testy: +37 (unit + security SSRF + API). Docs: `docs/WTYCZKI.md`, ADR-0015.
+
+### Poprawione (adwersaryjny przegląd Etapu 12b)
+- Przegląd (3 wymiary, 6 potwierdzonych findingów) i utwardzenia:
+- **Anty-DNS-rebinding**: `_validate_mcp_endpoint` rozwiązuje nazwę domenową i sprawdza
+  KAŻDY zwrócony adres wobec bloku wewnętrznego (nazwa wskazująca metadane/adres
+  wewnętrzny blokowana mimo allowlisty); nierozwiązywalna nazwa → fail-closed. Resolver
+  wstrzykiwalny (testy bez DNS). Pełne pinowanie IP nadal odłożone.
+- **Anty-„slow-drip" DoS**: `HttpxPluginTransport` egzekwuje bezwzględny deadline
+  wall-clock na pętli odczytu (serwer sączący bajty nie blokuje już wątku puli).
+- **TLS `verify=True` jawnie** w wywołaniu `httpx.stream` (spójne z docstring/ADR).
+- **Walidacja `security.egress.allowlist`**: odrzuca wpisy puste/whitespace i o
+  kształcie URL (koniec częściowego wildcardu `host.endswith('.')`).
+- **Diagnostyka**: nierozwiązywalny `token_ref` → `PluginSecretError` → HTTP **500**
+  (lokalna konfiguracja), odróżnione od zdalnej odmowy serwera (`502`).
+- Usunięto martwe pole `PluginConfig.protocol_version` (zwalidowane, nieużywane).
+- Testy: +5 (rebinding, fail-closed, walidacja allowlisty, 500 vs 502).
+
 ### Zmienione (Etap 12a — rejestr providerów narzędzi)
 - `tools/loader.build_tools` porzuca twardy `if/elif kind` na rzecz
   `ToolProviderRegistry` (`tools/registry.py`): rodzaj narzędzia = zarejestrowany

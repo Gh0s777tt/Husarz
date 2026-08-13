@@ -258,6 +258,26 @@ class PullRequestView(BaseModel):
     title: str
 
 
+class PluginView(BaseModel):
+    """Widok konektora wtyczki (bez sekretu — ``token_ref`` to tylko referencja)."""
+
+    name: str
+    transport: str
+    endpoint: str
+    description: str
+    enabled: bool
+    token_ref: str | None
+    timeout_seconds: int
+    max_output_bytes: int
+
+
+class RemoteToolView(BaseModel):
+    """Narzędzie udostępniane przez zdalny serwer MCP (wynik odkrywania)."""
+
+    name: str
+    description: str
+
+
 class OrchestrateRequest(BaseModel):
     """Żądanie orkiestracji zadania."""
 

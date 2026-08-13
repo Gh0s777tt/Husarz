@@ -26,6 +26,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "git:read",
             "git:write",
             "git:pr",
+            "plugin:read",
         }
     ),
     # Zwykły użytkownik (np. samodzielna rejestracja): może rozmawiać/orkiestrować,

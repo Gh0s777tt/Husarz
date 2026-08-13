@@ -14,7 +14,8 @@ import ipaddress
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -235,6 +236,25 @@ class EgressConfig(_StrictModel):
     default_policy: EgressPolicy = EgressPolicy.DENY
     allowlist: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _validate_allowlist(self) -> EgressConfig:
+        # Wpisy muszą być czystymi nazwami hostów. Pusty/whitespace wpis stałby się
+        # częściowym wildcardem (dopasowanie ``host.endswith('.')``), rozszczelniając
+        # deny-all — odrzucamy przy starcie z czytelnym komunikatem.
+        normalized: list[str] = []
+        for entry in self.allowlist:
+            host = entry.strip().lower()
+            if not host:
+                raise ValueError("security.egress.allowlist zawiera pusty wpis (usuń go).")
+            if "/" in host or "@" in host or ":" in host or host != entry.strip():
+                raise ValueError(
+                    f"security.egress.allowlist['{entry}'] musi być samą nazwą hosta "
+                    f"(bez schematu/portu/ścieżki/poświadczeń)."
+                )
+            normalized.append(host)
+        object.__setattr__(self, "allowlist", normalized)
+        return self
+
 
 class SandboxConfig(_StrictModel):
     """Ograniczenia sandboxa narzędzi."""
@@ -403,6 +423,49 @@ class ToolConfig(_StrictModel):
 
 
 # ---------------------------------------------------------------------------
+# plugins (config/plugins/*.yaml) — konektory wtyczek (MCP)
+# ---------------------------------------------------------------------------
+
+_SECRET_REF_SCHEMES = ("env:", "file:", "vault:", "sops:")
+
+
+class PluginConfig(_StrictModel):
+    """Konektor wtyczki (serwer narzędzi MCP przez HTTP JSON-RPC).
+
+    Token jest WYŁĄCZNIE referencją do sekretu (nie wartością). Pełna polityka egress
+    (loopback/allowlista/anty-SSRF) egzekwowana jest w runtime (``build_connector``);
+    tu walidujemy jedynie kształt endpointu (http(s), bez userinfo, z hostem).
+    """
+
+    name: str
+    transport: Literal["http"] = "http"  # MVP: tylko HTTP JSON-RPC (stdio odłożone)
+    description: str = ""
+    enabled: bool = True
+    endpoint: str  # URL serwera MCP (np. http://127.0.0.1:8808)
+    token_ref: str | None = None  # referencja env:/file:/vault:/sops: (nie sam token)
+    timeout_seconds: int = Field(default=30, ge=1)
+    max_output_bytes: int = Field(default=1_000_000, ge=1)  # twardy limit odpowiedzi (DoS)
+
+    @model_validator(mode="after")
+    def _validate(self) -> PluginConfig:
+        if self.token_ref is not None and not self.token_ref.startswith(_SECRET_REF_SCHEMES):
+            raise ValueError(
+                f"Wtyczka '{self.name}': token_ref musi być referencją do sekretu "
+                f"(env:/file:/vault:/sops:), a nie samą wartością tokenu."
+            )
+        parsed = urlparse(self.endpoint)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Wtyczka '{self.name}': endpoint musi być adresem http(s)://.")
+        if parsed.username or parsed.password or "@" in parsed.netloc:
+            raise ValueError(
+                f"Wtyczka '{self.name}': endpoint nie może zawierać poświadczeń w URL (userinfo)."
+            )
+        if not parsed.hostname:
+            raise ValueError(f"Wtyczka '{self.name}': endpoint nie zawiera hosta.")
+        return self
+
+
+# ---------------------------------------------------------------------------
 # roe (config/roe/*.yaml) — Rules of Engagement dla Puszkarza
 # ---------------------------------------------------------------------------
 
@@ -544,6 +607,7 @@ class HusarzConfig(_StrictModel):
     git: GitConfig = Field(default_factory=GitConfig)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     tools: dict[str, ToolConfig] = Field(default_factory=dict)
+    plugins: dict[str, PluginConfig] = Field(default_factory=dict)
     roe: dict[str, RoeConfig] = Field(default_factory=dict)
 
     @model_validator(mode="after")
