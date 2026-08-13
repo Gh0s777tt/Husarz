@@ -1,0 +1,12 @@
+# Normalizacja końców linii — spójne LF w repo (unikamy szumu CRLF na Windows).
+* text=auto eol=lf
+
+# Pliki binarne — bez normalizacji.
+*.png binary
+*.jpg binary
+*.gif binary
+*.gguf binary
+*.safetensors binary
+*.bin binary
+*.pt binary
+*.onnx binary

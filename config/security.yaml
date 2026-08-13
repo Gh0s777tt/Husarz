@@ -1,0 +1,51 @@
+# ============================================================================
+# config/security.yaml — bezpieczeństwo i prywatność (sekcja "security").
+# ----------------------------------------------------------------------------
+# Twarde wymagania: deny-all egress, sandbox bez sieci, audit log niemodyfikowalny,
+# szyfrowanie at-rest, mTLS, OIDC+RBAC, filtry anty-prompt-injection.
+#
+# Model dwuwarstwowy egress: globalna polityka (tu) jest DENY-ALL; narzędzia
+# deklarują potrzebne domeny w config/tools/*.yaml. Aby faktycznie zezwolić na
+# ruch, operator dodaje domenę do egress.allowlist poniżej.
+# ============================================================================
+
+egress:
+  # deny = blokuj wszystko poza allowlistą (domyślne, suwerenność danych).
+  default_policy: deny
+  # Pusta = pełny deny-all. Dodawaj domeny świadomie (np. "docs.python.org").
+  allowlist: []
+
+sandbox:
+  engine: docker+gvisor      # none | docker | docker+gvisor | firecracker
+  network: false             # brak sieci w sandboxie domyślnie
+  cpu_limit: "1"
+  memory_limit: 512m
+  timeout_seconds: 60
+  workspace_only: true       # dostęp wyłącznie do katalogu workspace
+  command_allowlist: []      # np. ["python", "pytest", "git"] — ustawiane per profil
+  path_allowlist: []         # dodatkowe ścieżki tylko-do-odczytu
+
+mtls:
+  enabled: false             # włącz w prod; materiały przez sekrety, nie w repo
+  ca_cert_ref: null
+  cert_ref: null
+  key_ref: null
+
+auth:
+  oidc_enabled: false        # włącz w prod
+  issuer: null
+  client_id: null
+  roles: [admin, operator, viewer]
+
+audit:
+  enabled: true
+  path: ./audit/audit.log
+  immutable: true
+  hash_chain: true           # łańcuch skrótów (wykrywanie manipulacji)
+
+encryption:
+  at_rest: true
+  algorithm: AES-256-GCM
+
+# Filtry I/O i izolacja treści niezaufanych (anty-prompt-injection).
+prompt_injection_filters: true

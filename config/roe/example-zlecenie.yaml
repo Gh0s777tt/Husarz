@@ -1,0 +1,41 @@
+# ============================================================================
+# config/roe/example-zlecenie.yaml — SZABLON Rules of Engagement (ROE).
+# ----------------------------------------------------------------------------
+# To NIEAKTYWNY przykład (consent: false, brak podpisu). Puszkarz nie wykona
+# żadnej akcji na podstawie tego pliku, dopóki nie zostanie podpisany i zatwierdzony.
+#
+# Adresy poniżej należą do zakresów dokumentacyjnych (RFC 5737) i domen .local —
+# są bezpiecznymi placeholderami, nie prawdziwymi celami.
+# ============================================================================
+
+engagement_id: example-zlecenie
+owner: "Właściciel systemu (imię i nazwisko / organizacja)"
+authorized_by: "Osoba zatwierdzająca zakres (rola)"
+
+scope:
+  targets_cidr:
+    - 192.0.2.0/24        # RFC 5737 TEST-NET-1 (przykład, nie realny cel)
+  targets_domains:
+    - app.example.local
+  out_of_scope:
+    - 192.0.2.1           # host krytyczny wyłączony z testów
+
+window:
+  start: 2026-09-01T09:00:00+02:00
+  end: 2026-09-01T17:00:00+02:00
+
+allowed_techniques:
+  - recon-passive
+  - port-scan
+  - vuln-scan-noninvasive
+forbidden_techniques:
+  - denial-of-service
+  - social-engineering
+  - data-exfiltration
+
+# Zgoda i podpis — muszą być uzupełnione, by ROE stało się aktywne.
+consent: false
+signature: null            # referencja/hash podpisu (np. sops:... lub odcisk)
+
+# Domyślnie dry-run; akcje aktywne wymagają --authorized i potwierdzenia operatora.
+dry_run_default: true

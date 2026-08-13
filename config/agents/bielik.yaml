@@ -1,0 +1,13 @@
+# Bielik — specjalista języka i zadań polskich.
+name: bielik
+display_name: Bielik (Język PL)
+agent_class: towarzysz
+role: >-
+  Specjalista języka polskiego i zadań PL: pisanie, redakcja, tłumaczenia,
+  analiza tekstu, kontekst kulturowy i prawny PL.
+model: bielik
+prompt_file: bielik.md
+tools: [rag]
+max_iterations: 8
+roe_required: false
+enabled: true

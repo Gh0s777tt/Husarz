@@ -1,0 +1,13 @@
+# Chorąży — router/planner pomocniczy (klasyfikacja intencji, kontrola kosztów).
+name: chorazy
+display_name: Chorąży (Router/Planner)
+agent_class: pocztowy
+role: >-
+  Lekki agent pomocniczy: klasyfikacja intencji, wstępny plan i kontrola kosztów.
+  Odciąża orkiestratora tanimi decyzjami routingu.
+model: hermes
+prompt_file: chorazy.md
+tools: []
+max_iterations: 4
+roe_required: false
+enabled: true

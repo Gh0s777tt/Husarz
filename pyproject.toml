@@ -1,0 +1,110 @@
+# Husarz — konfiguracja pakietu i narzędzi jakości.
+# Uwaga: identyfikatory i klucze techniczne po angielsku; komentarze po polsku.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "husarz"
+version = "0.1.0"
+description = "Husarz — suwerenna, samodzielnie hostowana, wieloagentowa platforma AI (Chorągiew)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Husarz Contributors" }]
+keywords = ["ai", "agents", "sovereign", "self-hosted", "orchestration"]
+
+# Zależności rdzenia (Etap 0). Kolejne etapy dołożą FastAPI, litellm, itd.
+dependencies = [
+  "pydantic>=2.6,<3",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# Narzędzia deweloperskie i jakości kodu.
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.5.0",
+  "black>=24.0",
+  "mypy>=1.10",
+  "types-PyYAML>=6.0",
+  "pre-commit>=3.7",
+]
+
+[project.scripts]
+# Launcher CLI (pełna implementacja w Etapie 5). Na razie punkt wejścia szkieletu.
+husarz = "husarz.launcher.cli:main"
+
+[project.urls]
+Homepage = "https://gitlab.com/Gh0s777tt/husarz"
+Repository = "https://github.com/Gh0s777tt/Husarz"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+husarz = ["py.typed"]
+
+# ----------------------------------------------------------------------------
+# Ruff — linter + isort.
+# ----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+  "S",   # flake8-bandit (bezpieczeństwo)
+  "C4",  # flake8-comprehensions
+  "SIM", # flake8-simplify
+]
+ignore = [
+  "S101",  # assert dozwolone w testach (patrz per-file-ignores)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S106"]  # asserty i "hasła" testowe w testach są OK
+
+# ----------------------------------------------------------------------------
+# Black — formatter.
+# ----------------------------------------------------------------------------
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+# ----------------------------------------------------------------------------
+# Mypy — typowanie statyczne.
+# ----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+packages = ["husarz"]
+
+# ----------------------------------------------------------------------------
+# Pytest.
+# ----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "unit: testy jednostkowe",
+  "integration: testy integracyjne",
+  "security: testy bezpieczeństwa",
+]
+
+[tool.coverage.run]
+source = ["husarz"]
+branch = true

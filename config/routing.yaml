@@ -1,0 +1,38 @@
+# ============================================================================
+# config/routing.yaml — router modeli (sekcja "routing").
+# ----------------------------------------------------------------------------
+# Dobór modelu po tagach/capabilities + domyślne modele per agent + fallbacki.
+# Zmiana modelu agenta = edycja tego pliku, bez zmian w kodzie.
+# ============================================================================
+
+# Strategia doboru: tags | cost | latency
+strategy: tags
+
+# Domyślny model per agent (nazwa agenta -> id modelu z registry, lub "auto").
+agent_models:
+  husarz: glm-main
+  bielik: bielik
+  kopijnik: hermes
+  zwiadowca: hermes
+  puszkarz: hermes
+  kanclerz: glm-main
+  chorazy: hermes
+
+# Reguły: dopasuj po wymaganych tagach, preferuj wskazane modele (kolejność = priorytet).
+rules:
+  - match_tags: [polish]
+    prefer: [bielik, glm-main]
+  - match_tags: [code]
+    prefer: [glm-main, hermes]
+  - match_tags: [function-calling]
+    prefer: [hermes, glm-main]
+  - match_tags: [reasoning]
+    prefer: [glm-main]
+
+# Kontrola kosztów i limitów (twarde limity egzekwowane przez router w Etapie 1).
+cost_controls:
+  max_tokens_per_request: 8192
+  max_requests_per_minute: 120
+
+# Włącz łańcuchy fallback zdefiniowane w models.yaml.
+fallbacks_enabled: true

@@ -1,0 +1,24 @@
+# Konfiguracja gitleaks — skan sekretów przed commitem i w CI.
+# Rozszerza reguły domyślne gitleaks o dopasowania specyficzne dla Husarza.
+title = "Husarz gitleaks config"
+
+[extend]
+useDefault = true
+
+# Ścieżki wykluczone ze skanu (przykłady, dokumentacja, fikstury testowe).
+[allowlist]
+description = "Wykluczenia globalne — wyłącznie wartości jawnie przykładowe."
+paths = [
+  '''\.env\.example$''',
+  '''docs/.*\.md$''',
+  '''prompts/.*\.md$''',
+  '''config/roe/example-.*\.yaml$''',
+]
+# Znaczniki jawnych placeholderów, które NIE są prawdziwymi sekretami.
+regexes = [
+  '''CHANGE_ME''',
+  '''PLACEHOLDER''',
+  '''example\.local''',
+  '''vault:secret/data/.*''',   # referencje do Vault (nie sam sekret)
+  '''sops:.*''',                # referencje do SOPS/age (nie sam sekret)
+]

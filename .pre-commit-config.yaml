@@ -1,0 +1,40 @@
+# Husarz — hooki pre-commit.
+# Instalacja: pre-commit install  (wymaga jednorazowego dostępu do sieci do pobrania hooków).
+# Uwaga: w profilu airgap hooki należy wcześniej pobrać/zbudować offline.
+minimum_pre_commit_version: "3.7.0"
+
+repos:
+  # Skan sekretów — twardy wymóg: żadnych sekretów w repo.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: gitleaks (skan sekretów)
+        args: ["--config", ".gitleaks.toml"]
+
+  # Ruff — lint + autofix + isort.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  # Black — formatowanie.
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+
+  # Podstawowa higiena plików.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]  # blokuje przypadkowe dodanie dużych plików (np. wag)
+      - id: check-merge-conflict
+      - id: detect-private-key

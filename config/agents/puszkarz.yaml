@@ -1,0 +1,19 @@
+# Puszkarz — agent bezpieczeństwa. WYŁĄCZNIE autoryzowany pentest/audyt.
+# Działa tylko w granicach podpisanego ROE (config/roe/*.yaml). Domyślnie dry-run.
+# NIE generuje malware ani exploitów — proponuje działania defensywne.
+name: puszkarz
+display_name: Puszkarz (Bezpieczeństwo)
+agent_class: towarzysz
+role: >-
+  Agent bezpieczeństwa działający wyłącznie w granicach podpisanego ROE.
+  Integruje istniejące narzędzia (recon, skanery) i wiedzę defensywną (RAG).
+  Domyślnie dry-run; akcje aktywne wymagają flagi --authorized i zgody operatora.
+model: hermes
+prompt_file: puszkarz.md
+tools: [shell, web]
+max_iterations: 12
+# Twardy wymóg: bez aktywnego ROE agent nie wykona żadnej akcji ofensywnej.
+roe_required: true
+enabled: true
+params:
+  dry_run_default: true

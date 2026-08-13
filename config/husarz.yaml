@@ -1,0 +1,23 @@
+# ============================================================================
+# config/husarz.yaml — ustawienia globalne platformy (sekcja "platform").
+# ----------------------------------------------------------------------------
+# Zasada "zero hardcode": to plik, nie kod, decyduje o zachowaniu platformy.
+# Nadpisania: ENV (HUSARZ_PLATFORM__*) oraz panel runtime mają wyższy priorytet.
+# ============================================================================
+
+# Profil działania: dev | prod | airgap
+profile: dev
+
+# Poziom logowania: DEBUG | INFO | WARNING | ERROR
+log_level: INFO
+
+# Katalogi robocze (tworzone przy starcie usług; dane poza repo).
+data_dir: ./data
+artifacts_dir: ./artifacts
+workspace_dir: ./workspace
+
+# Domyślny język zadań i UI.
+language_default: pl
+
+# Zero telemetrii — twardy wymóg. Musi pozostać false.
+telemetry_enabled: false

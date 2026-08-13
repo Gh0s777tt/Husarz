@@ -1,0 +1,21 @@
+# ============================================================================
+# docker-compose.yaml — SZKIELET (pełna implementacja: Etap 6).
+# ----------------------------------------------------------------------------
+# Profile: dev | prod | airgap. Usługi (postgres/pgvector, redis, minio, vault,
+# api, web, router) zostaną dodane wraz z odpowiednimi etapami. Na Etapie 0 plik
+# jest celowo pusty co do usług, by nie sugerować działającej infrastruktury.
+#
+# W profilu "airgap" żadna usługa nie ma dostępu do WAN (deny-all egress);
+# manifesty k8s dodadzą NetworkPolicy deny-all (deploy/k8s, Etap 6).
+# ============================================================================
+
+# Deklaracja profili — usługi przypisujemy do nich w kolejnych etapach.
+# Użycie (docelowo): docker compose --profile dev up
+#                    docker compose --profile airgap up
+services: {}
+
+# Sieci: domyślnie wewnętrzna, bez dostępu na zewnątrz (dopracowanie w Etapie 6).
+networks:
+  husarz_internal:
+    driver: bridge
+    internal: true   # brak trasy do WAN — zgodne z deny-all egress

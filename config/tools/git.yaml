@@ -1,0 +1,19 @@
+# git — operacje na repozytorium w workspace (bez push do zdalnych bez zgody).
+name: git
+kind: git
+description: Operacje git w obrębie workspace (status, add, commit, diff, log).
+enabled: true
+requires_sandbox: true
+requires_egress: false
+# Dozwolone podkomendy git.
+allowlist:
+  - status
+  - add
+  - commit
+  - diff
+  - log
+  - branch
+  - checkout
+config:
+  workdir: /workspace
+  allow_push: false        # push wymaga osobnej zgody i egress

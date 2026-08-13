@@ -1,0 +1,58 @@
+# --- Husarz .gitignore ---
+# Zasada bezpieczeństwa: wagi modeli, sekrety i dane NIGDY nie trafiają do repo.
+
+# Wagi modeli i dane lokalne (suwerenność — trzymane wyłącznie lokalnie)
+/models/
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.onnx
+
+# Sekrety i konfiguracja środowiska
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+*.age
+!*.age.pub
+
+# Dane runtime, artefakty, logi
+/data/
+/artifacts/
+/var/
+*.log
+audit/*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Node / web
+node_modules/
+web/.next/
+web/out/
+web/dist/
+
+# Narzędzia i IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

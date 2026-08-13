@@ -1,0 +1,13 @@
+# Zwiadowca — agent researchu (web, dokumentacja, RAG).
+name: zwiadowca
+display_name: Zwiadowca (Research)
+agent_class: towarzysz
+role: >-
+  Agent researchu: przeszukiwanie dokumentacji i sieci (tylko domeny z allowlisty),
+  synteza źródeł, zasilanie pamięci RAG. Treści niezaufane trzyma w izolacji.
+model: hermes
+prompt_file: zwiadowca.md
+tools: [web, rag]
+max_iterations: 10
+roe_required: false
+enabled: true

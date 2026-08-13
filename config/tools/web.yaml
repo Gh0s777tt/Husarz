@@ -1,0 +1,17 @@
+# web — dostęp do sieci WYŁĄCZNIE do domen z allowlisty.
+# Uwaga: to allowlista narzędzia. Globalny egress (security.yaml) i tak jest
+# deny-all — operator musi dodać domenę do egress.allowlist, by ruch przeszedł.
+name: web
+kind: web
+description: Pobieranie stron/dokumentacji z domen dozwolonych (allowlist).
+enabled: true
+requires_sandbox: true
+requires_egress: true
+# Przykładowe dozwolone domeny (edytuj wg potrzeb; puste = narzędzie nieużywalne).
+allowlist:
+  - docs.python.org
+  - pypi.org
+config:
+  method: GET
+  max_bytes: 2000000
+  timeout_seconds: 20

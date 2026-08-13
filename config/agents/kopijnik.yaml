@@ -1,0 +1,13 @@
+# Kopijnik — agent kodujący (edycja plików, shell w sandboxie, git, testy).
+name: kopijnik
+display_name: Kopijnik (Kod)
+agent_class: towarzysz
+role: >-
+  Agent inżynierii oprogramowania: edycja plików, uruchamianie poleceń w
+  sandboxie, obsługa git i testów. Działa małymi, weryfikowalnymi krokami.
+model: hermes
+prompt_file: kopijnik.md
+tools: [file_edit, shell, git, run_tests]
+max_iterations: 16
+roe_required: false
+enabled: true

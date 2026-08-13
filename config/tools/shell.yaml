@@ -1,0 +1,21 @@
+# shell — wykonywanie poleceń w sandboxie (Docker+gVisor), bez sieci.
+# Tylko komendy z allowlisty, tylko w katalogu workspace.
+name: shell
+kind: shell
+description: Uruchamianie dozwolonych poleceń w izolowanym sandboxie bez sieci.
+enabled: true
+requires_sandbox: true
+requires_egress: false
+# Allowlista poleceń (nazwa binarki). Puste = wszystko zablokowane.
+allowlist:
+  - python
+  - pytest
+  - ls
+  - cat
+  - grep
+config:
+  workdir: /workspace
+  network: false
+  cpu_limit: "1"
+  memory_limit: 512m
+  timeout_seconds: 60

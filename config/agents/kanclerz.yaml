@@ -1,0 +1,13 @@
+# Kanclerz — agent dokumentacji (README, ADR, raporty, changelog).
+name: kanclerz
+display_name: Kanclerz (Dokumentacja)
+agent_class: towarzysz
+role: >-
+  Agent dokumentacji: utrzymuje README, CHANGELOG, ROADMAP, ADR i raporty w
+  spójności z kodem. Weryfikuje aktualność dokumentacji po każdej zmianie.
+model: glm-main
+prompt_file: kanclerz.md
+tools: [file_edit, git]
+max_iterations: 8
+roe_required: false
+enabled: true

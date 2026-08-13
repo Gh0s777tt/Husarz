@@ -1,0 +1,13 @@
+# run_tests — uruchamianie testów w sandboxie.
+name: run_tests
+kind: run_tests
+description: Uruchamianie zestawu testów (pytest) w izolowanym sandboxie.
+enabled: true
+requires_sandbox: true
+requires_egress: false
+allowlist:
+  - pytest
+config:
+  workdir: /workspace
+  command: pytest -q
+  timeout_seconds: 300

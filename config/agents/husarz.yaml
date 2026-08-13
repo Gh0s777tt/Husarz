@@ -1,0 +1,13 @@
+# Husarz — orkiestrator (hetman). Dekompozycja, routing, synteza.
+name: husarz
+display_name: Husarz (Hetman)
+agent_class: towarzysz
+role: >-
+  Orkiestrator Chorągwi. Dekomponuje zadanie, dobiera agentów, deleguje,
+  obserwuje wyniki, koryguje plan (refleksja) i syntetyzuje odpowiedź.
+model: glm-main
+prompt_file: husarz.md
+tools: []
+max_iterations: 12
+roe_required: false
+enabled: true

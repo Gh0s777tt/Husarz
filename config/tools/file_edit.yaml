@@ -1,0 +1,17 @@
+# file_edit — odczyt/zapis plików wyłącznie w workspace.
+name: file_edit
+kind: file_edit
+description: Odczyt i zapis plików ograniczony do katalogu workspace.
+enabled: true
+requires_sandbox: true
+requires_egress: false
+# Allowlista wzorców ścieżek (względem workspace). Puste = cały workspace.
+allowlist: []
+config:
+  root: /workspace
+  max_file_bytes: 5000000
+  deny_globs:                 # nigdy nie ruszaj sekretów/wag
+    - "**/.env"
+    - "**/*.key"
+    - "**/*.pem"
+    - "models/**"

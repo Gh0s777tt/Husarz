@@ -1,0 +1,14 @@
+# rag — pamięć i wyszukiwanie semantyczne (PostgreSQL + pgvector).
+name: rag
+kind: rag
+description: Zapis/odczyt pamięci i wyszukiwanie semantyczne (pgvector).
+enabled: true
+requires_sandbox: false      # usługa wewnętrzna, nie polecenie w sandboxie
+requires_egress: false       # baza lokalna, brak ruchu na zewnątrz
+allowlist: []
+config:
+  backend: pgvector
+  collection: husarz_memory
+  embedding_dim: 1024
+  top_k: 8
+  encrypt_at_rest: true

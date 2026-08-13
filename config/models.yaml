@@ -1,0 +1,50 @@
+# ============================================================================
+# config/models.yaml — rejestr modeli (sekcja "models").
+# ----------------------------------------------------------------------------
+# Każdy model jest wymienny wyłącznie przez konfigurację (wymiana wag, fine-tune,
+# LoRA, nowy endpoint) — bez zmian w kodzie. Wagi trzymane lokalnie (models/,
+# gitignored). Endpointy to warstwa OpenAI-compat (vLLM/Ollama/SGLang).
+#
+# UWAGA: poniższe endpointy to lokalne placeholdery dla profilu dev. W profilu
+# airgap muszą pozostać lokalne (loopback/LAN); egress i tak jest deny-all.
+# ============================================================================
+
+# Domyślny model orkiestracji (musi istnieć w registry).
+default: glm-main
+
+registry:
+  # --- Model główny: GLM-5.2 (orkiestracja, rozumowanie, kod) ---
+  glm-main:
+    backend: openai_compat
+    model: glm-5.2               # nazwa/repo przekazywana do backendu
+    endpoint: http://localhost:8000/v1
+    tags: [reasoning, code, orchestration, tools, general]
+    context_length: 131072
+    weights_path: ./models/glm-5.2
+    params:
+      temperature: 0.3
+    fallback: [hermes]
+
+  # --- Model polski: Bielik-11B-v3.0-Instruct (język i zadania PL) ---
+  bielik:
+    backend: ollama
+    model: bielik-11b-v3.0-instruct
+    endpoint: http://localhost:11434/v1
+    tags: [polish, general, chat]
+    context_length: 32768
+    weights_path: ./models/bielik-11b-v3.0-instruct
+    params:
+      temperature: 0.4
+    fallback: [glm-main]
+
+  # --- Silnik agentów: Hermes (NousResearch) — pętle narzędziowe, function-calling ---
+  hermes:
+    backend: vllm
+    model: hermes-3
+    endpoint: http://localhost:8001/v1
+    tags: [tools, function-calling, agentic, research]
+    context_length: 32768
+    weights_path: ./models/hermes-3
+    params:
+      temperature: 0.2
+    fallback: [glm-main]
