@@ -55,3 +55,35 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_CONFIG: .gitleaks.toml
+
+  sca:
+    name: SCA (pip-audit — znane podatności zależności)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Instalacja pakietu + pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pip-audit
+      - name: pip-audit
+        run: pip-audit --strict --progress-spinner off
+
+  docker:
+    name: Lint + build obrazów
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hadolint (Dockerfile rdzenia)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+      - name: Hadolint (obraz sandboxa)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/husarz-sandbox.Dockerfile
+      - name: Build obrazu rdzenia (bez push)
+        run: docker build -t husarz-api:ci .

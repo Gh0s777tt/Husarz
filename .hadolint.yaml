@@ -1,0 +1,11 @@
+# Konfiguracja hadolint (lint Dockerfile w CI).
+# Ignorujemy pinowanie wersji pakietów apt/pip:
+#  - DL3008 (pin apt) — w suwerennym/airgap kontekście bazujemy na kontrolowanych
+#    obrazach bazowych i pinujemy je (python:3.13-slim), a wersje apt bumpują się
+#    wraz z obrazem; twardy pin `git=1:2.x` psułby build przy każdym odświeżeniu bazy.
+#  - DL3013 (pin pip) — `pip install .` instaluje NASZĄ paczkę (wersja z pyproject),
+#    a `--upgrade pip` jest celowe; twardy pin nie wnosi wartości.
+# Pozostałe reguły (w tym błędy) nadal blokują — próg pozostaje domyślny.
+ignored:
+  - DL3008
+  - DL3013

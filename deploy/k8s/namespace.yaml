@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: husarz
+  labels:
+    app.kubernetes.io/part-of: husarz
+    # Wymuszenie standardu bezpieczeństwa Pod Security "restricted" (non-root itd.).
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

@@ -1,0 +1,32 @@
+# Ingress dla domeny publicznej. TLS przez cert-manager (ACME) — jedyny punkt z
+# WAN jest kontroler ingress, nie Pody aplikacji.
+# UWAGA: k8s Ingress wymaga LITERALNEGO hosta (brak interpolacji ENV jak w compose).
+# Host 'husarzai.pl' występuje w DWÓCH miejscach (tls.hosts + rules.host) — zmieniając
+# domenę, ZMIEŃ OBA. To jedyny operatorski punkt edycji hosta w profilu k8s
+# (w compose to samo steruje zmienną HUSARZ_PUBLIC_HOST). Alternatywnie podstaw host
+# przez Kustomize `replacements` z jednego źródła.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: husarz-api
+  namespace: husarz
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - husarzai.pl
+      secretName: husarz-tls
+  rules:
+    - host: husarzai.pl
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: husarz-api
+                port:
+                  name: http

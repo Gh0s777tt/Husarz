@@ -1,0 +1,18 @@
+# ============================================================================
+# NetworkPolicy: DOMYŚLNY DENY-ALL (ingress + egress) dla całego namespace.
+# ----------------------------------------------------------------------------
+# Twardy niezmiennik: bez jawnej reguły zezwalającej żaden Pod nie ma ruchu —
+# ani przychodzącego, ani wychodzącego. Reguły zezwalające (wąskie) są w
+# networkpolicy-allow.yaml. Wymaga CNI wspierającego NetworkPolicy (Calico/Cilium).
+# ============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: husarz
+spec:
+  podSelector: {} # wszystkie Pody w namespace
+  policyTypes:
+    - Ingress
+    - Egress
+  # Brak sekcji ingress/egress = pełny deny w obu kierunkach.

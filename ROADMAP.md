@@ -67,10 +67,19 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   macierz RBAC, odporność i współbieżność (regresje z przeglądu).
 - ⬜ WebSocket streaming odpowiedzi; pełny **OIDC** (przepływ tożsamości) + mTLS (Etap 6).
 
-## ⬜ Etap 6 — Deploy i profile
-- ⬜ docker-compose profile dev/prod/airgap; manifesty k8s + NetworkPolicy deny-all.
-- ⬜ CI pełne (lint, testy, gitleaks, SCA).
-- ⬜ Testy: profil airgap działa bez WAN; CI zielone.
+## ✅ Etap 6 — Deploy i profile
+- ✅ Obrazy: `husarz-api` (Dockerfile, non-root, chudy runtime) + `husarz-sandbox`
+  (obraz narzędzi uruchamiany z `--network none`); `.dockerignore` bez wag/sekretów.
+- ✅ docker-compose profile dev/prod/airgap (dev samowystarczalny; prod = Caddy TLS
+  dla `HUSARZ_PUBLIC_HOST`; airgap bez WAN, tylko loopback).
+- ✅ Manifesty k8s (Kustomize): **NetworkPolicy deny-all** + wąskie reguły (bez
+  `0.0.0.0/0`), Deployment hardened (non-root, read-only rootfs, drop ALL), Ingress TLS.
+- ✅ CI pełne (GitHub + GitLab): lint, format, typy, testy, gitleaks, **pip-audit
+  (SCA)**, hadolint + build obrazu; `--allow-insecure` jako jawny opt-out launchera.
+- ✅ Testy: niezmienniki wdrożeń (deny-all, non-root, loopback, brak WAN w airgapie,
+  placeholdery sekretów) parsowane bez klastra/Dockera.
+- ⬜ Realne uruchomienie na klastrze (CNI+NetworkPolicy, gVisor, Vault unseal) —
+  środowisko docelowe; pgvector/RAG i pętla narzędziowa Towarzysza (reszta Etapu 3).
 
 ## Pozostałe ustalenia
 - Modele (GLM-5.2, Bielik v3, Hermes) pobierane lokalnie do `models/` (gitignored)

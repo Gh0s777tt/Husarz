@@ -1,0 +1,32 @@
+# ============================================================================
+# docker-compose.airgap.yml — nakładka profilu AIRGAP (nałóż na base).
+# ----------------------------------------------------------------------------
+#   docker compose -f deploy/compose/docker-compose.base.yml \
+#                  -f deploy/compose/docker-compose.airgap.yml up -d
+#
+# BRAK DOSTĘPU DO WAN: żadnego proxy/ACME, wszystkie sieci wewnętrzne (z base),
+# dostęp do API wyłącznie przez loopback HOSTA. Profil airgap w configu wymusza
+# deny-all egress, brak sieci sandboxa i lokalne endpointy modeli (walidacja
+# krzyżowa schematu). Token API nadal wymagany. Zob. docs/DEPLOY.md.
+# ============================================================================
+
+services:
+  api:
+    command: ["up", "--profile", "airgap", "--host", "0.0.0.0"]
+    # Dostęp tylko z loopbacku hosta — brak ekspozycji do LAN/WAN.
+    ports:
+      - "127.0.0.1:8000:8000"
+    # W airgapie obraz musi już istnieć lokalnie (brak pull z rejestru w runtime).
+    pull_policy: never
+    restart: unless-stopped
+
+  # Usługi danych również NIE mogą próbować pullować w airgapie — brak obrazu = jawny
+  # błąd, nie ciche sięganie do rejestru (którego i tak nie ma trasy WAN).
+  postgres:
+    pull_policy: never
+  redis:
+    pull_policy: never
+  minio:
+    pull_policy: never
+  vault:
+    pull_policy: never

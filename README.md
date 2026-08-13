@@ -7,11 +7,12 @@ husarski), w pełni konfigurowalna, z własnym launcherem i interfejsem WWW,
 zaprojektowana pod **suwerenność danych**: modele i dane **nie opuszczają
 infrastruktury użytkownika bez wyraźnej zgody**. Domyślnie **deny-all egress**.
 
-> Status: **Etapy 0–5 ukończone** — konfiguracja, router modeli, agenci +
+> Status: **Etapy 0–6 ukończone** — konfiguracja, router modeli, agenci +
 > orkiestrator, narzędzia + sandbox, rdzeń bezpieczeństwa (ROE-gate/audit/Puszkarz),
-> oraz REST API + launcher + konsola WWW. Pozostaje **Etap 6** (deploy: compose/k8s/CI).
-> mTLS/OIDC oraz realne wykonanie (Docker+gVisor, pgvector) — środowisko z tymi
-> zależnościami. Kolejne: patrz [ROADMAP.md](ROADMAP.md).
+> REST API + launcher + konsola WWW, oraz **deploy** (obrazy, compose dev/prod/airgap,
+> k8s + NetworkPolicy deny-all, CI z SCA). Realne uruchomienie na klastrze (gVisor,
+> pgvector, Vault unseal) oraz pełny OIDC/mTLS — środowisko docelowe. Patrz
+> [ROADMAP.md](ROADMAP.md) i [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ---
 
@@ -59,7 +60,7 @@ przez zmianę `config/models.yaml`. Wagi trzymane lokalnie (`models/`, gitignore
 - **Sandbox narzędzi:** Docker + gVisor (opcjonalnie Firecracker) (Etap 3).
 - **Frontend:** własne UI (Next.js/React) — czat + panel konfiguracji (Etap 5).
 - **Launcher:** CLI + opcjonalnie desktop (Tauri).
-- **Konteneryzacja:** docker-compose (profile dev/prod/airgap) + k8s + NetworkPolicy (Etap 6).
+- **Konteneryzacja:** docker-compose (profile dev/prod/airgap) + k8s + NetworkPolicy deny-all (✅ Etap 6).
 
 ## Szybki start (dev)
 
@@ -131,6 +132,7 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 - [docs/ORKIESTRATOR.md](docs/ORKIESTRATOR.md) — rdzeń agentów i hetman „Husarz".
 - [docs/NARZEDZIA.md](docs/NARZEDZIA.md) — narzędzia i sandbox (allowlisty, izolacja).
 - [docs/API.md](docs/API.md) — REST API i konsola WWW (`husarz up`).
+- [docs/DEPLOY.md](docs/DEPLOY.md) — wdrożenie: obrazy, compose (dev/prod/airgap), k8s.
 - [docs/AGENCI.md](docs/AGENCI.md) — role i konfiguracja agentów.
 - [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) — model bezpieczeństwa i weryfikacje.
 - [docs/adr/](docs/adr/) — rejestr decyzji architektonicznych (ADR).

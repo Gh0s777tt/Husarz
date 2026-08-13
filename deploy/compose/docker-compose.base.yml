@@ -1,0 +1,116 @@
+# ============================================================================
+# docker-compose.base.yml — wspólna baza dla profili prod/airgap.
+# ----------------------------------------------------------------------------
+# Łącz z nakładką profilu, np.:
+#   docker compose -f deploy/compose/docker-compose.base.yml \
+#                  -f deploy/compose/docker-compose.prod.yml up -d
+#
+# Sekrety (token API, hasła DB) pochodzą ze ZMIENNYCH ŚRODOWISKOWYCH wskazujących
+# referencje/wartości — nigdy z repo. Skopiuj deploy/compose/.env.example do .env
+# i uzupełnij w bezpieczny sposób (Vault/SOPS w prod). Zob. docs/DEPLOY.md.
+#
+# Domyślnie WSZYSTKIE usługi są w sieci wewnętrznej (internal: true) — brak trasy
+# do WAN (deny-all egress). Profil prod dodaje wąską sieć brzegową tylko dla proxy.
+# ============================================================================
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: husarz-api:0.1.0
+    # Hardening kontenera — lustro securityContext z k8s (non-root, rootfs RO, brak
+    # eskalacji, zrzut capabilities). Zapis tylko do woluminów audit/data i tmpfs /tmp.
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp
+    environment:
+      HUSARZ_CONFIG_DIR: /app/config
+      # Referencja do sekretu (warstwa ENV configu) — bez niej launcher nie rozwiąże
+      # tokenu i fail-closed odmówi nasłuchu 0.0.0.0. Sam token w HUSARZ_API_TOKEN.
+      HUSARZ_SECURITY__AUTH__API_TOKEN_REF: env:HUSARZ_API_TOKEN
+      HUSARZ_API_TOKEN: ${HUSARZ_API_TOKEN:?ustaw HUSARZ_API_TOKEN (patrz .env.example)}
+    volumes:
+      - ../../config:/app/config:ro
+      - ../../prompts:/app/prompts:ro
+      - husarz_audit:/app/audit
+      - husarz_data:/app/data
+    networks:
+      - husarz_internal
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: husarz
+      POSTGRES_USER: husarz
+      POSTGRES_PASSWORD: ${HUSARZ_PG_PASSWORD:?ustaw HUSARZ_PG_PASSWORD}
+    volumes:
+      - husarz_pg:/var/lib/postgresql/data
+    networks:
+      - husarz_internal
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # --requirepass: Redis, jak Postgres/MinIO, wymaga hasła (spójna obrona w głąb).
+    command:
+      - "redis-server"
+      - "--requirepass"
+      - "${HUSARZ_REDIS_PASSWORD:?ustaw HUSARZ_REDIS_PASSWORD}"
+      - "--save"
+      - "60"
+      - "1"
+      - "--appendonly"
+      - "yes"
+    volumes:
+      - husarz_redis:/data
+    networks:
+      - husarz_internal
+    restart: unless-stopped
+
+  minio:
+    # Tag przypięty (nie :latest) dla powtarzalności; w prod rozważ pin po @sha256.
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${HUSARZ_MINIO_USER:?ustaw HUSARZ_MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${HUSARZ_MINIO_PASSWORD:?ustaw HUSARZ_MINIO_PASSWORD}
+    volumes:
+      - husarz_minio:/data
+    networks:
+      - husarz_internal
+    restart: unless-stopped
+
+  vault:
+    image: hashicorp/vault:1.18
+    # UWAGA: domyślny obraz startuje w trybie -dev (niezaszyfrowany, root token w
+    # logu) — NIE dla produkcji. Do prod dostarcz `command: ["server"]` + zamontowany
+    # config i wykonaj init/unseal poza compose. Tu placeholder pod sekrety (Etap 3+).
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - husarz_vault:/vault/file
+    networks:
+      - husarz_internal
+    restart: unless-stopped
+
+networks:
+  husarz_internal:
+    driver: bridge
+    internal: true # brak trasy do WAN — deny-all egress na warstwie sieci
+
+volumes:
+  husarz_audit:
+  husarz_data:
+  husarz_pg:
+  husarz_redis:
+  husarz_minio:
+  husarz_vault:

@@ -98,13 +98,21 @@ def _cmd_up(args: argparse.Namespace) -> int:
 
     # Fail-closed: nasłuch poza loopbackiem BEZ tokenu = otwarte control-plane API.
     if not _is_loopback(args.host) and api_token is None:
+        if not args.allow_insecure:
+            print(
+                f"Odmowa: nasłuch na '{args.host}' (poza loopbackiem) wymaga tokenu API. "
+                "Ustaw security.auth.api_token_ref na referencję sekretu (env:/file:), "
+                "nasłuchuj na 127.0.0.1, albo (świadomie) użyj --allow-insecure.",
+                file=sys.stderr,
+            )
+            return 2
+        # Świadoma zgoda operatora (np. kontener za publikacją tylko na loopback hosta).
         print(
-            f"Odmowa: nasłuch na '{args.host}' (poza loopbackiem) wymaga tokenu API. "
-            "Ustaw security.auth.api_token_ref na referencję sekretu (env:/file:) "
-            "albo nasłuchuj na 127.0.0.1.",
+            f"OSTRZEŻENIE: nasłuch na '{args.host}' BEZ tokenu API (--allow-insecure). "
+            "Zabezpiecz dostęp na warstwie sieci (publikacja portu tylko na loopback, "
+            "NetworkPolicy).",
             file=sys.stderr,
         )
-        return 2
 
     # Importy leniwe — 'validate'/'version' nie wymagają FastAPI/uvicorn.
     import uvicorn  # noqa: PLC0415
@@ -166,6 +174,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_up.add_argument("--host", default="127.0.0.1", help="Adres nasłuchu (domyślnie loopback).")
     p_up.add_argument("--port", default=8000, type=int, help="Port API.")
     p_up.add_argument("--prompts", default="./prompts", help="Katalog promptów agentów.")
+    p_up.add_argument(
+        "--allow-insecure",
+        action="store_true",
+        help="Zezwól na nasłuch poza loopbackiem BEZ tokenu API (świadomie; zabezpiecz "
+        "dostęp na warstwie sieci). Domyślnie taki nasłuch jest odrzucany.",
+    )
     p_up.set_defaults(func=_cmd_up)
 
     return parser

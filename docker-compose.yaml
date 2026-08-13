@@ -1,21 +1,50 @@
 # ============================================================================
-# docker-compose.yaml — SZKIELET (pełna implementacja: Etap 6).
+# docker-compose.yaml — profil DEV (samowystarczalny, uruchom w katalogu repo).
 # ----------------------------------------------------------------------------
-# Profile: dev | prod | airgap. Usługi (postgres/pgvector, redis, minio, vault,
-# api, web, router) zostaną dodane wraz z odpowiednimi etapami. Na Etapie 0 plik
-# jest celowo pusty co do usług, by nie sugerować działającej infrastruktury.
+#   docker compose up --build
 #
-# W profilu "airgap" żadna usługa nie ma dostępu do WAN (deny-all egress);
-# manifesty k8s dodadzą NetworkPolicy deny-all (deploy/k8s, Etap 6).
+# Uruchamia sam rdzeń (API + konsola) na loopbacku HOSTA (127.0.0.1:8000).
+# Wewnątrz kontenera API nasłuchuje na 0.0.0.0 (wymóg konteneryzacji), ale port
+# jest publikowany WYŁĄCZNIE na 127.0.0.1 — stąd świadome --allow-insecure.
+# Ciężkie usługi (postgres/pgvector, redis, minio, vault) oraz TLS/ingress są w
+# profilach prod/airgap: deploy/compose/. Zob. docs/DEPLOY.md.
 # ============================================================================
 
-# Deklaracja profili — usługi przypisujemy do nich w kolejnych etapach.
-# Użycie (docelowo): docker compose --profile dev up
-#                    docker compose --profile airgap up
-services: {}
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: husarz-api:dev
+    # Publikacja tylko na loopback hosta — API nieosiągalne z sieci LAN/WAN.
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["up", "--profile", "dev", "--host", "0.0.0.0", "--allow-insecure"]
+    # Hardening kontenera (jak w prod): non-root, rootfs RO, brak eskalacji, zrzut caps.
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp
+    environment:
+      HUSARZ_CONFIG_DIR: /app/config
+    volumes:
+      # Konfiguracja i prompty montowane tylko-do-odczytu (edycja bez rebuildu).
+      - ./config:/app/config:ro
+      - ./prompts:/app/prompts:ro
+      # Audyt zapisywany na wolumenie nazwanym (trwałość między restartami).
+      - husarz_audit:/app/audit
+    networks:
+      - husarz_internal
+    restart: unless-stopped
 
-# Sieci: domyślnie wewnętrzna, bez dostępu na zewnątrz (dopracowanie w Etapie 6).
 networks:
+  # Sieć wewnętrzna bez trasy do WAN — spójne z deny-all egress.
   husarz_internal:
     driver: bridge
-    internal: true   # brak trasy do WAN — zgodne z deny-all egress
+    internal: true
+
+volumes:
+  husarz_audit:

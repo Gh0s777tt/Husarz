@@ -5,6 +5,40 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 6 — deploy i profile)
+- Obrazy: `Dockerfile` (`husarz-api`, wieloetapowy, non-root, healthcheck) oraz
+  `docker/husarz-sandbox.Dockerfile` (obraz narzędzi); `.dockerignore` bez wag/sekretów.
+- Docker Compose w profilach: `docker-compose.yaml` (dev, loopback) + nakładki
+  `deploy/compose/{base,prod,airgap}.yml`. Prod = proxy Caddy z TLS dla
+  `${HUSARZ_PUBLIC_HOST}` (domyślnie `husarzai.pl`), usługi danych w sieci wewnętrznej;
+  airgap = brak WAN, dostęp tylko przez loopback.
+- Manifesty Kubernetes (`deploy/k8s/`, Kustomize): NetworkPolicy **default-deny-all**
+  + wąskie reguły (ingress z nginx, DNS, egress API→dane; brak `0.0.0.0/0`),
+  Deployment hardened (runAsNonRoot, readOnlyRootFilesystem, drop ALL caps, seccomp),
+  Service ClusterIP, Ingress TLS (cert-manager), ConfigMap (referencje) + szablon Secret.
+- Launcher: flaga `--allow-insecure` (jawny opt-out fail-closed dla kontenerów).
+- CI: dodane `pip-audit` (SCA) i `hadolint` + build obrazu w GitHub Actions; nowy
+  `.gitlab-ci.yml` (lustro pipeline'u dla GitLaba).
+- Testy bezpieczeństwa: `tests/security/test_deploy_invariants.py` — parsowanie
+  compose/k8s i egzekwowanie niezmienników (deny-all, non-root, loopback, brak WAN).
+- Dokumentacja: `docs/DEPLOY.md`, ADR-0008; aktualizacja README/ROADMAP/deploy.
+
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 6)
+- **Blocker: prod/airgap nie startowały** — base compose wstrzykiwał wartość tokenu,
+  ale nie referencję; dodano `HUSARZ_SECURITY__AUTH__API_TOKEN_REF=env:HUSARZ_API_TOKEN`,
+  więc launcher rozwiązuje token i nie odmawia nasłuchu `0.0.0.0`.
+- **Hardening kontenera Compose** (dev+prod+airgap): `read_only`, `cap_drop: [ALL]`,
+  `no-new-privileges`, `user 1000:1000`, `tmpfs /tmp` — lustro securityContext z k8s.
+- **Redis z hasłem** (`--requirepass`, `HUSARZ_REDIS_PASSWORD`) — spójnie z Postgres/MinIO.
+- **Obrazy przypięte** (koniec `:latest`): `vault:1.18`, `minio:RELEASE.*`, `husarz-api:0.1.0`;
+  `pull_policy: never` na wszystkich usługach airgap.
+- **CI naprawione**: GitLab `docker-build` dostał `DOCKER_HOST`/`DOCKER_TLS_CERTDIR`
+  (dind); dodano `.hadolint.yaml` (świadome ignorowanie DL3008/DL3013).
+- **Vault**: sprostowany komentarz — domyślny obraz startuje w `-dev`; prod wymaga
+  własnego `command: [server]` + config + unseal.
+- Testy: +9 regresji (hardening compose, e2e rozwiązanie tokenu prod, hasło Redis,
+  pin obrazów, PSA `restricted`, sondy `/api/health`, brak `--allow-insecure` w k8s).
+
 ### Dodane (Etap 5 — API + launcher + konsola WWW)
 - Pakiet `husarz.api`: `create_app(config, ...)` (FastAPI) z endpointami health,
   config/summary, agents, models, tools, audit (+`verify`), usage, orchestrate,

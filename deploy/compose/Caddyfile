@@ -1,0 +1,18 @@
+# Caddyfile — proxy brzegowe profilu prod (terminacja TLS, HTTPS dla domeny).
+# Host publiczny z env HUSARZ_PUBLIC_HOST (domyślnie husarzai.pl). Caddy sam
+# pozyskuje i odnawia certyfikat (ACME) — jedyny komponent z dostępem do WAN.
+{$HUSARZ_PUBLIC_HOST} {
+	encode gzip
+	# API i konsola rdzenia. API wymaga nagłówka Authorization: Bearer <token>
+	# (poza /api/health) — proxy nie przechowuje tokenu, przekazuje żądania klienta.
+	reverse_proxy api:8000
+
+	header {
+		# Twardsze nagłówki bezpieczeństwa (defense-in-depth dla konsoli).
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

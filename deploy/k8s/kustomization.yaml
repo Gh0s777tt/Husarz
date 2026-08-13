@@ -1,0 +1,20 @@
+# Kustomize — spina manifesty Husarza. Zastosowanie:
+#   kubectl apply -k deploy/k8s
+# UWAGA: secret.example.yaml jest CELOWO pominięty — dostarcz sekrety osobno
+# (External Secrets / Sealed Secrets / Vault). Zmień host w ingress.yaml na własny.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: husarz
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - networkpolicy-default-deny.yaml
+  - networkpolicy-allow.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: husarz

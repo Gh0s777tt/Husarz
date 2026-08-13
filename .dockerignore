@@ -1,0 +1,47 @@
+# ============================================================================
+# .dockerignore — co NIE trafia do kontekstu obrazu.
+# Twarde wymogi: żadnych wag modeli, sekretów, danych ani śmieci deweloperskich.
+# ============================================================================
+
+# Wagi modeli — nigdy w obrazie (gitignored, potencjalnie wielkie).
+models/
+
+# Sekrety i lokalne środowisko.
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# Środowiska i cache Pythona.
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Dane runtime — nie pieczemy ich w obraz.
+audit/
+data/
+artifacts/
+workspace/
+
+# VCS i CI.
+.git/
+.github/
+.gitlab-ci.yml
+
+# Frontend (budowany osobno; obraz rdzenia serwuje konsolę statyczną).
+web/node_modules/
+
+# Testy i dokumentacja — niepotrzebne w obrazie runtime.
+tests/
+docs/
+deploy/
+*.md
+!README.md

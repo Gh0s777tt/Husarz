@@ -1,10 +1,13 @@
 # deploy/ — wdrożenia (Etap 6)
 
-Katalog na materiały wdrożeniowe. Wypełniany w **Etapie 6**.
+Materiały wdrożeniowe Husarza. Pełny przewodnik: [../docs/DEPLOY.md](../docs/DEPLOY.md).
 
-- `compose/` — pliki docker-compose per profil (dev/prod/airgap).
-- `k8s/` — manifesty Kubernetes z **NetworkPolicy deny-all** (domyślny brak egress).
+- `compose/` — nakładki Docker Compose dla profili **prod**/**airgap** (baza +
+  override). Profil **dev** to samowystarczalny `../docker-compose.yaml` w repo.
+- `k8s/` — manifesty Kubernetes (Kustomize) z **NetworkPolicy deny-all**, hardened
+  Deployment (non-root, read-only rootfs), Ingress TLS i szablonem sekretów.
 
-Zasady wdrożenia zgodne z modelem bezpieczeństwa: deny-all egress, sekrety z
-Vault/SOPS, mTLS między usługami, szyfrowanie at-rest. Szczegóły:
-[../SECURITY.md](../SECURITY.md), [../docs/BEZPIECZENSTWO.md](../docs/BEZPIECZENSTWO.md).
+Zasady zgodne z modelem bezpieczeństwa: deny-all egress, sekrety z Vault/SOPS/
+External Secrets (nie w repo), mTLS/TLS, szyfrowanie at-rest, non-root. Niezmienniki
+są testowane statycznie: [../tests/security/test_deploy_invariants.py](../tests/security/test_deploy_invariants.py).
+Szczegóły: [../SECURITY.md](../SECURITY.md), [../docs/BEZPIECZENSTWO.md](../docs/BEZPIECZENSTWO.md).

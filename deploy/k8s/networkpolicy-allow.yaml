@@ -1,0 +1,75 @@
+# ============================================================================
+# NetworkPolicy: wąskie reguły ZEZWALAJĄCE (nakładane na default-deny-all).
+# ----------------------------------------------------------------------------
+# Zasada najmniejszych uprawnień: otwieramy tylko to, co konieczne. Brak reguły
+# zezwalającej na egress do WAN — spójne z deny-all egress (dostęp do internetu
+# ma wyłącznie kontroler ingress, poza tym namespace).
+# ============================================================================
+---
+# 1) Ingress do API tylko z kontrolera ingress (nginx) na porcie 8000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-api
+  namespace: husarz
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: husarz-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# 2) Egress DNS (rozwiązywanie nazw usług w klastrze) — bez tego nic nie zadziała.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: husarz
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# 3) Egress API → usługi danych w tym samym namespace (Postgres/Redis/MinIO).
+#    Brak reguły do 0.0.0.0/0 — modele i dane są lokalne (suwerenność danych).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-data
+  namespace: husarz
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: husarz-api
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: husarz
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 9000

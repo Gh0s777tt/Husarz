@@ -243,6 +243,31 @@ def test_up_loopback_builds_app_without_serving(
     assert "app" in served  # aplikacja zbudowana i przekazana do uvicorn (nie uruchamiamy serwera)
 
 
+def test_up_allow_insecure_permits_open_bind(
+    repo_config_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Świadome --allow-insecure pozwala na nasłuch poza loopbackiem bez tokenu.
+    import uvicorn
+
+    served: dict[str, object] = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: served.update(app=app, kw=kw))
+    prompts = repo_config_dir.parent / "prompts"
+    args = build_parser().parse_args(
+        [
+            "up",
+            "--config",
+            str(repo_config_dir),
+            "--host",
+            "0.0.0.0",  # noqa: S104 - literał celowo testowany (opt-out)
+            "--allow-insecure",
+            "--prompts",
+            str(prompts),
+        ]
+    )
+    assert _cmd_up(args) == 0
+    assert "app" in served
+
+
 def test_resolve_api_token_from_env(repo_config_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HUSARZ_TEST_TOKEN", "  z-sekretu  ")
     config = load_config(

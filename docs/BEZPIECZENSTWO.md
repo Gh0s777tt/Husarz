@@ -174,3 +174,48 @@ Wdrożone poprawki bezpieczeństwa:
 tylko obecność; weryfikator jest wstrzykiwalny); audyt bez `hmac_key` jest tamper-evident
 wobec przypadkowej korekty, z kluczem — wobec zmotywowanego edytora (zalecane w prod);
 uwierzytelnienie (OIDC), mTLS oraz runtime egress/sandbox enforcement — API (Etap 5) i deploy (Etap 6).
+
+### Etap 5 — uwierzytelnianie API i hardening (przegląd adwersaryjny, data: 2026-08-13)
+
+**Zakres:** `husarz.api` (REST API + konsola) i launcher `husarz up`.
+
+| Niezmiennik                                                   | Test |
+|---------------------------------------------------------------|------|
+| API wymaga tokenu Bearer, gdy skonfigurowany (poza `/api/health`) | `test_auth_required_when_token_set` |
+| RBAC: operator bez `config:write`; viewer bez `agent:run`; admin pełny | `test_rbac_operator_cannot_write_config`, `test_rbac_viewer_cannot_orchestrate`, `test_rbac_admin_can_write_config` |
+| Błędy routera → kody HTTP (429/502/503), nie gołe 500          | `test_orchestrate_maps_router_errors` |
+| Liczniki usage/audyt spójne (próby + failures)                | `test_usage_counts_attempts_and_failures` |
+| Łańcuch audytu atomowy pod współbieżnością (Lock)             | `test_audit_chain_atomic_under_threads` |
+| `config/runtime` przebudowuje orkiestrator (koniec starej konfiguracji) | `test_config_runtime_rebuilds_orchestrator` |
+| Launcher fail-closed: nasłuch poza loopbackiem bez tokenu = odmowa | `test_up_refuses_non_loopback_without_token` |
+| Token API rozwiązywany z sekretu (env/file), fail-closed przy braku | `test_resolve_api_token_from_env`, `test_resolve_api_token_fails_closed_when_unresolvable` |
+| Konsola: dane z API escapowane HTML (anty-XSS)                | `test_console_escapes_interpolated_data` |
+
+### Etap 6 — niezmienniki wdrożeń (data: 2026-08-13)
+
+**Zakres:** obrazy, Docker Compose (dev/prod/airgap), manifesty k8s. Weryfikacja
+**statyczna** (parsowanie YAML) — bez uruchamiania klastra/Dockera.
+
+| Niezmiennik                                                   | Test |
+|---------------------------------------------------------------|------|
+| API publikowane tylko na loopbacku (dev/airgap)               | `test_dev_compose_publishes_api_only_on_loopback`, `test_airgap_api_loopback_only_and_no_wan` |
+| Prod: token wymagany, bez `--allow-insecure`; WAN tylko dla proxy | `test_prod_api_requires_token_no_insecure` |
+| Airgap: brak proxy/sieci brzegowej (bez WAN)                  | `test_airgap_api_loopback_only_and_no_wan` |
+| k8s: NetworkPolicy default-deny (ingress+egress)              | `test_k8s_default_deny_all_present` |
+| k8s: reguły zezwalające nie otwierają `0.0.0.0/0`             | `test_k8s_allow_policies_do_not_open_wan` |
+| k8s: Deployment non-root, read-only rootfs, drop ALL caps     | `test_k8s_deployment_hardened_non_root_readonly` |
+| k8s: Ingress wymusza TLS                                       | `test_k8s_ingress_uses_tls` |
+| Szablon Secret zawiera wyłącznie placeholdery                 | `test_secret_example_has_only_placeholders` |
+
+**Weryfikacja manualna (wykonano):** cała suita zielona (ruff/black/mypy `--strict`,
+pytest), gitleaks czysty (skan sekretów). Realne uruchomienie na klastrze z CNI
+egzekwującym NetworkPolicy, gVisor dla sandboxa oraz Vault (unseal) — środowisko
+docelowe (poza zakresem testów jednostkowych).
+
+**Przegląd adwersaryjny Etapu 6 (wykonano):** wieloagentowy przegląd deploy (16
+findingów, 12 potwierdzonych) — naprawiono m.in. blocker startu prod/airgap (brak
+referencji tokenu w compose), hardening kontenera Compose (rootfs RO, drop caps,
+no-new-privileges), hasło Redisa, przypięcie obrazów, `pull_policy: never` w airgapie,
+poprawki CI (dind, hadolint). Nowe testy niezmienników: hardening compose, e2e
+rozwiązanie tokenu prod, PSA `restricted`, sondy `/api/health`, brak `--allow-insecure`
+w k8s. Odrzucone (fałszywe): pętla Vault, brak Secreta (celowy), zapis artifacts/workspace.

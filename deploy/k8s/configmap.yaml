@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: husarz-config
+  namespace: husarz
+# Nadpisania NIE-sekretne (warstwa ENV hierarchii konfiguracji). Sam token jest w
+# Secret (husarz-secrets); tutaj tylko REFERENCJA do niego. Zero hardcode: wartości
+# domyślne w obrazie (config/*.yaml), tu tylko różnice środowiskowe.
+data:
+  HUSARZ_CONFIG_DIR: /app/config
+  HUSARZ_PLATFORM__PROFILE: prod
+  HUSARZ_PLATFORM__LOG_LEVEL: INFO
+  HUSARZ_SECURITY__EGRESS__DEFAULT_POLICY: deny
+  # API rozwiązuje token z env:HUSARZ_API_TOKEN (wartość z Secret poniżej).
+  HUSARZ_SECURITY__AUTH__API_TOKEN_REF: env:HUSARZ_API_TOKEN
+  HUSARZ_SECURITY__AUTH__API_ROLE: operator
