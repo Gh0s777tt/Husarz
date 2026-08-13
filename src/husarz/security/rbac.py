@@ -18,6 +18,10 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "operator": frozenset(
         {"config:read", "agent:run", "agent:puszkarz", "tool:*", "audit:read", "roe:authorize"}
     ),
+    # Zwykły użytkownik (np. samodzielna rejestracja): może rozmawiać/orkiestrować,
+    # ale NIE ma tool:*, roe:authorize (autoryzacja ofensywy) ani audit:read.
+    # Najmniejsze uprawnienia dla kont zakładanych publicznie.
+    "user": frozenset({"config:read", "agent:run"}),
     "viewer": frozenset({"config:read", "audit:read"}),
 }
 

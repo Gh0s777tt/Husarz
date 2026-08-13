@@ -277,21 +277,47 @@ class AuthConfig(_StrictModel):
     oidc_enabled: bool = False
     issuer: str | None = None
     client_id: str | None = None
-    roles: list[str] = Field(default_factory=lambda: ["admin", "operator", "viewer"])
+    roles: list[str] = Field(default_factory=lambda: ["admin", "operator", "user", "viewer"])
     api_token_ref: str | None = None
     api_role: str = "operator"
     # --- Konta użytkowników (Etap 7): logowanie/rejestracja, sesje, limity ---
     # Rejestracja domyślnie WYŁĄCZONA (model „dla wybranych" — konta tworzy admin).
     allow_registration: bool = False
-    default_user_role: str = "operator"
+    # Domyślna rola nowego konta = 'user' (najmniejsze uprawnienia: czat/orkiestracja,
+    # bez tool:*/roe:authorize/audit:read). Podniesienie roli wymaga decyzji admina.
+    default_user_role: str = "user"
     # Limit tokenów dla nowego konta (None = bez limitu; sensowne w trybie hostowanym).
     default_token_quota: int | None = Field(default=None, ge=1)
     session_ttl_minutes: int = Field(default=720, ge=1)
+    # Anty-brute-force logowania: blokada konta po N nieudanych próbach na M minut.
+    login_max_attempts: int = Field(default=5, ge=1)
+    login_lockout_minutes: int = Field(default=15, ge=1)
     # Trwały magazyn kont (JSON). None = tylko w pamięci (dev/testy, bez trwałości).
     accounts_path: Path | None = None
     # Seed konta administratora przy pustym magazynie (hasło z referencji do sekretu).
+    # Oba pola muszą być ustawione RAZEM (walidator poniżej).
     seed_admin_username: str | None = None
     seed_admin_password_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_roles_and_seed(self) -> AuthConfig:
+        known = set(self.roles)
+        if self.api_role not in known:
+            raise ValueError(
+                f"security.auth.api_role='{self.api_role}' nie należy do auth.roles "
+                f"({sorted(known)})."
+            )
+        if self.default_user_role not in known:
+            raise ValueError(
+                f"security.auth.default_user_role='{self.default_user_role}' nie należy "
+                f"do auth.roles ({sorted(known)})."
+            )
+        if bool(self.seed_admin_username) != bool(self.seed_admin_password_ref):
+            raise ValueError(
+                "security.auth: seed_admin_username i seed_admin_password_ref muszą być "
+                "ustawione RAZEM (albo oba, albo żadne)."
+            )
+        return self
 
 
 class AuditConfig(_StrictModel):

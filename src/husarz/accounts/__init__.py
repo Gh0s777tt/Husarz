@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from husarz.accounts.errors import (
     AccountError,
+    AccountLockedError,
     AuthenticationError,
     QuotaExceededError,
     RegistrationDisabledError,
@@ -27,6 +28,7 @@ from husarz.accounts.store import (
 __all__ = [
     "Account",
     "AccountError",
+    "AccountLockedError",
     "AccountService",
     "AccountStore",
     "AuthenticationError",

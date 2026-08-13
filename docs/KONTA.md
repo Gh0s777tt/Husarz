@@ -21,21 +21,28 @@ Konta są aktywne, gdy w `security.auth` ustawisz choć jedno: `accounts_path`,
 ```yaml
 # config/security.yaml → auth:
 allow_registration: false        # false = konta zakłada admin („dla wybranych")
-default_user_role: operator
+default_user_role: user          # najmniejsze uprawnienia (czat); admin podnosi rolę
 default_token_quota: null        # null = bez limitu; liczba = limit tokenów per konto
 session_ttl_minutes: 720
+login_max_attempts: 5            # blokada konta po tylu nieudanych logowaniach…
+login_lockout_minutes: 15        # …na tyle minut (anty-brute-force)
 accounts_path: ./data/accounts.json   # trwałość (null = tylko w pamięci)
 seed_admin_username: hetman
-seed_admin_password_ref: env:HUSARZ_ADMIN_PASSWORD   # REFERENCJA do sekretu
+seed_admin_password_ref: env:HUSARZ_ADMIN_PASSWORD   # REFERENCJA (oba pola seed razem)
 ```
+
+Konta zakładane administracyjnie (gdy rejestracja wyłączona): `husarz useradd`
+(patrz niżej). Rola `user` może rozmawiać/orkiestrować, ale NIE ma `tool:*`,
+`roe:authorize` ani `audit:read` — podniesienie do `operator`/`admin` to decyzja admina.
 
 Gdy magazyn jest pusty, a skonfigurowano seed — przy starcie tworzone jest konto
 administratora (hasło z sekretu; fail-closed, gdy nierozwiązywalne).
 
 ## Uwierzytelnianie API
 
-Gdy konta są aktywne (lub ustawiono `api_token_ref`), wszystkie endpointy poza
-`/api/health` wymagają nagłówka `Authorization: Bearer <token>`. Akceptowany jest:
+Gdy konta są aktywne (lub ustawiono `api_token_ref`), endpointy `/api` wymagają
+nagłówka `Authorization: Bearer <token>` — **poza** publicznymi: `/api/health`
+(liveness), `/api/auth/register`, `/api/auth/login` oraz `/` (konsola). Akceptowany jest:
 
 - **token sesji** użytkownika (z `/api/auth/login`), albo
 - **statyczny token maszynowy** (`api_token_ref` — admin/CI).
@@ -46,7 +53,7 @@ Gdy konta są aktywne (lub ustawiono `api_token_ref`), wszystkie endpointy poza
 |------------------|------|------|
 | `POST /api/auth/register` | `{username, password}` → konto + token sesji (gdy `allow_registration`) | publiczny |
 | `POST /api/auth/login` | `{username, password}` → token sesji | publiczny |
-| `POST /api/auth/logout` | unieważnia sesję (nagłówek Bearer) | Bearer |
+| `POST /api/auth/logout` | unieważnia sesję (idempotentny; czyta token z nagłówka) | Bearer (opc.) |
 | `GET /api/auth/me` | bieżący użytkownik: rola, **aktywny model czatu**, `tokens_used`, `token_quota`, `tokens_remaining` | Bearer |
 
 Limit tokenów: gdy konto ma `token_quota` i je wyczerpie, `POST /api/chat` i
@@ -55,10 +62,16 @@ odpowiedzi modelu (dla czatu; orkiestracja — po zsumowaniu zużycia w kolejnym
 
 ## Bezpieczeństwo
 
-- Hasła: `scrypt` (memory-hard), losowa sól per hasło, porównanie w stałym czasie;
-  nigdy nie są przechowywane ani logowane w postaci jawnej.
+- Hasła: `scrypt` (memory-hard, n=2¹⁶), losowa sól per hasło, porównanie w stałym
+  czasie; nigdy nie są przechowywane ani logowane w postaci jawnej.
 - Enumeracja użytkowników utrudniona: weryfikacja hasha także przy braku konta.
-- Sesje: nieprzewidywalny token (`secrets.token_urlsafe`), TTL, unieważnianie.
+- **Anty-brute-force**: blokada konta po `login_max_attempts` nieudanych próbach na
+  `login_lockout_minutes` (HTTP 429); nieudane logowania i blokady są audytowane.
+- Sesje: nieprzewidywalny token (`secrets.token_urlsafe`), TTL, unieważnianie,
+  sprzątanie wygasłych przy logowaniu + limit sesji na użytkownika.
+- **Najmniejsze uprawnienia**: nowe konta dostają rolę `user` (czat), nie `operator`.
+- Trwały magazyn kont: zapis **atomowy** (temp + `os.replace`) pod zamkiem — brak
+  ryzyka uszkodzenia pliku poświadczeń przy współbieżności.
 - Seed-admin: hasło wyłącznie z referencji do sekretu (zero hardcode).
 
 Decyzje: [ADR-0009](adr/0009-konta-tokeny.md). Model bezpieczeństwa: [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md).

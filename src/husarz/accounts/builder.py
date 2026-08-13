@@ -31,6 +31,8 @@ def build_account_service(
         allow_registration=auth.allow_registration,
         default_role=auth.default_user_role,
         default_token_quota=auth.default_token_quota,
+        login_max_attempts=auth.login_max_attempts,
+        login_lockout_seconds=auth.login_lockout_minutes * 60,
     )
     _seed_admin(service, auth, secrets or NullSecretsProvider())
     return service

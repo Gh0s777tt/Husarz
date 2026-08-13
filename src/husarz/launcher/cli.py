@@ -9,6 +9,7 @@ Podkomendy:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
 from typing import Any
@@ -88,9 +89,10 @@ def _resolve_api_token(config: HusarzConfig) -> str | None:
 
 
 def _accounts_enabled(config: HusarzConfig) -> bool:
-    """Czy konta są aktywne (skonfigurowano magazyn, seed lub rejestrację)."""
+    """Czy konta są aktywne (skonfigurowano magazyn, kompletny seed lub rejestrację)."""
     auth = config.security.auth
-    return bool(auth.accounts_path or auth.seed_admin_username or auth.allow_registration)
+    seed = bool(auth.seed_admin_username and auth.seed_admin_password_ref)
+    return bool(auth.accounts_path or seed or auth.allow_registration)
 
 
 def _build_accounts(config: HusarzConfig) -> Any:
@@ -194,6 +196,45 @@ def _cmd_up(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_useradd(args: argparse.Namespace) -> int:
+    """Tworzy konto użytkownika (admin) — dla modelu „dostęp dla wybranych".
+
+    Hasło pobierane jest ze zmiennej środowiskowej (``--password-env``), nie z
+    argumentu (brak w historii powłoki). Wymaga trwałego magazynu (``accounts_path``).
+    """
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    auth = config.security.auth
+    if auth.accounts_path is None:
+        print(
+            "useradd wymaga trwałego magazynu — ustaw security.auth.accounts_path.",
+            file=sys.stderr,
+        )
+        return 1
+    password = os.environ.get(args.password_env, "")
+    if not password.strip():
+        print(f"Brak hasła: ustaw zmienną środowiskową {args.password_env}.", file=sys.stderr)
+        return 1
+
+    from husarz.accounts.builder import build_account_service  # noqa: PLC0415
+    from husarz.accounts.errors import AccountError  # noqa: PLC0415
+
+    try:
+        service = build_account_service(auth, secrets=_SchemeSecrets())
+        account = service.create_account(
+            args.username, password.strip(), role=args.role, token_quota=args.quota
+        )
+    except (AccountError, ConfigError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    quota = account.token_quota if account.token_quota is not None else "brak"
+    print(f"Utworzono konto '{account.username}' (rola: {account.role}, limit tokenów: {quota}).")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Buduje parser argumentów CLI."""
     parser = argparse.ArgumentParser(
@@ -227,6 +268,22 @@ def build_parser() -> argparse.ArgumentParser:
         "dostęp na warstwie sieci). Domyślnie taki nasłuch jest odrzucany.",
     )
     p_up.set_defaults(func=_cmd_up)
+
+    p_useradd = sub.add_parser("useradd", help="Utwórz konto użytkownika (admin; hasło z ENV).")
+    p_useradd.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_useradd.add_argument("--username", required=True, help="Nazwa użytkownika.")
+    p_useradd.add_argument(
+        "--role", default=None, help="Rola RBAC (domyślnie security.auth.default_user_role)."
+    )
+    p_useradd.add_argument(
+        "--quota", type=int, default=None, help="Limit tokenów (domyślnie: z configu/bez limitu)."
+    )
+    p_useradd.add_argument(
+        "--password-env",
+        default="HUSARZ_NEW_USER_PASSWORD",
+        help="Nazwa zmiennej środowiskowej z hasłem nowego konta.",
+    )
+    p_useradd.set_defaults(func=_cmd_useradd)
 
     return parser
 

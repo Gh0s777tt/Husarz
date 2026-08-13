@@ -26,6 +26,24 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   (sesja jako Bearer, 402, RBAC viewer), seed-admin fail-closed.
 - Dokumentacja: `docs/KONTA.md`, ADR-0009.
 
+### Poprawione / Bezpieczeństwo (adwersaryjny przegląd Etapu 7)
+- **Najmniejsze uprawnienia**: nowe konta dostają rolę `user` (czat/orkiestracja),
+  nie `operator` (bez `tool:*`, `roe:authorize`, `audit:read`). Dodano rolę `user`.
+- **Anty-brute-force**: blokada konta po `login_max_attempts` nieudanych logowaniach
+  na `login_lockout_minutes` (HTTP 429); nieudane logowania/blokady audytowane.
+- **Walidacja ról**: `api_role`/`default_user_role` muszą należeć do `auth.roles`;
+  pola seed-admina wymagane RAZEM (walidator schematu, czytelny błąd po polsku).
+- **Hasła**: scrypt `n=2**16` (bliżej OWASP; jawny `maxmem`).
+- **Trwały magazyn kont**: zapis atomowy (temp + `os.replace`) pod zamkiem — koniec
+  ryzyka uszkodzenia pliku poświadczeń przy współbieżności.
+- **Sesje**: sprzątanie wygasłych przy logowaniu + limit sesji na użytkownika.
+- **Pusty token maszynowy** normalizowany do braku (koniec dopasowania „Bearer ").
+- `check_quota` pod tym samym zamkiem co `record_usage` (limit udokumentowany jako miękki).
+- **`husarz useradd`** — admin tworzy konta „dla wybranych" (hasło z ENV), gdy
+  rejestracja wyłączona. Wymaga trwałego magazynu (`accounts_path`).
+- Testy: +14 regresji (rola user, lockout+429, walidacja ról/seed, atomowy zapis,
+  pusty Bearer, sweep sesji, most config→konta, fail-closed z kontami, useradd).
+
 ### Dodane (Czat lokalny + customowy model Ollama)
 - **Customowy model Ollama** `husarz` (`ollama/Husarz.Modelfile`): persona hetmana
   (PL, czat + kodowanie) zaszyta w `SYSTEM`, baza wymienna przez `FROM` (domyślnie

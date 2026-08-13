@@ -8,7 +8,9 @@ w rdzeniu. Hasła trafiają tu WYŁĄCZNIE jako hash (patrz ``passwords``).
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import threading
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -110,6 +112,9 @@ class FileAccountStore(InMemoryAccountStore):
     def __init__(self, path: str | Path) -> None:
         super().__init__()
         self._path = Path(path)
+        # Serializuje cykl mutacja+zapis (endpointy FastAPI biegną w puli wątków) —
+        # inaczej iteracja po słowniku podczas równoległej mutacji psuje plik kont.
+        self._file_lock = threading.Lock()
         self._load()
 
     def _load(self) -> None:
@@ -125,17 +130,23 @@ class FileAccountStore(InMemoryAccountStore):
             self._id_by_name[_norm(account.username)] = account.user_id
 
     def _persist(self) -> None:
+        # Zapis ATOMOWY: plik tymczasowy w tym samym katalogu + os.replace — przerwany
+        # zapis nie zostawia uszkodzonego pliku poświadczeń. Wołane pod ``_file_lock``.
         self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"accounts": [asdict(a) for a in self._by_id.values()]}
-        self._path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp = self._path.with_name(f"{self._path.name}.tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, self._path)
 
     def add(self, account: Account) -> None:  # noqa: D102
-        super().add(account)
-        self._persist()
+        with self._file_lock:
+            super().add(account)
+            self._persist()
 
     def update(self, account: Account) -> None:  # noqa: D102
-        super().update(account)
-        self._persist()
+        with self._file_lock:
+            super().update(account)
+            self._persist()
 
 
 def with_usage(account: Account, tokens: int) -> Account:

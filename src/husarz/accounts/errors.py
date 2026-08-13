@@ -15,5 +15,9 @@ class AuthenticationError(AccountError):
     """Nieprawidłowe poświadczenia (zła nazwa lub hasło)."""
 
 
+class AccountLockedError(AccountError):
+    """Konto tymczasowo zablokowane po zbyt wielu nieudanych próbach logowania."""
+
+
 class QuotaExceededError(AccountError):
     """Wyczerpany limit tokenów konta."""

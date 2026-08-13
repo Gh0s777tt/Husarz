@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from husarz.accounts.errors import (
+    AccountLockedError,
     AuthenticationError,
     QuotaExceededError,
     RegistrationDisabledError,
@@ -48,8 +49,11 @@ class AccountService:
         clock: Callable[[], datetime] = _default_clock,
         session_ttl_seconds: int = 12 * 3600,
         allow_registration: bool = False,
-        default_role: str = "operator",
+        default_role: str = "user",
         default_token_quota: int | None = None,
+        login_max_attempts: int = 5,
+        login_lockout_seconds: int = 15 * 60,
+        max_sessions_per_user: int = 20,
     ) -> None:
         self._store: AccountStore = store if store is not None else InMemoryAccountStore()
         self._clock = clock
@@ -57,7 +61,12 @@ class AccountService:
         self._allow_registration = allow_registration
         self._default_role = default_role
         self._default_quota = default_token_quota
+        self._max_attempts = login_max_attempts
+        self._lockout = login_lockout_seconds
+        self._max_sessions = max_sessions_per_user
         self._sessions: dict[str, _SessionData] = {}
+        # Znaczniki czasu nieudanych logowań per (znormalizowana) nazwa — anty-brute-force.
+        self._failed: dict[str, list[float]] = {}
         self._lock = threading.Lock()
 
     # --- Tworzenie kont ----------------------------------------------------
@@ -96,25 +105,63 @@ class AccountService:
 
     # --- Logowanie i sesje -------------------------------------------------
 
+    def _prune_failures(self, key: str, now: float) -> list[float]:
+        """Zwraca (i zapisuje) nieudane próby z bieżącego okna blokady dla klucza."""
+        recent = [t for t in self._failed.get(key, []) if t >= now - self._lockout]
+        if recent:
+            self._failed[key] = recent
+        else:
+            self._failed.pop(key, None)
+        return recent
+
     def authenticate(self, username: str, password: str) -> Account:
-        """Weryfikuje poświadczenia. Rzuca ``AuthenticationError`` przy błędzie."""
+        """Weryfikuje poświadczenia. Rzuca ``AuthenticationError``/``AccountLockedError``."""
+        key = username.strip().casefold()
+        now = self._clock().timestamp()
+        with self._lock:
+            if len(self._prune_failures(key, now)) >= self._max_attempts:
+                raise AccountLockedError(
+                    "Konto tymczasowo zablokowane po zbyt wielu nieudanych próbach. "
+                    "Spróbuj ponownie później."
+                )
         account = self._store.get_by_username(username)
         # Weryfikujemy hash nawet przy braku konta — zbliżony czas odpowiedzi
         # (ogranicza enumerację użytkowników przez pomiar czasu).
         reference = account.password_hash if account else _DUMMY_HASH
         ok = verify_password(password, reference)
         if account is None or not ok:
+            with self._lock:
+                self._failed.setdefault(key, []).append(now)
             raise AuthenticationError("Nieprawidłowa nazwa użytkownika lub hasło.")
+        with self._lock:
+            self._failed.pop(key, None)  # udane logowanie czyści licznik blokady
         return account
 
     def login(self, username: str, password: str) -> tuple[Account, str]:
         """Loguje użytkownika i zwraca ``(konto, token_sesji)``."""
         account = self.authenticate(username, password)
         token = secrets.token_urlsafe(32)
-        expires = self._clock().timestamp() + self._ttl
+        now = self._clock().timestamp()
         with self._lock:
-            self._sessions[token] = _SessionData(account.user_id, expires)
+            self._sweep_sessions(now)
+            self._cap_user_sessions(account.user_id)
+            self._sessions[token] = _SessionData(account.user_id, now + self._ttl)
         return account, token
+
+    def _sweep_sessions(self, now: float) -> None:
+        """Usuwa wygasłe sesje (ogranicza narastanie pamięci). Wołane pod zamkiem."""
+        expired = [tok for tok, data in self._sessions.items() if now >= data.expires_at]
+        for tok in expired:
+            del self._sessions[tok]
+
+    def _cap_user_sessions(self, user_id: str) -> None:
+        """Ogranicza liczbę aktywnych sesji na użytkownika (usuwa najstarsze). Pod zamkiem."""
+        owned = [(tok, d.expires_at) for tok, d in self._sessions.items() if d.user_id == user_id]
+        if len(owned) < self._max_sessions:
+            return
+        owned.sort(key=lambda item: item[1])  # najstarsze (najwcześniej wygasające) pierwsze
+        for tok, _ in owned[: len(owned) - self._max_sessions + 1]:
+            del self._sessions[tok]
 
     def resolve_session(self, token: str) -> Account | None:
         """Zwraca konto dla ważnego tokenu sesji albo ``None`` (wygasł/nieznany)."""
@@ -136,12 +183,18 @@ class AccountService:
     # --- Limity i zużycie tokenów -----------------------------------------
 
     def check_quota(self, user_id: str) -> None:
-        """Rzuca ``QuotaExceededError``, gdy konto wyczerpało limit tokenów."""
-        account = self._store.get(user_id)
-        if account is None or account.token_quota is None:
-            return
-        if account.tokens_used >= account.token_quota:
-            raise QuotaExceededError("Wyczerpano limit tokenów konta.")
+        """Rzuca ``QuotaExceededError``, gdy konto wyczerpało limit tokenów.
+
+        Limit jest z natury MIĘKKI: rozliczenie tokenów następuje po odpowiedzi
+        modelu, więc równoległe żądania tuż przy progu mogą go nieznacznie przekroczyć.
+        Sprawdzenie pod tym samym zamkiem co ``record_usage`` (spójny odczyt).
+        """
+        with self._lock:
+            account = self._store.get(user_id)
+            if account is None or account.token_quota is None:
+                return
+            if account.tokens_used >= account.token_quota:
+                raise QuotaExceededError("Wyczerpano limit tokenów konta.")
 
     def record_usage(self, user_id: str, tokens: int) -> None:
         """Dolicza zużyte tokeny do konta (atomowo)."""

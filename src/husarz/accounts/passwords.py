@@ -15,12 +15,18 @@ import hmac
 import os
 
 # Parametry scrypt: n (koszt CPU/pamięci), r (rozmiar bloku), p (równoległość).
-# n=2**14 to rozsądny kompromis bezpieczeństwo/koszt dla logowania interaktywnego.
-_N = 2**14
+# n=2**16 (~64 MiB) — utwardzenie bliżej wytycznych OWASP (2**17 idealnie). Parametry
+# są zakodowane w hashu (n$r$p$...), więc możliwy jest przezroczysty rehash przy
+# logowaniu, gdy operator podniesie koszt w przyszłości.
+_N = 2**16
 _R = 8
 _P = 1
 _DKLEN = 32
 _SALT_BYTES = 16
+# Limit pamięci dla OpenSSL (domyślny ~32 MiB nie wystarcza dla n=2**16 ≈ 64 MiB).
+# Sufit chroni też weryfikację przed patologicznie dużym 'n' w zapisanym hashu
+# (przekroczenie → ValueError → fail-closed w verify_password).
+_MAXMEM = 132 * 1024 * 1024
 
 
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
@@ -36,7 +42,9 @@ def hash_password(password: str, *, salt: bytes | None = None) -> str:
     if not password:
         raise ValueError("Hasło nie może być puste.")
     salt = salt if salt is not None else os.urandom(_SALT_BYTES)
-    derived = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=_N, r=_R, p=_P, dklen=_DKLEN)
+    derived = hashlib.scrypt(
+        password.encode("utf-8"), salt=salt, n=_N, r=_R, p=_P, dklen=_DKLEN, maxmem=_MAXMEM
+    )
     return (
         f"scrypt${_N}${_R}${_P}$"
         f"{base64.b64encode(salt).decode('ascii')}$"
@@ -59,6 +67,7 @@ def verify_password(password: str, encoded: str) -> bool:
             r=int(r_str),
             p=int(p_str),
             dklen=len(expected),
+            maxmem=_MAXMEM,
         )
     except (ValueError, TypeError, binascii.Error):
         return False

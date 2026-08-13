@@ -240,3 +240,24 @@ w k8s. Odrzucone (fałszywe): pętla Vault, brak Secreta (celowy), zapis artifac
 **Weryfikacja na żywo (wykonano):** uruchomiony serwer z kontami — rejestracja →
 token, `/api/auth/me` (rola, model `husarz-local`, liczniki), sesja jako Bearer (200),
 wylogowanie → 401. Konsola serwuje modal logowania i pasek użytkownika.
+
+### Etap 7 — hardening po przeglądzie adwersaryjnym (data: 2026-08-13)
+
+Przegląd (3 wymiary, 15 findingów, 12 potwierdzonych — brak osiągalnego obejścia
+auth w dostarczanej ścieżce) i wdrożone utwardzenia:
+
+| Poprawka | Test |
+|---|---|
+| Najmniejsze uprawnienia: nowe konta = rola `user` (nie `operator`) | `test_default_registration_role_is_user` |
+| Anty-brute-force: blokada po N próbach (HTTP 429), audyt nieudanych | `test_login_lockout_after_max_attempts`, `test_api_login_lockout_returns_429`, `test_lockout_window_expires` |
+| Walidacja `api_role`/`default_user_role` ∈ `roles`; seed parowany | `test_config_rejects_unknown_api_role`, `test_config_rejects_partial_seed` |
+| Hasła scrypt `n=2**16` (jawny `maxmem`) | (przez pełną suitę haseł) |
+| Trwały magazyn: zapis atomowy (`os.replace`) pod zamkiem | `test_file_store_atomic_leaves_no_tmp` |
+| Sesje: sprzątanie wygasłych + limit per użytkownik | `test_session_sweep_bounds_growth` |
+| Pusty token maszynowy normalizowany do braku | `test_empty_bearer_rejected_when_token_set` |
+| Most config→konta (ENV/seed) i fail-closed z kontami | `test_accounts_enabled_and_built_from_env`, `test_up_with_accounts_allows_non_loopback` |
+| `husarz useradd` (konta „dla wybranych") | `test_useradd_creates_persistent_account` |
+
+**Ograniczenia (świadome):** limit tokenów jest miękki (rozliczanie po odpowiedzi);
+throttling logowania jest per-konto/in-proces (per-IP i współdzielony magazyn sesji —
+przy skalowaniu poziomym); rozliczanie tokenów orkiestracji — po zsumowaniu `usage`.

@@ -40,7 +40,7 @@ auth:
   oidc_enabled: false        # włącz w prod (pełny przepływ tożsamości — Etap 6)
   issuer: null
   client_id: null
-  roles: [admin, operator, viewer]
+  roles: [admin, operator, user, viewer]
   # Token API (Bearer) dla REST API/konsoli. Podaj REFERENCJĘ do sekretu (nie sam
   # token!): "env:HUSARZ_API_TOKEN" lub "file:api_token". Gdy null — uwierzytelnianie
   # wyłączone (dozwolone WYŁĄCZNIE na loopbacku; launcher wymusza token dla 0.0.0.0).
@@ -49,9 +49,11 @@ auth:
   # --- Konta użytkowników (logowanie/rejestracja, sesje, limity tokenów) ---
   # Aktywne, gdy ustawisz accounts_path LUB seed_admin_username LUB allow_registration.
   allow_registration: false  # false = „dla wybranych" (konta zakłada admin)
-  default_user_role: operator
+  default_user_role: user     # najmniejsze uprawnienia (czat); admin podnosi rolę świadomie
   default_token_quota: null   # null = bez limitu (tryb suwerenny); liczba = limit per konto
   session_ttl_minutes: 720    # ważność sesji (12 h)
+  login_max_attempts: 5       # blokada konta po tylu nieudanych logowaniach…
+  login_lockout_minutes: 15   # …na tyle minut (anty-brute-force)
   accounts_path: null         # np. ./data/accounts.json (trwałość); null = tylko w pamięci
   # Seed administratora przy pustym magazynie — hasło z REFERENCJI do sekretu:
   seed_admin_username: null

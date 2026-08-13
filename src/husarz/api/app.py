@@ -27,6 +27,7 @@ from husarz import __version__
 from husarz.accounts import AccountService, Principal
 from husarz.accounts.errors import (
     AccountError,
+    AccountLockedError,
     AuthenticationError,
     QuotaExceededError,
     RegistrationDisabledError,
@@ -113,6 +114,10 @@ def create_app(
     w runtime — bez niego ``/api/orchestrate`` i ``/api/chat`` działałyby na starej
     konfiguracji. ``chat_model`` nadpisuje model trybu czatu (domyślnie z configu).
     """
+    # Pusty/whitespace token maszynowy traktujemy jak brak — inaczej „Bearer " (pusty)
+    # mógłby się zrównać z pustym api_token (compare_digest(b"", b"")==True).
+    api_token = api_token.strip() if api_token and api_token.strip() else None
+
     app = FastAPI(title="Husarz API", version=__version__)
     if trusted_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
@@ -156,8 +161,11 @@ def create_app(
             raise HTTPException(status_code=401, detail="Wymagany token Bearer.")
         presented = authorization[len(prefix) :]
         # 1) Statyczny token maszynowy (admin/CI) — porównanie w stałym czasie.
-        if api_token is not None and hmac.compare_digest(
-            presented.encode("utf-8"), api_token.encode("utf-8")
+        # Guard na prawdziwości obu operandów: pusty token nigdy nie pasuje.
+        if (
+            api_token
+            and presented
+            and hmac.compare_digest(presented.encode("utf-8"), api_token.encode("utf-8"))
         ):
             return Principal(role=role, user_id=None, username=None)
         # 2) Token sesji użytkownika.
@@ -438,7 +446,12 @@ def create_app(
             raise HTTPException(status_code=404, detail="Konta nie są włączone.")
         try:
             account, token = accounts.login(request.username, request.password)
+        except AccountLockedError as exc:
+            # Nieudane próby są audytowane (w tym blokada) — inaczej niż sukces.
+            audit_log.record("api", "auth.login.locked", {"username": request.username[:64]})
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         except AuthenticationError as exc:
+            audit_log.record("api", "auth.login.failed", {"username": request.username[:64]})
             raise HTTPException(
                 status_code=401, detail="Nieprawidłowa nazwa użytkownika lub hasło."
             ) from exc
