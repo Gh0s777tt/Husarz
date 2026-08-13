@@ -12,7 +12,13 @@ Dodanie/wymiana agenta nie wymaga zmian w rdzeniu.
 Implementacja (Etap 2): `husarz.agents` — `BaseAgent`, `Towarzysz`, `Pocztowy`,
 `build_agents(config, prompts_dir)`. Agenci są dobierani do modelu przez router
 (`agent=<nazwa>`), a hetmanem dowodzi orkiestrator — patrz [ORKIESTRATOR.md](ORKIESTRATOR.md).
-Pętla narzędziowa (function-calling) dla Towarzysza dojdzie w Etapie 3.
+
+**Pętla narzędziowa (Etap 13, ADR-0016):** agent wykonuje narzędzia w pętli ReAct po
+jawnym opt-in `tool_loop_enabled: true` (domyślnie `false` — deny-by-default). Wtedy
+`Orchestrator` deleguje go przez `ToolLoop` (autoryzacja per-wywołanie, audyt, budżet),
+a nie jako pojedyncze wywołanie. Agent `roe_required` (Puszkarz) NIE wchodzi w pętlę.
+Uwaga: `shell` z `python` na allowliście = wykonanie dowolnego kodu w sandboxie — włączaj
+pętlę świadomie, z minimalną allowlistą. Patrz [NARZEDZIA.md](NARZEDZIA.md), [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md).
 
 ## Roster
 
@@ -59,7 +65,8 @@ tagach → `models.default`. Ustaw `model: auto`, by całość zostawić routero
 | `model`         | str            | Id modelu z rejestru lub `auto`. |
 | `prompt_file`   | str            | Plik promptu w `prompts/`. |
 | `tools`         | list[str]      | Allowlista narzędzi (muszą istnieć w `config/tools/`). |
-| `max_iterations`| int            | Limit iteracji pętli agenta. |
+| `max_iterations`| int            | Limit iteracji pętli narzędziowej (per krok). |
+| `tool_loop_enabled` | bool       | Opt-in na pętlę narzędziową (domyślnie `false`). |
 | `roe_required`  | bool           | `true` wymusza aktywne ROE (Puszkarz). |
 | `enabled`       | bool           | Czy agent aktywny. |
 | `params`        | dict           | Parametry dodatkowe. |

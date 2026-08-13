@@ -13,6 +13,7 @@ from pathlib import Path
 
 from husarz.agents.base import BaseAgent, SupportsComplete
 from husarz.agents.loader import build_agents
+from husarz.agents.tool_loop import ToolCallBudget, ToolLoop
 from husarz.config.schema import HusarzConfig
 from husarz.orchestrator.plan import Plan, PlanStep, Reflection, parse_plan, parse_reflection
 from husarz.orchestrator.prompts import (
@@ -66,6 +67,8 @@ class Orchestrator:
         orchestrator_name: str = DEFAULT_ORCHESTRATOR,
         max_extra_rounds: int = 1,
         isolate_untrusted: bool = True,
+        tool_loop: ToolLoop | None = None,
+        max_plan_steps: int = 20,
     ) -> None:
         if orchestrator_name not in agents:
             raise OrchestratorError(
@@ -77,6 +80,9 @@ class Orchestrator:
         self._orchestrator = agents[orchestrator_name]
         self._max_extra_rounds = max_extra_rounds
         self._isolate_untrusted = isolate_untrusted
+        # Pętla narzędziowa (opcjonalna). Bez niej — zachowanie sprzed Etapu 13.
+        self._tool_loop = tool_loop
+        self._max_plan_steps = max_plan_steps
 
     # -- fazy ---------------------------------------------------------------
 
@@ -99,7 +105,9 @@ class Orchestrator:
         content = self._ask_orchestrator(PHASE_PLAN, f"Zadanie: {task}", instruction)
         return parse_plan(content)
 
-    def _delegate(self, step: PlanStep, context: str | None = None) -> Observation:
+    def _delegate(
+        self, step: PlanStep, context: str | None = None, budget: ToolCallBudget | None = None
+    ) -> Observation:
         agent = self._agents.get(step.agent)
         if agent is None or step.agent == self._orchestrator_name:
             return Observation(step.agent, step.task, SKIPPED_UNKNOWN_AGENT, "")
@@ -107,7 +115,13 @@ class Orchestrator:
         # jest delegowany bez aktywnego zlecenia. Pełny ROE-gate runtime: Etap 4.
         if agent.config.roe_required:
             return Observation(step.agent, step.task, SKIPPED_ROE, "")
-        result = agent.run(step.task, router=self._router, context=context)
+        # Pętla narzędziowa tylko dla agentów z opt-in (supports); reszta — jednokrotni.
+        if self._tool_loop is not None and budget is not None and self._tool_loop.supports(agent):
+            result = self._tool_loop.run(
+                agent, step.task, router=self._router, context=context, budget=budget
+            )
+        else:
+            result = agent.run(step.task, router=self._router, context=context)
         return Observation(
             agent=result.agent, task=step.task, output=result.output, model=result.model
         )
@@ -139,7 +153,14 @@ class Orchestrator:
     def run(self, task: str) -> OrchestratorResult:
         """Wykonuje pełną orkiestrację zadania i zwraca wynik."""
         plan = self._plan(task)
-        observations: list[Observation] = [self._delegate(step) for step in plan.steps]
+        # Plan z NIEZAUFANEGO wyjścia modelu — twardy cap liczby kroków (anty-amplifikacja).
+        plan = Plan(steps=plan.steps[: self._max_plan_steps])
+        # Globalny budżet wywołań narzędzi na CAŁĄ orkiestrację (świeży per run — nie
+        # współdzielony między żądaniami/wątkami). None, gdy pętla nieaktywna.
+        budget = self._tool_loop.new_budget() if self._tool_loop is not None else None
+        observations: list[Observation] = [
+            self._delegate(step, budget=budget) for step in plan.steps
+        ]
 
         rounds = 0
         while rounds < self._max_extra_rounds:
@@ -149,8 +170,9 @@ class Orchestrator:
             # Kroki z refleksji budują na dotychczasowych wynikach — przekazujemy je
             # jako kontekst (agent ogradza je jako dane, patrz BaseAgent._build_messages).
             context = self._summary(observations)
+            extra_steps = reflection.additional_steps[: self._max_plan_steps]
             observations.extend(
-                self._delegate(step, context=context) for step in reflection.additional_steps
+                self._delegate(step, context=context, budget=budget) for step in extra_steps
             )
             rounds += 1
 
@@ -167,11 +189,13 @@ def build_orchestrator(
     prompts_dir: str | Path,
     orchestrator_name: str = DEFAULT_ORCHESTRATOR,
     max_extra_rounds: int = 1,
+    tool_loop: ToolLoop | None = None,
 ) -> Orchestrator:
     """Buduje Chorągiew (agentów) z konfiguracji i składa orkiestratora.
 
     Izolacja treści niezaufanej (ogradzanie obserwacji) jest sterowana flagą
-    ``security.prompt_injection_filters`` z konfiguracji.
+    ``security.prompt_injection_filters`` z konfiguracji. ``tool_loop`` (opcjonalny)
+    włącza pętlę narzędziową dla agentów z opt-in — bez niego zachowanie sprzed Etapu 13.
     """
     agents = build_agents(config, prompts_dir=prompts_dir)
     return Orchestrator(
@@ -180,4 +204,6 @@ def build_orchestrator(
         orchestrator_name=orchestrator_name,
         max_extra_rounds=max_extra_rounds,
         isolate_untrusted=config.security.prompt_injection_filters,
+        tool_loop=tool_loop,
+        max_plan_steps=config.security.tool_loop.max_plan_steps,
     )

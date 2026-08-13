@@ -89,6 +89,15 @@ Rejestr obsługuje wyłącznie providerów **first-party** — świadomie NIE ł
 modułów (`entry_points`/`importlib`), bo import = wykonanie kodu (RCE/łańcuch dostaw).
 Rozszerzalność zewnętrzną realizują **wtyczki/konektory MCP** (data-driven, `husarz.plugins`).
 
+### Wykonanie w pętli narzędziowej (Etap 13, ADR-0016)
+
+Narzędzia wykonuje **pętla function-calling** (`husarz.agents.tool_loop`) dla agentów z
+opt-in `tool_loop_enabled`. Model prosi o `(tool, action, args)` (protokół ReAct);
+`husarz.tools.dispatch` tłumaczy to na publiczną metodę narzędzia przez jawną tabelę akcji
+(bez `getattr`), z walidacją argumentów. Autoryzacja per-wywołanie (allowlista agenta,
+audyt, budżet) jest w pętli; sandbox/egress/konfinacja pozostają W narzędziach. Wynik jest
+ogradzany jako DANE przed oddaniem modelowi. Patrz [AGENCI.md](AGENCI.md), [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md).
+
 ## Testy
 
 Konfinacja i allowlisty, budowa argv sandboxa (izolacja sieci, cap-drop, montaż),

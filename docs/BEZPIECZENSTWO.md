@@ -409,3 +409,29 @@ Przegląd (3 wymiary, 6 potwierdzonych findingów) i utwardzenia:
 
 **Ograniczenia:** pełne pinowanie IP (okno TOCTOU) pozostaje odłożone; „slow-drip"
 deadline jest sprawdzany między chunkami (ograniczenie ~`timeout` + jeden odczyt).
+
+### Etap 13 — pętla narzędziowa (function-calling) (data: 2026-08-13)
+
+**Zakres:** pierwszy egzekutor narzędzi (model steruje wykonaniem) — największa nowa
+powierzchnia ataku. Projekt z panelu 3 architektur + krytyki; przyjęte poprawki:
+opt-in per agent (nie predykat z klasy), GLOBALNY budżet wywołań (nie tylko per-krok),
+cap `rag.add`, wzbogacony audyt `web`, parytet ogradzania kontekstu, cięcie `ToolProtocol`.
+
+| Niezmiennik | Test |
+|---|---|
+| L1: narzędzie spoza allowlisty agenta → deny, instancja NIGDY nie wołana (sandbox nietknięty) | `test_tool_outside_allowlist_denied_never_executes` |
+| L0: agent `roe_required` → pętla nie startuje (fail-closed), model NIE wywołany | `test_roe_agent_refused_without_model_call` |
+| Wynik NIEZAUFANY ogrodzony przed re-injekcją; marker akcji z wnętrza wyniku zneutralizowany | `test_injected_marker_in_tool_result_neutralized`, `test_result_is_fenced_before_reinjection` |
+| Parser akcji działa tylko na treści asystenta (nie na ogrodzonym wyniku) → brak eskalacji | `test_injected_marker_in_tool_result_neutralized` |
+| Limit iteracji per krok + globalny budżet wywołań kończą deterministycznie (anty-amplifikacja) | `test_iteration_limit_terminates`, `test_global_budget_terminates` |
+| Kontekst (niezaufane obserwacje) ogrodzony — parytet z `BaseAgent` | `test_context_is_fenced_like_base_agent` |
+| Audyt bez surowej treści/sekretów (rozmiar+sha256; web=host); łańcuch niemodyfikowalny | `test_audit_arg_summary_has_no_raw_content` |
+| Dispatch: zły kształt args → `ok=False` bez wyjątku/efektu; brak `getattr` na danych modelu | `test_bad_args_shell_command_not_list`, `test_unknown_tool_and_action` |
+| `rag.add` z tekstem ponad limit odrzucony (anty-OOM współdzielonego magazynu) | `test_rag_add_oversize_rejected` |
+| `workspace_dir` rozłączny z `data_dir`/`artifacts_dir` (izolacja zapisu) | walidacja `_cross_validate` |
+
+**Ograniczenia:** ogrodzenie NL to obrona miękka (nie powstrzyma perswazji wolnotekstowej —
+twardą barierą jest allowlista + sandbox); `shell` z `python` = RCE-w-sandboxie (dla takich
+agentów granicą jest sandbox); `web` model-sterowane bez pinowania IP (DNS-rebinding — jak Git);
+audyt wiąże agenta, nie użytkownika (korelacja principal↔wywołanie — follow-up). Pętla jest
+**opt-in** (`tool_loop_enabled`, domyślnie false) — w dostarczonej konfiguracji wyłączona.

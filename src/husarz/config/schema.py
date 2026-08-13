@@ -358,6 +358,26 @@ class EncryptionConfig(_StrictModel):
     algorithm: str = "AES-256-GCM"
 
 
+class ToolLoopConfig(_StrictModel):
+    """Limity pętli narzędziowej (function-calling). Feed danych NIEZAUFANYCH → bezpieczeństwo.
+
+    ``max_iterations`` żyje per agent (``AgentConfig.max_iterations``); tu są limity
+    globalne/rozmiarowe wspólne dla wszystkich agentów.
+    """
+
+    # Twardy limit rozmiaru pojedynczego wyniku narzędzia przed re-injekcją (anty-DoS).
+    max_result_bytes: int = Field(default=100_000, ge=1)
+    # Twardy limit rozmiaru tekstu wchodzącego do RAG (rag.add) — feed sterowany modelem,
+    # anty-OOM współdzielonego magazynu. Osobne od max_result_bytes (wejście ≠ wyjście).
+    max_rag_add_bytes: int = Field(default=100_000, ge=1)
+    # Globalny budżet wywołań narzędzi na CAŁĄ orkiestrację (kroki × iteracje × rundy)
+    # — pętla zamienia nieograniczony fan-out planu w realną amplifikację (spawny
+    # kontenerów). Po wyczerpaniu: deterministyczne zakończenie (fail-closed) + audyt.
+    max_total_calls: int = Field(default=64, ge=1)
+    # Twardy cap liczby kroków planu (plan pochodzi z NIEZAUFANEGO wyjścia modelu).
+    max_plan_steps: int = Field(default=20, ge=1)
+
+
 class SecurityConfig(_StrictModel):
     """Zbiorcza konfiguracja bezpieczeństwa."""
 
@@ -367,6 +387,7 @@ class SecurityConfig(_StrictModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
     encryption: EncryptionConfig = Field(default_factory=EncryptionConfig)
+    tool_loop: ToolLoopConfig = Field(default_factory=ToolLoopConfig)
     prompt_injection_filters: bool = True
 
 
@@ -390,6 +411,10 @@ class AgentConfig(_StrictModel):
     tools: list[str] = Field(default_factory=list)
     max_iterations: int = 8
     roe_required: bool = False  # True dla Puszkarza
+    # Opt-in na pętlę narzędziową (function-calling). Domyślnie False (deny-by-default):
+    # agent wykonuje narzędzia w pętli TYLKO po jawnym włączeniu — kontrola promienia
+    # rażenia (np. shell 'python' = RCE-w-sandboxie). Patrz ADR-0016.
+    tool_loop_enabled: bool = False
     enabled: bool = True
     params: dict[str, Any] = Field(default_factory=dict)
 
@@ -692,6 +717,24 @@ class HusarzConfig(_StrictModel):
                         f"Profil airgap: model '{model_id}' ma nielokalny endpoint "
                         f"'{spec.endpoint}'. Dozwolone są tylko adresy lokalne/prywatne."
                     )
+
+        # 6) Pętla narzędziowa pisze do workspace (file_edit) — workspace NIE może pokrywać
+        #    się z katalogami danych/artefaktów (izolacja promienia rażenia; patrz ADR-0016).
+        workspace = self.platform.workspace_dir.resolve()
+        for label, other_dir in (
+            ("data_dir", self.platform.data_dir),
+            ("artifacts_dir", self.platform.artifacts_dir),
+        ):
+            other = other_dir.resolve()
+            if (
+                workspace == other
+                or workspace.is_relative_to(other)
+                or other.is_relative_to(workspace)
+            ):
+                errors.append(
+                    f"platform.workspace_dir ({workspace}) nie może pokrywać się z "
+                    f"platform.{label} ({other}) — rozdziel katalogi."
+                )
 
         if errors:
             raise ValueError("Błędy walidacji krzyżowej konfiguracji:\n- " + "\n- ".join(errors))

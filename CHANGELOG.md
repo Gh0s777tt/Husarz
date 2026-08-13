@@ -5,6 +5,36 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 13 — pętla narzędziowa / function-calling)
+- **Pętla ReAct** (`husarz.agents.tool_loop`): PIERWSZY egzekutor narzędzi. Model emituje
+  ogrodzony blok akcji `[[HUSARZ_ACTION]]{tool,action,args}[[/HUSARZ_ACTION]]`; pętla parsuje,
+  autoryzuje, dispatchuje, oddaje wynik NIEZAUFANY z powrotem — aż do odpowiedzi końcowej
+  lub limitu. Prompt-based (przenośne na każdy lokalny model), ZERO zmian w routerze.
+- **Dispatch** (`husarz.tools.dispatch`): jawna tabela akcji per kind (bez `getattr`),
+  walidacja args (zły kształt → `ToolResult(ok=False)`, nigdy wyjątek), `manual()` dla modelu.
+- **Autoryzacja per-wywołanie (deny-by-default)**: L0 `roe_required` wykluczony + opt-in
+  per agent (`AgentConfig.tool_loop_enabled`, domyślnie false); L1 allowlista agenta;
+  L2 walidacja dispatchu; L3 bramki w narzędziach (bez zmian). Audyt każdego wywołania
+  (arg_summary sanityzowany — bez surowej treści/sekretów).
+- **Limity**: `AgentConfig.max_iterations` (per krok) + `security.tool_loop`
+  (`max_result_bytes`, `max_total_calls` — globalny budżet per orkiestracja, `max_plan_steps`).
+- **Ogrodzenie**: `husarz.fencing` (wydzielone z załączników) — `fence_untrusted` ogradza
+  wyniki narzędzi (i kontekst) jako DANE; marker z wnętrza wyniku neutralizowany (prefiks linii).
+- **Wpięcie**: `Orchestrator`/`build_orchestrator`/`create_app` z opcjonalną pętlą;
+  `BaseAgent.run` niezmieniony (Pocztowy, plan/synteza, `/api/chat` bez zmian). Walidacja:
+  `workspace_dir` rozłączny z `data_dir`/`artifacts_dir`.
+- Wspólny helper `husarz.textjson.extract_json_object` (reużyty przez plan i ReAct).
+- Testy: +35 (dispatch, protokół, pętla, security offline). Docs: ADR-0016.
+
+### Poprawione (adwersaryjny przegląd Etapu 13)
+- Przegląd (3 wymiary, 0 findingów bezpieczeństwa/poprawności, 2 spójności) i utwardzenia:
+- **Zero-hardcode**: cap `rag.add` przeniesiony z modułowej stałej do
+  `security.tool_loop.max_rag_add_bytes` (konfigurowalny jak pozostałe limity pętli).
+- **Kontrakt „nigdy nie rzuca"**: `ToolDispatcher.dispatch` łapie `AttributeError` z
+  niespójnego `kind_of` (instancja innego rodzaju niż deklarowany kind) → `ToolResult(ok=False)`.
+- **Docs↔kod**: `ORKIESTRATOR.md`/`ROADMAP.md` — pętla oznaczona jako zrealizowana (Etap 13),
+  koniec sprzeczności z sekcją ✅. Testy: +2.
+
 ### Dodane (Etap 12b — wtyczki / konektory MCP)
 - Pakiet `husarz.plugins` (lustro `husarz.git`): konektor do zewnętrznego serwera
   narzędzi **MCP** przez HTTP JSON-RPC nad WSTRZYKIWALNYM transportem. MVP:

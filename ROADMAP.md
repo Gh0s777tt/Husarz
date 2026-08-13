@@ -38,7 +38,7 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   (referencje `postgres_dsn_ref`, `redis_dsn_ref`, `embeddings_model_id`, `vector_dim`).
 - ⬜ Wypromować przełączniki narzędzi (`network`, `allow_push`) z opaque `config`
   na typowane pola per-kind.
-- ⬜ Wpięcie pętli narzędziowej (function-calling) do agenta Towarzysz.
+- ✅ Wpięcie pętli narzędziowej (function-calling) do agenta Towarzysz — Etap 13 (ADR-0016).
 
 ## 🚧 Etap 4 — Bezpieczeństwo (rdzeń decyzyjny ✅; warstwa sieciowa ⬜ Etap 5/6)
 - ✅ Niemodyfikowalny audit log z łańcuchem skrótów (`husarz.security.audit`, `verify`).
@@ -79,11 +79,23 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Testy: niezmienniki wdrożeń (deny-all, non-root, loopback, brak WAN w airgapie,
   placeholdery sekretów) parsowane bez klastra/Dockera.
 - ⬜ Realne uruchomienie na klastrze (CNI+NetworkPolicy, gVisor, Vault unseal) —
-  środowisko docelowe; pgvector/RAG i pętla narzędziowa Towarzysza (reszta Etapu 3).
+  środowisko docelowe; pgvector/RAG (pamięć długoterminowa, przyszły etap).
 
 ## ✅ Czat lokalny (Ollama) + customowy model
 - ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
   `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
+
+## ✅ Etap 13 — Pętla narzędziowa (function-calling)
+- ✅ Pętla ReAct (`agents/tool_loop.py`) — pierwszy egzekutor narzędzi; prompt-based
+  (przenośne na lokalne modele), zero zmian w routerze. Dispatch (`tools/dispatch.py`)
+  z jawną tabelą akcji (bez `getattr`).
+- ✅ Autoryzacja per-wywołanie (deny-by-default): opt-in per agent `tool_loop_enabled`,
+  L0 ROE-exclude, L1 allowlista, L2 dispatch, L3 bramki narzędzi; audyt każdego wywołania.
+- ✅ Limity: `max_iterations` + `security.tool_loop` (`max_result_bytes`, `max_total_calls`,
+  `max_plan_steps`); ogrodzenie wyniku (`husarz/fencing.py`). Wpięcie w orkiestrator/API.
+- ✅ Testy: +35 (offline). Docs: ADR-0016.
+- ⬜ Wywoływanie wtyczek (`tools/call`) + `McpClient.call_tool` (Etap 13b/ADR-0017);
+  natywny adapter `tool_calls`; korelacja principal↔wywołanie; pinowanie IP dla `web`.
 
 ## ✅ Etap 12 — System wtyczek (rejestr narzędzi + konektor MCP)
 - ✅ 12a: `ToolProviderRegistry` (open/closed) zastępuje `if/elif` w `build_tools`;

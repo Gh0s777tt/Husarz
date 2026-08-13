@@ -35,6 +35,7 @@ from husarz.accounts.errors import (
     RegistrationDisabledError,
 )
 from husarz.agents.base import SupportsComplete
+from husarz.agents.tool_loop import build_tool_loop
 from husarz.api.schemas import (
     AgentInfo,
     AuditEntryView,
@@ -245,7 +246,13 @@ def create_app(
 
     def _build_stack(cfg: HusarzConfig) -> tuple[SupportsComplete | None, Orchestrator | None]:
         active = router_factory(cfg) if router_factory is not None else router
-        orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir) if active else None
+        if active is None:
+            return None, None
+        # Pętla narzędziowa: pierwszy egzekutor narzędzi. Zależności są leniwe
+        # (executor/fetcher/rag budowane domyślnie), więc konstrukcja jest bezpieczna
+        # bez Dockera — realne wykonanie potrzebują tylko agenci z opt-in (tool_loop_enabled).
+        loop = build_tool_loop(cfg, workspace=cfg.platform.workspace_dir, audit=audit_log)
+        orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir, tool_loop=loop)
         return active, orch
 
     def _resolve_chat_model(cfg: HusarzConfig) -> str:

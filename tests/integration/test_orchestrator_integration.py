@@ -48,3 +48,61 @@ def test_build_orchestrator_from_repo_runs(repo_config_dir: Path) -> None:
     assert result.observations[0].output == "[bielik] wynik"
     assert result.answer == "Synteza: ukończono."
     assert "husarz" in router.calls  # hetman planował i syntetyzował
+
+
+class ToolLoopRouter:
+    """Router: hetman planuje→kopijnik; kopijnik emituje akcję, potem odpowiedź końcową."""
+
+    def __init__(self) -> None:
+        self.kopijnik_turns = 0
+
+    def complete(self, request, *, agent=None, model=None, tags=None):  # noqa: ANN001
+        content = request.messages[-1].content
+        if agent == "husarz":
+            if PHASE_PLAN in content:
+                return ChatResponse(
+                    model="glm-main",
+                    content='{"steps": [{"agent": "kopijnik", "task": "zapisz plik a.md"}]}',
+                )
+            if PHASE_REFLECT in content:
+                return ChatResponse(model="glm-main", content='{"done": true}')
+            return ChatResponse(model="glm-main", content="Synteza: ukończono.")
+        if agent == "kopijnik":
+            self.kopijnik_turns += 1
+            if self.kopijnik_turns == 1:
+                action = (
+                    '[[HUSARZ_ACTION]]{"tool":"file_edit","action":"write",'
+                    '"args":{"path":"a.md","content":"treść"}}[[/HUSARZ_ACTION]]'
+                )
+                return ChatResponse(model="mock-kopijnik", content=action)
+            return ChatResponse(model="mock-kopijnik", content="Zapisałem plik a.md.")
+        return ChatResponse(model=f"mock-{agent}", content=f"[{agent}] wynik")
+
+
+def test_orchestrator_routes_opt_in_agent_through_tool_loop(
+    repo_config_dir: Path, tmp_path: Path
+) -> None:
+    from husarz.agents.tool_loop import build_tool_loop
+    from husarz.security import AuditLog
+    from husarz.tools import InMemoryRagBackend
+
+    # Włączamy pętlę dla kopijnika i zawężamy jego allowlistę do file_edit (opt-in).
+    config = load_config(
+        repo_config_dir,
+        runtime_overrides={
+            "agents": {"kopijnik": {"tool_loop_enabled": True, "tools": ["file_edit"]}}
+        },
+    )
+    prompts_dir = repo_config_dir.parent / "prompts"
+    router = ToolLoopRouter()
+    loop = build_tool_loop(
+        config, workspace=tmp_path, audit=AuditLog(), rag_backend=InMemoryRagBackend()
+    )
+    orchestrator = build_orchestrator(config, router, prompts_dir=prompts_dir, tool_loop=loop)
+
+    result = orchestrator.run("Zapisz notatkę.")
+
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "treść"  # pętla wykonała narzędzie
+    assert result.observations[0].agent == "kopijnik"
+    assert result.observations[0].output == "Zapisałem plik a.md."  # odpowiedź końcowa po akcji
+    assert router.kopijnik_turns == 2  # akcja + finalizacja (pętla, nie single-shot)

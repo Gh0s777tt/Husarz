@@ -8,7 +8,8 @@ sterowane konfiguracją i promptami; modele wołane przez router (Etap 1). Kod:
 
 - **`BaseAgent`** — wspólna baza: buduje wiadomości (system = prompt agenta,
   opcjonalny kontekst) i woła router (`agent=<nazwa>` → dobór modelu wg `routing.yaml`).
-- **`Towarzysz`** — agent pełny. W Etapie 3 zyska pętlę narzędziową (function-calling).
+- **`Towarzysz`** — agent pełny. Po opt-in (`tool_loop_enabled`) orkiestrator deleguje go
+  przez pętlę narzędziową (function-calling) — patrz ADR-0016 (Etap 13); inaczej jednokrotny.
 - **`Pocztowy`** — lekki podwykonawca (pojedyncze wywołanie, bez narzędzi).
 - **`build_agents(config, prompts_dir)`** — ładowarka: dla każdego wpisu
   `config/agents/*.yaml` czyta prompt z `prompts/*.md` i tworzy właściwą klasę

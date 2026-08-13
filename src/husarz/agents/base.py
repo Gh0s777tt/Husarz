@@ -1,8 +1,9 @@
 """Bazowa klasa agenta Chorągwi.
 
 Agent wykonuje zadanie, wołając model przez router (protokół ``SupportsComplete``).
-W Etapie 2 agent to pojedyncze, sterowane promptem wywołanie modelu — pętla
-narzędziowa (function-calling) dla klasy Towarzysz dojdzie w Etapie 3.
+``BaseAgent.run`` to pojedyncze, sterowane promptem wywołanie modelu. Pętla narzędziowa
+(function-calling) jest OSOBNA (``husarz.agents.tool_loop``, ADR-0016) i wpinana przez
+orkiestrator dla agentów z opt-in — baza pozostaje jednokrotna i niezmieniona.
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ class BaseAgent:
 
     @property
     def tools(self) -> list[str]:
-        """Allowlista narzędzi agenta (egzekwowana od Etapu 3)."""
+        """Allowlista narzędzi agenta (egzekwowana w pętli narzędziowej, ADR-0016)."""
         return list(self.config.tools)
 
     def _build_messages(self, task: str, context: str | None) -> list[ChatMessage]:
