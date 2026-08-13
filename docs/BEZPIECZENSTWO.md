@@ -1,7 +1,7 @@
 # Bezpieczeństwo — model i weryfikacja
 
 Dokument techniczny modelu bezpieczeństwa Husarza oraz **notatek weryfikacyjnych**
-(co sprawdzono, jak, z jakim wynikiem). Uzupełnienie [SECURITY.md](../SECURITY.md).
+(co sprawdzono, jak, z jakim wynikiem). Uzupełnienie [SECURITY.md](https://github.com/Gh0s777tt/Husarz/blob/main/SECURITY.md).
 
 ## Zasady (niezmienniki)
 

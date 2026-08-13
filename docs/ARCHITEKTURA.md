@@ -1,7 +1,7 @@
 # Architektura Husarza
 
 Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kodem
-(patrz zasady w [CLAUDE.md](../CLAUDE.md)). Stan: **Etap 0**.
+(patrz zasady w [CLAUDE.md](https://github.com/Gh0s777tt/Husarz/blob/main/CLAUDE.md)). Stan: **Etap 0**.
 
 ## Widok komponentów (docelowy)
 

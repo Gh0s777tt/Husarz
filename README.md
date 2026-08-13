@@ -149,6 +149,18 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 
 ## Dokumentacja
 
+Źródłem prawdy jest katalog [`docs/`](docs/). Publikujemy go jako **portal HTML** (MkDocs
+Material) ze zrzutami ekranu oraz **interaktywny PDF** (strona „Wersja do druku"):
+
+```bash
+.venv/Scripts/python.exe -m pip install -e ".[docs]"
+.venv/Scripts/python.exe -m mkdocs serve      # podgląd na żywo: http://127.0.0.1:8000/
+.venv/Scripts/python.exe -m mkdocs build      # statyczny portal -> ./site/
+# PDF: otwórz w portalu „Wersja do druku / PDF" (/print_page/) i wydrukuj do PDF.
+```
+
+Poszczególne dokumenty (renderowane też w portalu):
+
 - [docs/ARCHITEKTURA.md](docs/ARCHITEKTURA.md) — architektura i przepływy.
 - [docs/ROUTER.md](docs/ROUTER.md) — router modeli (wybór, fallbacki, koszty).
 - [docs/ORKIESTRATOR.md](docs/ORKIESTRATOR.md) — rdzeń agentów i hetman „Husarz".

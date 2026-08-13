@@ -56,3 +56,6 @@ web/dist/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Portal dokumentacji (MkDocs — build wyjściowy, generowany)
+/site/

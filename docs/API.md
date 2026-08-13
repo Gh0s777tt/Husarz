@@ -61,7 +61,7 @@ brak modelu → `503`, awaria wszystkich modeli → `502` (surowa treść błęd
 - **Czat bezpośredni** (`POST /api/chat`) — rozmowa z JEDNYM modelem (`models.chat`,
   domyślnie lokalny `husarz-local` z Ollamy). Szybki, konwersacyjny, do kodowania.
   Ciało: `{"messages": [...], "model"?: "...", "temperature"?: 0.3, "attachments"?: [...], "images"?: [...]}`.
-  Persona (hetman, PL, kod w blokach) jest zaszyta w modelu — patrz [ollama/README.md](../ollama/README.md).
+  Persona (hetman, PL, kod w blokach) jest zaszyta w modelu — patrz [ollama/README.md](https://github.com/Gh0s777tt/Husarz/blob/main/ollama/README.md).
   **Załączniki** (`attachments: [{name, content}]`) — pliki/foldery jako kontekst.
   Treść jest NIEZAUFANA: serwer egzekwuje limity (`chat.attachments` — liczba, rozmiar
   per plik/łączny), czyści nazwy (basename), odrzuca dane binarne i **ogradza** blok

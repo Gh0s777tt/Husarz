@@ -1,0 +1,114 @@
+# Portal dokumentacji Husarza (MkDocs Material).
+# Źródłem prawdy jest katalog docs/ — tę samą treść publikujemy jako stronę HTML
+# oraz (przez stronę „Wersja do druku") eksportujemy do interaktywnego PDF.
+# Budowa (offline): .venv/Scripts/python.exe -m mkdocs build
+# Podgląd na żywo:  .venv/Scripts/python.exe -m mkdocs serve
+site_name: Husarz — dokumentacja
+site_description: Suwerenna, samodzielnie hostowana, wieloagentowa platforma AI (Chorągiew).
+site_author: Husarz
+site_url: https://gh0s777tt.github.io/Husarz/
+repo_url: https://github.com/Gh0s777tt/Husarz
+repo_name: Gh0s777tt/Husarz
+copyright: Husarz — suwerenna platforma AI. Dokumentacja generowana z docs/ (MkDocs Material).
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: pl
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: red
+      accent: red
+      toggle:
+        icon: material/weather-night
+        name: Przełącz na tryb ciemny
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: red
+      accent: red
+      toggle:
+        icon: material/weather-sunny
+        name: Przełącz na tryb jasny
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tooltips
+  icon:
+    logo: material/shield-half-full
+
+plugins:
+  - search
+  - print-site:
+      add_to_navigation: true
+      print_page_title: "Wersja do druku / PDF"
+      add_cover_page: true
+      add_table_of_contents: true
+      toc_title: "Spis treści"
+      enumerate_headings: false
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Start: index.md
+  - Architektura i rdzeń:
+      - Architektura: ARCHITEKTURA.md
+      - Orkiestrator: ORKIESTRATOR.md
+      - Router modeli: ROUTER.md
+      - Agenci (Chorągiew): AGENCI.md
+      - Narzędzia i sandbox: NARZEDZIA.md
+      - Wtyczki (konektory MCP): WTYCZKI.md
+  - Bezpieczeństwo: BEZPIECZENSTWO.md
+  - Operacje:
+      - Launcher: LAUNCHER.md
+      - Wdrożenie: DEPLOY.md
+      - API i konsola WWW: API.md
+      - Konta i sesje: KONTA.md
+      - Integracje Git: GIT.md
+  - Decyzje (ADR):
+      - 0001 · Układ repozytorium: adr/0001-uklad-repo.md
+      - 0002 · Hierarchia konfiguracji: adr/0002-hierarchia-konfiguracji.md
+      - 0003 · Router modeli: adr/0003-router-modeli.md
+      - 0004 · Orkiestrator i agenci: adr/0004-orkiestrator-agenci.md
+      - 0005 · Narzędzia i sandbox: adr/0005-narzedzia-sandbox.md
+      - 0006 · Bezpieczeństwo i ROE: adr/0006-bezpieczenstwo-roe.md
+      - 0007 · API i launcher web: adr/0007-api-launcher-web.md
+      - 0008 · Deploy i profil airgap: adr/0008-deploy-profile-airgap.md
+      - 0009 · Konta i tokeny: adr/0009-konta-tokeny.md
+      - 0010 · Załączniki czatu: adr/0010-zalaczniki-czatu.md
+      - 0011 · Integracje Git: adr/0011-integracje-git.md
+      - 0012 · Pobierany launcher: adr/0012-pobierany-launcher.md
+      - 0013 · Obrazy w czacie: adr/0013-obrazy-w-czacie.md
+      - 0014 · Rejestr providerów narzędzi: adr/0014-rejestr-providerow-narzedzi.md
+      - 0015 · Konektor MCP: adr/0015-konektor-mcp.md
+      - 0016 · Pętla narzędziowa: adr/0016-petla-narzedziowa.md
+      - 0017 · Pamięć długoterminowa (RAG): adr/0017-pamiec-dlugoterminowa-rag.md
+      - 0018 · Trwałość + szyfrowanie at-rest: adr/0018-pamiec-trwala-at-rest.md

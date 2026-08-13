@@ -9,15 +9,15 @@ Docker Compose lub Kubernetes. Wszystkie profile trzymają się modelu bezpiecze
 
 | Obraz | Plik | Rola |
 |-------|------|------|
-| `husarz-api` | [`Dockerfile`](../Dockerfile) | Rdzeń: REST API + konsola (`husarz up`). Non-root, chudy runtime. |
-| `husarz-sandbox` | [`docker/husarz-sandbox.Dockerfile`](../docker/husarz-sandbox.Dockerfile) | Sandbox narzędzi (uruchamiany z `--network none`, `--cap-drop ALL`). |
+| `husarz-api` | [`Dockerfile`](https://github.com/Gh0s777tt/Husarz/blob/main/Dockerfile) | Rdzeń: REST API + konsola (`husarz up`). Non-root, chudy runtime. |
+| `husarz-sandbox` | [`docker/husarz-sandbox.Dockerfile`](https://github.com/Gh0s777tt/Husarz/blob/main/docker/husarz-sandbox.Dockerfile) | Sandbox narzędzi (uruchamiany z `--network none`, `--cap-drop ALL`). |
 
 ```bash
 docker build -t husarz-api:latest .
 docker build -f docker/husarz-sandbox.Dockerfile -t husarz-sandbox:latest .
 ```
 
-Obrazy nie zawierają wag, sekretów ani danych (patrz [`.dockerignore`](../.dockerignore)).
+Obrazy nie zawierają wag, sekretów ani danych (patrz [`.dockerignore`](https://github.com/Gh0s777tt/Husarz/blob/main/.dockerignore)).
 
 ## Docker Compose
 
@@ -67,7 +67,7 @@ docker compose \
 
 ## Kubernetes
 
-Manifesty w [`deploy/k8s/`](../deploy/k8s), spięte przez Kustomize:
+Manifesty w [`deploy/k8s/`](https://github.com/Gh0s777tt/Husarz/tree/main/deploy/k8s), spięte przez Kustomize:
 
 ```bash
 kubectl apply -k deploy/k8s
@@ -96,18 +96,18 @@ Zawartość i niezmienniki:
 
 ### Sekrety
 
-Nigdy nie commituj prawdziwego `Secret`. [`secret.example.yaml`](../deploy/k8s/secret.example.yaml)
+Nigdy nie commituj prawdziwego `Secret`. [`secret.example.yaml`](https://github.com/Gh0s777tt/Husarz/blob/main/deploy/k8s/secret.example.yaml)
 to szablon — dostarcz wartości przez **External Secrets Operator**, **Sealed Secrets**
 albo **Vault Agent Injector**. `configmap.yaml` trzyma wyłącznie *referencję*
 (`HUSARZ_SECURITY__AUTH__API_TOKEN_REF=env:HUSARZ_API_TOKEN`), nie sam token.
 
 ## CI/CD
 
-- GitHub Actions ([`.github/workflows/ci.yaml`](../.github/workflows/ci.yaml)) i
-  GitLab CI ([`.gitlab-ci.yml`](../.gitlab-ci.yml)): lint (ruff), format (black),
+- GitHub Actions ([`.github/workflows/ci.yaml`](https://github.com/Gh0s777tt/Husarz/blob/main/.github/workflows/ci.yaml)) i
+  GitLab CI ([`.gitlab-ci.yml`](https://github.com/Gh0s777tt/Husarz/blob/main/.gitlab-ci.yml)): lint (ruff), format (black),
   typy (mypy `--strict`), testy (pytest), **gitleaks** (sekrety), **pip-audit** (SCA),
   **hadolint** + build obrazu.
-- Niezmienniki wdrożeń są testowane bez klastra: [`tests/security/test_deploy_invariants.py`](../tests/security/test_deploy_invariants.py)
+- Niezmienniki wdrożeń są testowane bez klastra: [`tests/security/test_deploy_invariants.py`](https://github.com/Gh0s777tt/Husarz/blob/main/tests/security/test_deploy_invariants.py)
   parsuje compose/k8s i egzekwuje deny-all/non-root/loopback/brak-WAN.
 
 Decyzje projektowe: [ADR-0008](adr/0008-deploy-profile-airgap.md).

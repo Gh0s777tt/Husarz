@@ -38,7 +38,7 @@ działają. Rozwijanie fallbacków jest odporne na cykle (każdy model odwiedzan
 ## Bramka egress (deny-all)
 
 Przed połączeniem z modelem router sprawdza endpoint względem `security.egress`
-([egress.py](../src/husarz/router/egress.py)):
+([egress.py](https://github.com/Gh0s777tt/Husarz/blob/main/src/husarz/router/egress.py)):
 
 - endpointy **lokalne/prywatne** (loopback, RFC 1918, `.local`) są zawsze dozwolone
   (lokalny vLLM/Ollama nie jest ruchem do WAN),

@@ -5,6 +5,19 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (portal dokumentacji + PDF)
+- Portal dokumentacji **MkDocs Material** (`mkdocs.yml`, extra `husarz[docs]`) generowany z
+  `docs/` — jedno źródło prawdy dla strony HTML i **interaktywnego PDF** (plugin `print-site`,
+  strona „Wersja do druku / PDF"). Nowa strona startowa `docs/index.md` (przegląd, szybki start,
+  mapa dokumentacji) ze **zrzutem ekranu konsoli WWW** (`docs/assets/screenshots/console.png`).
+- Nawigacja: architektura/rdzeń, bezpieczeństwo, operacje, ADR 0001–0018; tryb jasny/ciemny,
+  wyszukiwarka, kopiowanie kodu.
+
+### Zmienione (dokumentacja)
+- Linki w `docs/*.md` wychodzące poza `docs/` (do plików repo) przepięte na absolutne URL-e
+  GitHuba — działają zarówno w portalu HTML, jak i na GitHubie (brak martwych odnośników).
+- `README.md`: sekcja budowy portalu i PDF. `.gitignore`: `/site/` (wyjście builda MkDocs).
+
 ## [0.14.0] - 2026-08-14
 
 ### Zmienione (standard prowadzenia projektu)

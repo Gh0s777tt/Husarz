@@ -26,11 +26,11 @@ pyinstaller packaging/husarz.spec --noconfirm
 
 Binarka zawiera rdzeń, konsolę oraz **domyślne** `config/`+`prompts/` (działa
 od razu; nadpisz `--config`/`--prompts`). BEZ sekretów i wag. Szczegóły:
-[../packaging/README.md](../packaging/README.md).
+[../packaging/README.md](https://github.com/Gh0s777tt/Husarz/blob/main/packaging/README.md).
 
 ## CI — pobieralny artefakt
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) buduje binarki dla
+[`.github/workflows/release.yml`](https://github.com/Gh0s777tt/Husarz/blob/main/.github/workflows/release.yml) buduje binarki dla
 **Windows/Linux/macOS** i publikuje jako artefakty przebiegu (zakładka Actions);
 dla tagu `v*` dołącza je do GitHub Release. Uruchom ręcznie (`workflow_dispatch`)
 lub przez push tagu wersji.
@@ -46,7 +46,7 @@ lub przez push tagu wersji.
 
 - **Podpis kodu** (Windows Authenticode / macOS notarization) — po stronie operatora
   (certyfikaty/tożsamość); bez tego systemy mogą ostrzegać przy pobraniu.
-- Realne odpowiedzi AI wymagają lokalnego modelu (Ollama) — [../ollama/README.md](../ollama/README.md).
+- Realne odpowiedzi AI wymagają lokalnego modelu (Ollama) — [../ollama/README.md](https://github.com/Gh0s777tt/Husarz/blob/main/ollama/README.md).
 - Bogatszy desktop (Tauri, auto-update, tray, ikona) — przyszły krok.
 
 Decyzje: [ADR-0012](adr/0012-pobierany-launcher.md).
