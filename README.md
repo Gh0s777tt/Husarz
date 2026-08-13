@@ -7,10 +7,11 @@ husarski), w pełni konfigurowalna, z własnym launcherem i interfejsem WWW,
 zaprojektowana pod **suwerenność danych**: modele i dane **nie opuszczają
 infrastruktury użytkownika bez wyraźnej zgody**. Domyślnie **deny-all egress**.
 
-> Status: **Etapy 0–3 ukończone**, **Etap 4 — rdzeń bezpieczeństwa ukończony**
-> (ROE-gate, niemodyfikowalny audit log, Puszkarz, RBAC, dostawcy sekretów).
-> mTLS/OIDC, runtime egress/sandbox oraz realne wykonanie (Docker+gVisor, pgvector)
-> — w środowisku z tymi zależnościami (Etap 5/6). Kolejne: patrz [ROADMAP.md](ROADMAP.md).
+> Status: **Etapy 0–5 ukończone** — konfiguracja, router modeli, agenci +
+> orkiestrator, narzędzia + sandbox, rdzeń bezpieczeństwa (ROE-gate/audit/Puszkarz),
+> oraz REST API + launcher + konsola WWW. Pozostaje **Etap 6** (deploy: compose/k8s/CI).
+> mTLS/OIDC oraz realne wykonanie (Docker+gVisor, pgvector) — środowisko z tymi
+> zależnościami. Kolejne: patrz [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -129,6 +130,7 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 - [docs/ROUTER.md](docs/ROUTER.md) — router modeli (wybór, fallbacki, koszty).
 - [docs/ORKIESTRATOR.md](docs/ORKIESTRATOR.md) — rdzeń agentów i hetman „Husarz".
 - [docs/NARZEDZIA.md](docs/NARZEDZIA.md) — narzędzia i sandbox (allowlisty, izolacja).
+- [docs/API.md](docs/API.md) — REST API i konsola WWW (`husarz up`).
 - [docs/AGENCI.md](docs/AGENCI.md) — role i konfiguracja agentów.
 - [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) — model bezpieczeństwa i weryfikacje.
 - [docs/adr/](docs/adr/) — rejestr decyzji architektonicznych (ADR).

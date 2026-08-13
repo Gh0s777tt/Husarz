@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Husarz — konsola</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --panel: #ffffff; --fg: #1a1d24; --muted: #5b6472;
+      --accent: #7a1f2b; --border: #e2e5ea; --ok: #1a7f37; --err: #b3261e;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0f1116; --panel:#171a21; --fg:#e6e8ec; --muted:#9aa3b2;
+              --accent:#c8455a; --border:#262b34; --ok:#4ac26b; --err:#ff6b6b; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+    header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+             display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 18px; margin: 0; }
+    header .badge { font-size: 12px; color: var(--muted); }
+    nav { display: flex; gap: 4px; padding: 8px 16px; background: var(--panel);
+          border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    nav button { background: transparent; border: 1px solid transparent; color: var(--muted);
+                 padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    nav button.active { color: var(--fg); border-color: var(--border); background: var(--bg); }
+    main { padding: 20px; max-width: 900px; margin: 0 auto; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+            padding: 16px; margin-bottom: 16px; }
+    .tab { display: none; } .tab.active { display: block; }
+    textarea, input { width: 100%; background: var(--bg); color: var(--fg);
+                      border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: inherit; }
+    button.primary { background: var(--accent); color: #fff; border: none; border-radius: 6px;
+                     padding: 8px 16px; cursor: pointer; font: inherit; margin-top: 8px; }
+    pre { white-space: pre-wrap; word-break: break-word; background: var(--bg);
+          border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    .ok { color: var(--ok); } .err { color: var(--err); }
+    .muted { color: var(--muted); font-size: 13px; }
+    code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🪽 Husarz</h1>
+    <span class="badge" id="badge">łączenie…</span>
+  </header>
+  <nav>
+    <button data-tab="chat" class="active">Czat</button>
+    <button data-tab="config">Konfiguracja</button>
+    <button data-tab="agents">Agenci</button>
+    <button data-tab="audit">Audyt</button>
+    <button data-tab="usage">Monitor</button>
+  </nav>
+  <main>
+    <section class="tab active" id="tab-chat">
+      <div class="card">
+        <p class="muted">Zleć zadanie hetmanowi (orkiestrator „Husarz"). Wymaga skonfigurowanego routera.</p>
+        <textarea id="task" rows="3" placeholder="Np. Napisz i przetłumacz krótki moduł w Pythonie."></textarea>
+        <button class="primary" id="send">Wyślij</button>
+        <pre id="chat-out" hidden></pre>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-config">
+      <div class="card">
+        <h3>Podsumowanie konfiguracji</h3>
+        <pre id="config-out">…</pre>
+      </div>
+      <div class="card">
+        <h3>Walidacja nadpisań (panel)</h3>
+        <p class="muted">JSON nadpisań runtime, np. <code>{"platform": {"log_level": "DEBUG"}}</code>.</p>
+        <textarea id="overrides" rows="3">{}</textarea>
+        <button class="primary" id="validate">Waliduj</button>
+        <pre id="validate-out" hidden></pre>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-agents">
+      <div class="card"><h3>Chorągiew</h3><div id="agents-out">…</div></div>
+    </section>
+
+    <section class="tab" id="tab-audit">
+      <div class="card">
+        <h3>Audyt <span id="audit-status" class="muted"></span></h3>
+        <div id="audit-out">…</div>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-usage">
+      <div class="card"><h3>Monitor tokenów/kosztów</h3><pre id="usage-out">…</pre></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const api = (p, opt) => fetch("/api/" + p, opt).then((r) => r.json());
+
+    document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
+      document.querySelectorAll("nav button").forEach((x) => x.classList.remove("active"));
+      document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      $("tab-" + b.dataset.tab).classList.add("active");
+      load(b.dataset.tab);
+    });
+
+    async function boot() {
+      try {
+        const h = await api("health");
+        $("badge").textContent = `v${h.version} · profil: ${h.profile}`;
+      } catch { $("badge").textContent = "API niedostępne"; }
+      load("chat");
+    }
+
+    async function load(tab) {
+      if (tab === "config") $("config-out").textContent = JSON.stringify(await api("config/summary"), null, 2);
+      if (tab === "usage") $("usage-out").textContent = JSON.stringify(await api("usage"), null, 2);
+      if (tab === "agents") {
+        const a = await api("agents");
+        $("agents-out").innerHTML = "<table><tr><th>Agent</th><th>Klasa</th><th>Model</th><th>Narzędzia</th><th>ROE</th></tr>" +
+          a.map((x) => `<tr><td>${x.name}</td><td>${x.agent_class}</td><td>${x.model}</td><td>${x.tools.join(", ") || "—"}</td><td>${x.roe_required ? "tak" : "—"}</td></tr>`).join("") + "</table>";
+      }
+      if (tab === "audit") {
+        const a = await api("audit");
+        $("audit-status").innerHTML = a.verified ? `<span class="ok">łańcuch zweryfikowany</span> (${a.count})` : `<span class="err">łańcuch USZKODZONY</span>`;
+        $("audit-out").innerHTML = a.entries.length ? "<table><tr><th>Czas</th><th>Aktor</th><th>Akcja</th><th>ROE</th></tr>" +
+          a.entries.map((e) => `<tr><td>${e.timestamp}</td><td>${e.actor}</td><td>${e.action}</td><td>${e.roe_ref || "—"}</td></tr>`).join("") + "</table>" : "<p class='muted'>Brak wpisów.</p>";
+      }
+    }
+
+    $("send").onclick = async () => {
+      $("chat-out").hidden = false; $("chat-out").textContent = "…";
+      const r = await fetch("/api/orchestrate", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task: $("task").value }) });
+      const d = await r.json();
+      $("chat-out").textContent = r.ok ? `Odpowiedź: ${d.answer}\n\nObserwacje:\n` +
+        d.observations.map((o) => `- ${o.agent} (${o.model}): ${o.output}`).join("\n") : `Błąd: ${d.detail || JSON.stringify(d)}`;
+    };
+
+    $("validate").onclick = async () => {
+      $("validate-out").hidden = false;
+      let body;
+      try { body = { overrides: JSON.parse($("overrides").value || "{}") }; }
+      catch { $("validate-out").textContent = "Niepoprawny JSON."; return; }
+      const d = await api("config/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      $("validate-out").textContent = d.ok ? "OK ✓\n" + JSON.stringify(d.summary, null, 2) : "Błąd: " + d.error;
+    };
+
+    boot();
+  </script>
+</body>
+</html>

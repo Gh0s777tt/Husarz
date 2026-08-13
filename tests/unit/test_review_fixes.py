@@ -253,18 +253,22 @@ def test_roe_inactive_is_never_active_at() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_up_not_implemented_returns_2(capsys: pytest.CaptureFixture) -> None:
-    """Podkomenda 'up' to zaślepka Etapu 5: kod 2 + komunikat na stderr."""
-    rc = main(["up"])
-    err = capsys.readouterr().err
-    assert rc == 2
-    assert "Etap 5" in err
+def test_up_subcommand_is_wired() -> None:
+    """Podkomenda 'up' jest podpięta w parserze (nie uruchamiamy serwera w teście)."""
+    from husarz.launcher.cli import _cmd_up, build_parser
+
+    args = build_parser().parse_args(["up"])
+    assert args.func is _cmd_up
+    assert args.profile == "dev"
 
 
-def test_up_accepts_airgap_profile_from_enum(capsys: pytest.CaptureFixture) -> None:
+def test_up_accepts_airgap_profile_from_enum() -> None:
     """Profil 'airgap' (z enuma Profile) jest akceptowany przez parser 'up'."""
-    rc = main(["up", "--profile", "airgap"])
-    assert rc == 2  # nadal zaślepka, ale profil przyjęty (nie SystemExit)
+    from husarz.launcher.cli import build_parser
+
+    args = build_parser().parse_args(["up", "--profile", "airgap", "--port", "9000"])
+    assert args.profile == "airgap"
+    assert args.port == 9000
 
 
 def test_up_rejects_unknown_profile() -> None:

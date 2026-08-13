@@ -5,6 +5,18 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 5 — API + launcher + konsola WWW)
+- Pakiet `husarz.api`: `create_app(config, ...)` (FastAPI) z endpointami health,
+  config/summary, agents, models, tools, audit (+`verify`), usage, orchestrate,
+  config/validate+runtime. Router modeli i audyt są wstrzykiwalne (testy bez sieci).
+- Konsola WWW: jednoplikowa (`api/static/console.html`, vanilla JS, theme-aware)
+  serwowana pod `/` — czat, panel konfiguracji (walidacja nadpisań), agenci, audyt, monitor.
+- Launcher `husarz up --profile dev --host --port` (uvicorn; importy FastAPI/uvicorn leniwe).
+- Zależności: `fastapi`, `uvicorn`.
+- Testy: smoke API przez `TestClient` (bez serwera/sieci), orkiestracja, walidacja
+  configu, serwowanie konsoli; łącznie ~303 przypadki.
+- Dokumentacja: `docs/API.md`, ADR-0007; aktualizacja ARCHITEKTURA/ROADMAP.
+
 ### Dodane (Etap 4 — bezpieczeństwo/ROE)
 - Pakiet `husarz.security`:
   - **Audit log** niemodyfikowalny z łańcuchem skrótów (`AuditLog`, `verify`,

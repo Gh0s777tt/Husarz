@@ -52,10 +52,14 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   (uwierzytelnienie + przypisanie ról) — Etap 5 (API).
 - ⬜ Aktywować strategie routingu `cost`/`latency` (obecnie placeholdery; aktywne `tags`).
 
-## ⬜ Etap 5 — API + Launcher + Web
-- ⬜ REST/WS API rdzenia (FastAPI); launcher `husarz up --profile dev`.
-- ⬜ UI: czat + panel konfiguracji + audyt + monitor tokenów.
-- ⬜ Testy: smoke API, start/stop launchera, edycja configu z panelu.
+## ✅ Etap 5 — API + Launcher + Web
+- ✅ REST API rdzenia (FastAPI): health, config, agents, models, tools, audit,
+  usage, orchestrate, config/validate+runtime; router/audyt wstrzykiwalne.
+- ✅ Launcher `husarz up --profile dev` (uvicorn; importy FastAPI/uvicorn leniwe).
+- ✅ Konsola WWW (jednoplikowa, serwowana przez API): czat + panel konfiguracji +
+  audyt + monitor. Pełny Next.js — ścieżka produkcyjna na przyszłość.
+- ✅ Testy: smoke API (TestClient, bez sieci), orkiestracja, walidacja configu, konsola.
+- ⬜ WebSocket streaming odpowiedzi; OIDC/mTLS przed API (Etap 6).
 
 ## ⬜ Etap 6 — Deploy i profile
 - ⬜ docker-compose profile dev/prod/airgap; manifesty k8s + NetworkPolicy deny-all.

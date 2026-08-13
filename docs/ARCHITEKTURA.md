@@ -54,8 +54,10 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   skrótów), ROE-gate (twarda bramka Puszkarza, dry-run domyślnie), agent Puszkarz
   (odmowa ofensywy), RBAC oraz dostawcy sekretów File/SOPS/Vault. Szczegóły:
   [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md), [ADR-0006](adr/0006-bezpieczenstwo-roe.md).
-- Pozostałe pakiety (`core`, `memory`, `api`) to na razie zaślepki z opisem roli
-  i etapu wdrożenia; mTLS/OIDC oraz runtime egress/sandbox — Etap 5/6.
+- **Pakiet `husarz.api`** (Etap 5) — REST API (FastAPI) + serwowana konsola WWW,
+  launcher `husarz up`. Szczegóły: [API.md](API.md), [ADR-0007](adr/0007-api-launcher-web.md).
+- Pozostałe pakiety (`core`, `memory`) to na razie zaślepki; mTLS/OIDC oraz runtime
+  egress/sandbox — Etap 6.
 
 ## Hierarchia konfiguracji (zaimplementowana)
 

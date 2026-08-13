@@ -1,12 +1,9 @@
 """Launcher CLI Husarza.
 
-Etap 0 dostarcza podkomendę ``validate``, która wczytuje i waliduje konfigurację
-oraz wypisuje zwięzłe podsumowanie. Podkomenda ``up`` (start profili dev/prod/airgap)
-zostanie w pełni zaimplementowana w Etapie 5.
-
-Uruchomienie po instalacji pakietu:
-    husarz validate --config ./config
-    husarz version
+Podkomendy:
+    husarz validate --config ./config   — wczytaj i zwaliduj konfigurację,
+    husarz version                      — wypisz wersję,
+    husarz up --profile dev             — uruchom API (FastAPI) + konsolę WWW.
 """
 
 from __future__ import annotations
@@ -55,13 +52,31 @@ def _cmd_version(_: argparse.Namespace) -> int:
 
 
 def _cmd_up(args: argparse.Namespace) -> int:
-    # Placeholder — pełny start usług (docker-compose/k8s) w Etapie 5.
-    print(
-        f"[Etap 5] Uruchamianie profilu '{args.profile}' nie jest jeszcze "
-        f"zaimplementowane. Na razie użyj 'husarz validate'.",
-        file=sys.stderr,
+    # Ładujemy konfigurację, wymuszając wybrany profil jako nadpisanie runtime.
+    try:
+        config = load_config(args.config, runtime_overrides={"platform": {"profile": args.profile}})
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    # Importy leniwe — 'validate'/'version' nie wymagają FastAPI/uvicorn.
+    import uvicorn  # noqa: PLC0415
+
+    from husarz.api import create_app  # noqa: PLC0415
+    from husarz.router import ModelRouter  # noqa: PLC0415
+
+    app = create_app(
+        config,
+        config_dir=args.config,
+        router=ModelRouter(config),
+        prompts_dir=args.prompts,
     )
-    return 2
+    print(
+        f"Husarz API — profil {config.platform.profile.value} — "
+        f"http://{args.host}:{args.port} (konsola: /)"
+    )
+    uvicorn.run(app, host=args.host, port=args.port)  # pragma: no cover - serwer blokujący
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -83,13 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_version = sub.add_parser("version", help="Wypisz wersję.")
     p_version.set_defaults(func=_cmd_version)
 
-    p_up = sub.add_parser("up", help="[Etap 5] Uruchom platformę w danym profilu.")
+    p_up = sub.add_parser("up", help="Uruchom API + konsolę WWW w danym profilu.")
+    p_up.add_argument("--config", default=None, help="Katalog konfiguracji.")
     # Źródło prawdy o profilach to enum Profile — bez duplikowania listy w CLI.
-    p_up.add_argument(
-        "--profile",
-        default=Profile.DEV.value,
-        choices=[p.value for p in Profile],
-    )
+    p_up.add_argument("--profile", default=Profile.DEV.value, choices=[p.value for p in Profile])
+    p_up.add_argument("--host", default="127.0.0.1", help="Adres nasłuchu (domyślnie loopback).")
+    p_up.add_argument("--port", default=8000, type=int, help="Port API.")
+    p_up.add_argument("--prompts", default="./prompts", help="Katalog promptów agentów.")
     p_up.set_defaults(func=_cmd_up)
 
     return parser
