@@ -17,6 +17,9 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 - Linki w `docs/*.md` wychodzące poza `docs/` (do plików repo) przepięte na absolutne URL-e
   GitHuba — działają zarówno w portalu HTML, jak i na GitHubie (brak martwych odnośników).
 - `README.md`: sekcja budowy portalu i PDF. `.gitignore`: `/site/` (wyjście builda MkDocs).
+- `ollama/README.md`: sekcja „Rozwiązywanie problemów" — GPU 50xx/Blackwell (`cudaMalloc failed`
+  mimo wolnego VRAM: limit pojedynczej alokacji ~4 GB; obejścia: sterownik / baza ≤3B / CPU)
+  oraz pułapka `ollama create -f` (FROM mylone ze ścieżką na Windows).
 
 ## [0.14.0] - 2026-08-14
 

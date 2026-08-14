@@ -59,3 +59,31 @@ Następnie: `ollama create husarz -f ollama/Husarz.Modelfile`.
 > domyślne wypalone w modelu, ale przy wywołaniach przez Husarza nadrzędne są
 > `params` z `config/models.yaml` (klient wysyła je jawnie w każdym żądaniu). Zmianę
 > temperatury dla platformy rób w configu, nie tylko w Modelfile.
+
+## Rozwiązywanie problemów
+
+### GPU NVIDIA 50xx (Blackwell) — `cudaMalloc failed` mimo wolnego VRAM
+
+Objaw: model 7B nie wchodzi na GPU (`cudaMalloc failed: out of memory` przy alokacji
+~4.4 GB), mimo że `nvidia-smi` pokazuje kilkanaście GB wolnego VRAM; częściowy offload
+(`num_gpu`) wywala `CUDA error: shared object initialization failed`. Modele ≤3B ładują się
+100% na GPU bez problemu.
+
+Przyczyna: na bardzo nowych sterownikach (obserwowane: 595.97 / CUDA 13.2) + Blackwell
+backend CUDA Ollamy (testowane 0.32.9 — najnowsze) ma **limit pojedynczej alokacji ~4 GB** —
+większy bufor wag zawodzi. To bug warstwy sterownik/CUDA, nie brak VRAM.
+
+Obejścia (od najlepszego):
+1. **Zaktualizuj/zmień sterownik NVIDIA** na stabilną wersję produkcyjną — właściwy fix dla 7B.
+2. **Mniejsza baza w Modelfile**: `FROM qwen2.5-coder:3b` (≈2.4 GB, mieści się pod limitem,
+   działa 100% na GPU, dobra jakość kodu). Po naprawie sterownika wróć na `7b`.
+3. **CPU** (`PARAMETER num_gpu 0`) — działa dla każdego rozmiaru, ale wolniej.
+
+Sprawdź, gdzie model się załadował: `ollama ps` (kolumna `PROCESSOR` = `100% GPU` / `CPU`).
+
+### `ollama create -f` myli `FROM model:tag` ze ścieżką pliku (Windows)
+
+W niektórych wersjach `ollama create husarz -f ollama/Husarz.Modelfile` interpretuje
+`FROM qwen2.5-coder:7b` jako ścieżkę (`...\ollama\qwen2.5-coder:7b`) i pada. Obejście:
+zbuduj przez API HTTP `POST /api/create` z jawnymi polami `from`/`system`/`parameters`,
+albo zaktualizuj Ollamę.
