@@ -179,7 +179,13 @@ def _normalize_env_segments(parts: list[str]) -> list[str]:
     for part in parts:
         if part == "":
             continue
-        seg = part if prev in _COLLECTION_FIELDS else part.lower()
+        # Klucz mapy tylko wtedy, gdy poprzedni segment JEST polem-kolekcją NA SWOJEJ
+        # pozycji. Sama nazwa nie wystarcza: `security.roe` to sekcja skalarnej
+        # konfiguracji, a `roe` na poziomie 0 to kolekcja zleceń — bez sprawdzenia
+        # pozycji `HUSARZ_SECURITY__ROE__VERIFY_SIGNATURE` trafiłoby jako klucz mapy
+        # (z zachowaną wielkością liter) i nie dopasowało się do pola schematu.
+        is_collection_key = prev in _COLLECTION_FIELDS and (prev != "roe" or len(segments) == 1)
+        seg = part if is_collection_key else part.lower()
         segments.append(seg)
         prev = seg
     return segments

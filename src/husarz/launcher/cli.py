@@ -21,6 +21,23 @@ from husarz.config.errors import ConfigError
 from husarz.config.schema import Profile
 
 
+def _roe_signature_status(config: HusarzConfig) -> str:
+    """Opisuje EFEKTYWNY stan weryfikacji podpisu ROE (widoczny przy każdym `validate`).
+
+    Bez tego wyłączona weryfikacja była niewidoczna poza lekturą YAML-a — a to degradacja
+    jedynego prymitywu autoryzującego aktywne działania Puszkarza, więc operator ma ją
+    widzieć od razu, wraz z informacją, czy w ogóle istnieje zlecenie ze zgodą.
+    """
+    roe = config.security.roe
+    consented = sorted(name for name, entry in config.roe.items() if entry.consent)
+    if not roe.verify_signature:
+        suffix = f" — UWAGA: aktywne zlecenia: {', '.join(consented)}" if consented else ""
+        return f"WYŁĄCZONA (weryfikacja pominięta){suffix}"
+    if not roe.key_ref:
+        return f"włączona ({roe.algorithm}), ale BRAK key_ref — weryfikacja odmówi"
+    return f"włączona ({roe.algorithm}, klucz: {roe.key_ref})"
+
+
 def _summarize(config: HusarzConfig) -> str:
     """Buduje zwięzłe, czytelne podsumowanie wczytanej konfiguracji."""
     lines = [
@@ -32,6 +49,7 @@ def _summarize(config: HusarzConfig) -> str:
         f"  agenci:            {', '.join(sorted(config.agents)) or '—'}",
         f"  narzędzia:         {', '.join(sorted(config.tools)) or '—'}",
         f"  ROE (zlecenia):    {', '.join(sorted(config.roe)) or '—'}",
+        f"  podpis ROE:        {_roe_signature_status(config)}",
         f"  egress:            {config.security.egress.default_policy.value}",
         f"  sandbox:           {config.security.sandbox.engine.value} "
         f"(sieć: {'tak' if config.security.sandbox.network else 'nie'})",
@@ -182,7 +200,11 @@ class _SchemeSecrets:
 def _cmd_up(args: argparse.Namespace) -> int:
     # Ładujemy konfigurację, wymuszając wybrany profil jako nadpisanie runtime.
     try:
-        config = load_config(args.config, runtime_overrides={"platform": {"profile": args.profile}})
+        # Profil nadpisujemy TYLKO gdy operator podał go jawnie. Domyślne wstrzykiwanie
+        # 'dev' po cichu degradowało konfigurację z `profile: prod` w pliku — a profil
+        # kotwiczy całą bazową linię bezpieczeństwa (sandbox, audyt, szyfrowanie, podpis ROE).
+        overrides = {"platform": {"profile": args.profile}} if args.profile else None
+        config = load_config(args.config, runtime_overrides=overrides)
         api_token = _resolve_api_token(config)
         accounts = _build_accounts(config)
         git_service = _build_git(config)
@@ -313,6 +335,15 @@ def _cmd_roe_sign(args: argparse.Namespace) -> int:
     try:
         config, roe = _load_roe(args)
         algorithm = args.algorithm or config.security.roe.algorithm
+        if algorithm != config.security.roe.algorithm:
+            # Podpis innym algorytmem niż skonfigurowany zostanie odrzucony przez
+            # downgrade-guard w runtime — lepiej powiedzieć to teraz niż dać operatorowi
+            # „poprawny" podpis, który nigdy nie przejdzie weryfikacji.
+            raise ConfigError(
+                f"--algorithm={algorithm} nie zgadza się z security.roe.algorithm="
+                f"{config.security.roe.algorithm}. Runtime odrzuci taki podpis "
+                f"(downgrade-guard). Zmień config albo pomiń --algorithm."
+            )
         if algorithm == ALGORITHM_ED25519:
             if not args.private_key_file:
                 raise ConfigError(
@@ -332,6 +363,15 @@ def _cmd_roe_sign(args: argparse.Namespace) -> int:
         return 1
     print(f"# Wklej do config/roe/{args.engagement}.yaml (pole 'signature'):")
     print(f"signature: {signature}")
+    if any(key.startswith("HUSARZ_ROE__") for key in os.environ):
+        # Podpis obejmuje EFEKTYWNĄ treść zlecenia (plik + ENV), a nie sam plik. Jeśli
+        # runtime wystartuje bez tych zmiennych, treść będzie inna i podpis nie przejdzie.
+        print(
+            "# UWAGA: w środowisku są nadpisania HUSARZ_ROE__* — podpis obejmuje treść "
+            "EFEKTYWNĄ (plik + ENV).\n"
+            "# Runtime musi widzieć te same nadpisania, inaczej weryfikacja odmówi.",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -419,7 +459,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_up = sub.add_parser("up", help="Uruchom API + konsolę WWW w danym profilu.")
     p_up.add_argument("--config", default=None, help="Katalog konfiguracji.")
     # Źródło prawdy o profilach to enum Profile — bez duplikowania listy w CLI.
-    p_up.add_argument("--profile", default=Profile.DEV.value, choices=[p.value for p in Profile])
+    p_up.add_argument(
+        "--profile",
+        default=None,
+        choices=[p.value for p in Profile],
+        help="Nadpisz profil z konfiguracji (bez tej flagi obowiązuje profil z pliku/ENV).",
+    )
     p_up.add_argument("--host", default="127.0.0.1", help="Adres nasłuchu (domyślnie loopback).")
     p_up.add_argument("--port", default=8000, type=int, help="Port API.")
     p_up.add_argument("--prompts", default="./prompts", help="Katalog promptów agentów.")

@@ -425,3 +425,100 @@ def test_cli_roe_sign_unknown_engagement_fails(write_config) -> None:  # noqa: A
     assert (
         main(["roe", "sign", "--config", str(write_config(files)), "--engagement", "nie-ma"]) == 1
     )
+
+
+def test_gate_denies_and_audits_when_key_is_unresolvable() -> None:
+    """Niezmiennik bramki: KAŻDA decyzja trafia do audytu. Wyjątek z weryfikatora (np. sekret
+    zniknął w runtime) nie może uciec z `evaluate` i zostawić próby bez śladu."""
+    audit = AuditLog()
+    verifier = build_roe_verifier(
+        _security(algorithm="hmac-sha256", key_ref="env:ROE"), DictSecrets({})
+    )
+    decision = RoeGate(_signed(), audit, signature_verifier=verifier).evaluate(
+        target="192.0.2.10", technique="port-scan", now=NOW
+    )
+    assert decision.allowed is False
+    denials = [entry for entry in audit.entries if entry.action == "roe.deny"]
+    assert denials, "próba użycia ROE musi zostawić wpis w audycie"
+    assert any("niemożliwa" in str(entry.detail.get("reason", "")) for entry in denials)
+
+
+# --- Utwardzenia z adwersaryjnego przeglądu Etapu 4b ------------------------
+
+
+@pytest.mark.parametrize("entry", ["192.0.2.5/29", "10.0.0.1/8", "", "   "])
+def test_out_of_scope_malformed_entry_is_rejected_at_config(entry: str) -> None:
+    """FAIL-OPEN: niewyrównany CIDR w `out_of_scope` był CICHO ignorowany, więc wykluczenie
+    znikało (poszerzenie zakresu) — a podpis i tak obejmował taki dokument jako ważny."""
+    from husarz.config.schema import RoeScope
+
+    with pytest.raises(ValueError, match="out_of_scope"):
+        RoeScope(targets_cidr=["192.0.2.0/24"], out_of_scope=[entry])
+
+
+def test_out_of_scope_exclusion_actually_blocks_after_validation() -> None:
+    """Poprawny wpis realnie chroni host (kontrola pozytywna do testu wyżej)."""
+    audit = AuditLog()
+    roe = _signed(scope={"targets_cidr": ["192.0.2.0/24"], "out_of_scope": ["192.0.2.0/29"]})
+    decision = RoeGate(roe, audit).evaluate(target="192.0.2.5", technique="port-scan", now=NOW)
+    assert decision.allowed is False
+    assert "out_of_scope" in decision.reason
+
+
+@pytest.mark.parametrize(
+    ("entry", "target"),
+    [
+        (" db.example.local ", "db.example.local"),  # białe znaki we wpisie
+        ("db.example.local.", "db.example.local"),  # FQDN z kropką końcową
+        ("DB.Example.Local", "db.example.local"),  # wielkość liter
+    ],
+)
+def test_scope_entry_is_normalized_like_target(entry: str, target: str) -> None:
+    """Wpis i cel przechodzą tę SAMĄ normalizację — inaczej różnica w zapisie decydowałaby
+    o autoryzacji, a dla `out_of_scope` znaczyłaby odsłonięcie chronionego hosta."""
+    roe = _signed(scope={"targets_domains": ["example.local"], "out_of_scope": [entry]})
+    decision = RoeGate(roe, AuditLog()).evaluate(target=target, technique="port-scan", now=NOW)
+    assert decision.allowed is False
+    assert "out_of_scope" in decision.reason
+
+
+def test_env_override_reaches_security_roe_section() -> None:
+    """Regresja: `roe` jest też nazwą kolekcji zleceń, więc `HUSARZ_SECURITY__ROE__*`
+    trafiało jako klucz mapy (z zachowaną wielkością liter) i nie dopasowywało się do pola."""
+    from husarz.config.loader import _normalize_env_segments
+
+    assert _normalize_env_segments(["SECURITY", "ROE", "VERIFY_SIGNATURE"]) == [
+        "security",
+        "roe",
+        "verify_signature",
+    ]
+    # ...a kolekcja zleceń NADAL zachowuje wielkość liter identyfikatora:
+    assert _normalize_env_segments(["ROE", "Moje-Zlecenie", "CONSENT"]) == [
+        "roe",
+        "Moje-Zlecenie",
+        "consent",
+    ]
+
+
+def test_runtime_override_cannot_downgrade_profile(repo_config_dir: Any) -> None:
+    """Profil KOTWICZY bazową linię bezpieczeństwa (sandbox, audyt, szyfrowanie, podpis ROE),
+    więc jedno żądanie `{"platform": {"profile": "dev"}}` degradowałoby je wszystkie naraz."""
+    from fastapi.testclient import TestClient
+
+    from husarz.api import create_app
+    from husarz.config import load_config
+
+    config = load_config(repo_config_dir)
+    client = TestClient(create_app(config, config_dir=repo_config_dir, audit=AuditLog()))
+    response = client.post(
+        "/api/config/runtime", json={"overrides": {"platform": {"profile": "dev"}}}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert "platform.profile" in body["error"]
+    # Inne nadpisania działają jak dotąd — blokujemy WYŁĄCZNIE kotwicę profilu.
+    ok = client.post(
+        "/api/config/runtime", json={"overrides": {"platform": {"log_level": "DEBUG"}}}
+    )
+    assert ok.json()["ok"] is True

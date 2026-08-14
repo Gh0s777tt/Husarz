@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from husarz.config.net import endpoint_host
 from husarz.config.schema import RoeConfig, RoeScope
 from husarz.security.audit import AuditLog
+from husarz.security.errors import SecurityError
 
 
 @dataclass(slots=True, frozen=True)
@@ -38,12 +39,17 @@ def _as_network(entry: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network | N
 
 
 def _host_of(target: str) -> str:
-    """Wyłuskuje sam host z celu (obsługuje scheme://, userinfo i port)."""
-    if "://" in target:
-        parsed = endpoint_host(target)
+    """Wyłuskuje sam host z celu/wpisu (obsługuje scheme://, userinfo, port, FQDN z kropką).
+
+    Używane po OBU stronach porównania — cel i wpis zakresu muszą być normalizowane tak
+    samo, inaczej różnica w zapisie decyduje o autoryzacji.
+    """
+    raw = target.strip()
+    if "://" in raw:
+        parsed = endpoint_host(raw)
         if parsed:
-            return parsed.lower()
-    return target.rsplit("@", 1)[-1].split(":", 1)[0].strip("[]").lower()
+            return parsed.strip(".").lower()
+    return raw.rsplit("@", 1)[-1].split(":", 1)[0].strip("[]").strip(".").lower()
 
 
 def _target_matches_entry(target: str, entry: str) -> bool:
@@ -56,10 +62,12 @@ def _target_matches_entry(target: str, entry: str) -> bool:
             return ipaddress.ip_address(target) in network
         except ValueError:
             return False
-    # Wpis jest domeną — dopasowanie dokładne lub jako subdomena.
+    # Wpis jest domeną — dopasowanie dokładne lub jako subdomena. Obie strony przechodzą
+    # przez tę samą normalizację: bez tego wpis z portem/schematem/białym znakiem nie
+    # dopasowałby się, a dla `out_of_scope` znaczyłoby to ODSŁONIĘCIE chronionego hosta.
     host = _host_of(target)
-    domain = entry.lower()
-    return host == domain or host.endswith(f".{domain}")
+    domain = _host_of(entry)
+    return bool(domain) and (host == domain or host.endswith(f".{domain}"))
 
 
 def _matches_any(target: str, entries: list[str]) -> bool:
@@ -88,6 +96,32 @@ class RoeGate:
         # sekretów). Gdy None — bramka wymaga jedynie obecności podpisu (is_active).
         self._signature_verifier = signature_verifier
 
+    def _verified(self, roe: RoeConfig, target: str, technique: str) -> bool:
+        """Uruchamia weryfikator podpisu; KAŻDY jego błąd traktuje jak odmowę.
+
+        Weryfikator podnosi ``RoeSignatureError`` przy problemie KONFIGURACJI (np. sekret
+        z ``key_ref`` zniknął w runtime). Gdyby wyjątek uciekł z ``evaluate``, próba użycia
+        ROE nie zostawiłaby wpisu w audycie — a niezmiennikiem tej bramki jest, że KAŻDA
+        decyzja jest logowana. Zamieniamy go więc na odmowę z osobnym powodem (widocznym
+        w audycie), zamiast wywracać wywołanie.
+
+        Args:
+            roe: konfiguracja zlecenia.
+            target: cel akcji (do audytu przy błędzie).
+            technique: technika akcji (do audytu przy błędzie).
+
+        Returns:
+            ``True`` tylko przy poprawnym podpisie.
+        """
+        verifier = self._signature_verifier
+        if verifier is None:  # pragma: no cover - wołane wyłącznie gdy weryfikator istnieje
+            return True
+        try:
+            return verifier(roe)
+        except SecurityError as exc:
+            self._deny(target, technique, f"Weryfikacja podpisu ROE niemożliwa: {exc}")
+            return False
+
     def _deny(self, target: str, technique: str, reason: str) -> RoeDecision:
         self._audit.record(
             self._actor,
@@ -111,7 +145,7 @@ class RoeGate:
 
         if not roe.is_active:
             return self._deny(target, technique, "ROE nieaktywne (brak zgody lub podpisu).")
-        if self._signature_verifier is not None and not self._signature_verifier(roe):
+        if self._signature_verifier is not None and not self._verified(roe, target, technique):
             return self._deny(target, technique, "Podpis ROE nie przeszedł weryfikacji.")
         if not roe.is_active_at(moment):
             return self._deny(target, technique, "Poza oknem czasowym ROE.")

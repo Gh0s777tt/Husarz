@@ -71,6 +71,38 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 - Testy: +40 (offline), w tym parametryczne wykrywanie manipulacji każdego pola, round-trip
   Ed25519 (PEM i base64), walidacja krzyżowa profili i pętla CLI. Łącznie 837.
 
+### Poprawione (adwersaryjny przegląd Etapu 4b — 3 soczewki, 12 potwierdzonych findingów)
+- **FAIL-OPEN w `out_of_scope` (major)**: niewyrównany CIDR (`192.0.2.5/29`), pusty wpis albo
+  śmieć były CICHO ignorowane przez dopasowanie — wykluczenie po prostu znikało, czyli zakres
+  się POSZERZAŁ. Gorzej: operator podpisywał kryptograficznie dokument, którego semantyka
+  różniła się od tego, co czytał. Teraz walidacja odrzuca takie wpisy przy starcie.
+- **Normalizacja wpisów zakresu (major)**: `_target_matches_entry` normalizował tylko CEL,
+  a wpis brał dosłownie — więc `" db.example.local "`, `"db.example.local."` czy wpis
+  z portem/schematem nie dopasowywał się. Dla `targets_*` to ciche zawężenie, ale dla
+  `out_of_scope` — odsłonięcie chronionego hosta. Obie strony przechodzą teraz to samo.
+- **Kotwica profilu (major)**: `platform.profile` dało się nadpisać przez
+  `POST /api/config/runtime`, a to na nim opiera się CAŁA bazowa linia prod/airgap
+  (sandbox, audyt, szyfrowanie, podpis ROE). Jedno żądanie `{"platform":{"profile":"dev"}}`
+  wyłączało je wszystkie naraz. Endpoint odrzuca teraz takie nadpisanie.
+- **`husarz up` degradował profil (major)**: `--profile` miał domyślną wartość `dev`
+  wstrzykiwaną jako nadpisanie runtime, więc konfiguracja z `profile: prod` startowała jako
+  dev. Bez jawnej flagi profil NIE jest już nadpisywany.
+- **Kolizja nazw w ENV (major)**: `HUSARZ_SECURITY__ROE__VERIFY_SIGNATURE` nie działało —
+  `roe` jest też nazwą kolekcji zleceń, a loader decydował o zachowaniu wielkości liter po
+  SAMEJ nazwie segmentu, nie po ścieżce. Regresja wprowadzona przez nową sekcję `security.roe`.
+- **CLI (minor)**: `roe sign --algorithm` niezgodny z configiem kończy się błędem (runtime
+  odrzuciłby taki podpis przez downgrade-guard); `roe sign` ostrzega, gdy w środowisku są
+  nadpisania `HUSARZ_ROE__*` (podpis obejmuje treść EFEKTYWNĄ, nie sam plik).
+- **Widoczność (minor)**: `husarz validate` pokazuje stan weryfikacji podpisu ROE — wyłączona
+  weryfikacja była dotąd niewidoczna poza lekturą YAML-a, mimo że degraduje jedyny prymityw
+  autoryzacji. Przy wyłączeniu wypisywane są też nazwy zleceń ze zgodą.
+- **Audyt (minor)**: błąd weryfikatora (np. zniknął sekret z `key_ref`) kończy się odmową
+  Z WPISEM w audycie, a nie wyjątkiem uciekającym z `evaluate` — niezmiennikiem bramki jest,
+  że KAŻDA decyzja zostawia ślad.
+- **Dokumentacja (nit)**: README przedstawiał podpis ROE jako aktywną gwarancję runtime,
+  choć `RoeGate` nie jest jeszcze wpięty — dopisane zastrzeżenie.
+- Testy: +9 regresyjnych (łącznie 848).
+
 ### Zmienione (Etap 4b — zmiana zachowania, ścieżka aktualizacji)
 - Dotychczasowe „podpisy" (dowolny tekst w polu `signature`) **przestają być ważne**. Dotyczy
   każdego zlecenia z `consent: true`. **Migracja:** ustaw `security.roe.key_ref`, wygeneruj

@@ -618,6 +618,20 @@ def create_app(
         cdir = state["config_dir"]
         if cdir is None:
             return ValidateResponse(ok=False, error="Nadpisania wymagają katalogu konfiguracji.")
+        # Profil jest KOTWICĄ bazowej linii bezpieczeństwa (_cross_validate wymusza na jego
+        # podstawie sandbox, audyt, szyfrowanie i weryfikację podpisu ROE). Gdyby dało się go
+        # nadpisać przez API, wystarczyłoby jedno żądanie `{"platform": {"profile": "dev"}}`,
+        # by zdegradować prod/airgap i wyłączyć wszystkie te wymagania naraz. Profil zmienia
+        # się wyłącznie przez konfigurację startową (plik/ENV/`husarz up --profile`).
+        if "profile" in (request.overrides.get("platform") or {}):
+            return ValidateResponse(
+                ok=False,
+                error=(
+                    "Nadpisanie 'platform.profile' w runtime jest zabronione — profil kotwiczy "
+                    "bazową linię bezpieczeństwa (sandbox, audyt, szyfrowanie, podpis ROE). "
+                    "Zmień profil w konfiguracji startowej i uruchom ponownie."
+                ),
+            )
         try:
             merged = load_config(cdir, runtime_overrides=request.overrides)
         except ConfigError as exc:

@@ -259,7 +259,11 @@ def test_up_subcommand_is_wired() -> None:
 
     args = build_parser().parse_args(["up"])
     assert args.func is _cmd_up
-    assert args.profile == "dev"
+    # Bez jawnej flagi profil NIE jest nadpisywany — obowiązuje ten z pliku/ENV.
+    # Domyślne wstrzykiwanie 'dev' po cichu degradowało konfigurację `profile: prod`,
+    # a profil kotwiczy bazową linię bezpieczeństwa (sandbox/audyt/szyfrowanie/podpis ROE).
+    assert args.profile is None
+    assert build_parser().parse_args(["up", "--profile", "prod"]).profile == "prod"
 
 
 def test_up_accepts_airgap_profile_from_enum() -> None:

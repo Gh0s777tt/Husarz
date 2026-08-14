@@ -679,6 +679,20 @@ alternatyw — [ADR-0021](adr/0021-podpis-roe.md).
 | Sam szablon (`consent: false`) NIE wymusza klucza (brak zbędnej friction) | `test_prod_without_consented_roe_does_not_require_key` |
 | Narzędzie operatora domyka pętlę: `roe sign` → wklejenie → `roe verify` = 0 | `test_cli_roe_sign_then_verify_round_trip` |
 
+#### Hardening po adwersaryjnym przeglądzie 4b (3 soczewki, 12 potwierdzonych findingów)
+
+| Poprawka | Test |
+|---|---|
+| **FAIL-OPEN**: niewyrównany CIDR w `out_of_scope` (`192.0.2.5/29`) był CICHO ignorowany — wykluczenie znikało, czyli zakres się POSZERZAŁ, a podpis obejmował taki dokument jako ważny | `test_out_of_scope_malformed_entry_is_rejected_at_config`, `test_out_of_scope_exclusion_actually_blocks_after_validation` |
+| Wpis zakresu normalizowany tak samo jak cel (białe znaki, kropka końcowa FQDN, port/schemat, wielkość liter) — różnica w zapisie nie może decydować o autoryzacji | `test_scope_entry_is_normalized_like_target` |
+| **Kotwica profilu**: `POST /api/config/runtime` nie może nadpisać `platform.profile` — jedno żądanie degradowało prod→dev, wyłączając naraz wymagania sandboxa, audytu, szyfrowania i podpisu ROE | `test_runtime_override_cannot_downgrade_profile` |
+| `husarz up` bez `--profile` NIE nadpisuje profilu (domyślne `dev` po cichu degradowało `profile: prod` z pliku) | `test_up_subcommand_is_wired` |
+| `HUSARZ_SECURITY__ROE__*` działa — `roe` jest też nazwą kolekcji zleceń, więc segment trafiał jako klucz mapy i nie dopasowywał się do pola schematu | `test_env_override_reaches_security_roe_section` |
+| `roe sign --algorithm` niezgodny z configiem → błąd (runtime i tak odrzuciłby taki podpis) | (`_cmd_roe_sign`) |
+| `roe sign` ostrzega, gdy działają nadpisania `HUSARZ_ROE__*` (podpis obejmuje treść EFEKTYWNĄ) | (`_cmd_roe_sign`) |
+| Stan weryfikacji podpisu widoczny w `husarz validate` (wyłączona weryfikacja nie może być niewidoczna) | (`_roe_signature_status`) |
+| Błąd weryfikatora (np. zniknął sekret) → odmowa Z WPISEM w audycie, nie wyjątek z `evaluate` | `test_gate_denies_and_audits_when_key_is_unresolvable` |
+
 **Kod wrażliwy (kryptografia) — czy da się go usunąć?** Nie. Bez weryfikacji podpisu
 autoryzacją jest dowolny tekst, a bramka ROE — jedyne zabezpieczenie przed użyciem Husarza
 przeciwko celom bez zgody — opiera się na dokumencie, którego integralności nikt nie sprawdza.

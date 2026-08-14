@@ -51,7 +51,12 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   z EFEKTYWNEGO configu (wykrywa też nadpisania runtime), `hmac-sha256` (stdlib) i `ed25519`
   (klucz prywatny poza maszyną), downgrade-guard, fail-closed w każdym rozgałęzieniu,
   wymagane w `prod`/`airgap` przy aktywnym zleceniu. Narzędzie operatora: `husarz roe sign|verify`.
-  Testy: +40. ⬜ Pozostaje: wpięcie `RoeGate` w runtime (dziś orkiestrator pomija `roe_required`),
+  Testy: +49. Utwardzenia z adwersaryjnego przeglądu (12 findingów): domknięty FAIL-OPEN
+  w `out_of_scope` (niewyrównany CIDR cicho znikał = poszerzenie zakresu), normalizacja wpisów
+  zakresu, **kotwica profilu** (`platform.profile` nie do nadpisania przez `/api/config/runtime`
+  ani domyślnie przez `husarz up`), kolizja `HUSARZ_SECURITY__ROE__*` w loaderze, widoczność
+  stanu weryfikacji w `validate`, audyt przy błędzie weryfikatora.
+- ⬜ Pozostaje: wpięcie `RoeGate` w runtime (dziś orkiestrator pomija `roe_required`),
   klucze prywatne z hasłem, rotacja/wersjonowanie kluczy.
 - 🚧 Uwierzytelnienie + przypisanie ról: **token Bearer + RBAC wpięte w API (Etap 5)**;
   pełny **OIDC** i **mTLS** — Etap 6.

@@ -633,6 +633,17 @@ class RoeScope(_StrictModel):
     targets_domains: list[str] = Field(default_factory=list)
     out_of_scope: list[str] = Field(default_factory=list)
 
+    @field_validator("targets_cidr", "targets_domains", "out_of_scope")
+    @classmethod
+    def _strip_entries(cls, value: list[str]) -> list[str]:
+        """Przycina białe znaki i kropkę końcową FQDN — runtime porównuje wpisy dosłownie.
+
+        Bez tego wpis ``" 192.0.2.1 "`` albo ``"app.example.local."`` nie dopasowałby się
+        do celu. Dla ``targets_*`` skutkiem byłoby ciche zawężenie (nieszkodliwe), ale dla
+        ``out_of_scope`` — ciche ZNIKNIĘCIE wykluczenia, czyli poszerzenie uprawnień.
+        """
+        return [entry.strip().rstrip(".") for entry in value]
+
     @model_validator(mode="after")
     def _validate(self) -> RoeScope:
         if not self.targets_cidr and not self.targets_domains:
@@ -648,6 +659,23 @@ class RoeScope(_StrictModel):
                 raise ValueError(
                     f"targets_cidr: '{entry}' nie jest poprawną, wyrównaną siecią CIDR "
                     f"(dla pojedynczego hosta użyj /32 lub /128)."
+                ) from exc
+        # out_of_scope ma ODWROTNĄ polaryzację niż targets_*: wpis, który się nie dopasuje,
+        # nie zawęża zakresu, tylko ODSŁANIA host, który miał być chroniony. Niewyrównany
+        # CIDR ('192.0.2.5/29') albo pusty wpis byłby cichym no-opem — i to na dokumencie,
+        # który operator podpisuje kryptograficznie. Dlatego walidujemy fail-closed.
+        for entry in self.out_of_scope:
+            if not entry:
+                raise ValueError("out_of_scope: pusty wpis (usuń go lub podaj cel).")
+            if "/" not in entry:
+                continue  # domena albo pojedynczy adres — dopasowanie łańcuchowe/IP
+            try:
+                ipaddress.ip_network(entry, strict=True)
+            except ValueError as exc:
+                raise ValueError(
+                    f"out_of_scope: '{entry}' nie jest poprawną, wyrównaną siecią CIDR — "
+                    f"wykluczenie byłoby CICHO IGNOROWANE (dla pojedynczego hosta użyj "
+                    f"samego adresu albo /32)."
                 ) from exc
         return self
 
