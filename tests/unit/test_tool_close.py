@@ -62,3 +62,13 @@ def test_sqlite_store_double_close_is_safe(tmp_path: Path) -> None:
     store = SqliteVectorStore(tmp_path / "m.db")
     store.close()
     store.close()  # idempotentne — drugie zamknięcie nie rzuca
+
+
+def test_dispatch_after_close_degrades_to_ok_false(tmp_path: Path) -> None:
+    # Niezmiennik degradacji: użycie ZAMKNIĘTEGO magazynu przez dispatch → ToolResult(ok=False),
+    # nie wyjątek — żądanie w locie po podmianie stacku nie pada (RagBackendError ⊂ MemoryError_).
+    store = SqliteVectorStore(tmp_path / "m.db")
+    backend = EmbeddingRagBackend(FakeEmbedder(dim=8), store, namespace="ns", dim=8)
+    dispatcher = ToolDispatcher({"rag": RagTool(backend)}, {"rag": "rag"})
+    dispatcher.close()
+    assert dispatcher.dispatch("rag", "search", {"query": "x"}).ok is False
