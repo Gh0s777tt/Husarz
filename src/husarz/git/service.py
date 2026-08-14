@@ -36,6 +36,11 @@ class GitService:
         self._transport = transport
         self._resolve = resolve
 
+    @property
+    def store(self) -> GitConnectionStore:
+        """Magazyn połączeń — do PRZEBUDOWY serwisu z nową polityką bez utraty danych."""
+        return self._store
+
     def add(self, conn: GitConnection) -> None:
         """Dodaje połączenie (metadane + referencja tokenu; bez sekretu)."""
         self._store.add(conn)

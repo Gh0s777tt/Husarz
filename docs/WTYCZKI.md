@@ -115,4 +115,6 @@ przekierowanie omijałoby walidację i pin).
 
 **Domknięte w Etapie 15:** pełne **pinowanie IP** (okno TOCTOU rebindingu) — patrz
 [ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md). Klasyfikacja hostów i pin są współdzielone
-z narzędziem `web` (moduł `husarz.ssrf`), więc obie ścieżki wychodzące mają tę samą obronę.
+z narzędziem `web` i integracjami Git (moduł `husarz.ssrf`), więc WSZYSTKIE trzy ścieżki
+wychodzące mają tę samą obronę — różnią się wyłącznie dwiema flagami polityki
+(`allow_loopback`, `allow_lan`).

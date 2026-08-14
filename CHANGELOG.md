@@ -66,6 +66,43 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `resolve` przewleczony przez `build_git_service → GitService → build_provider`.
 - Testy: +8 niezmienników ścieżki Git. Docs: ADR-0020 (oś `allow_lan`), GIT.md, BEZPIECZENSTWO.md.
 
+### Poprawione (adwersaryjny przegląd Etapu 15b — 3 soczewki, 8 potwierdzonych findingów)
+- **Fail-open kill-switch dla Gita (major)**: `POST /api/config/runtime` przebudowywał router,
+  orkiestrator, `plugin_service` i pętlę narzędziową, ale NIE `git_service` — zmiana polityki
+  egress (łącznie z przełączeniem na profil `airgap`) nie obowiązywała aż do restartu, mimo że
+  cała warstwa anty-SSRF opiera się na tej bramce, a to JEDYNA ścieżka wychodząca niosąca token
+  z prawem zapisu do repozytoriów. Dodano `git_service_factory` (jak dla wtyczek); `_require_git`
+  czyta świeży serwis ze stanu. Magazyn połączeń jest PRZEKAZYWANY do nowej instancji, więc
+  przebudowa nie kasuje połączeń dodanych przez API (`build_git_service(..., store=...)`).
+- **3xx dostawcy Git jako sukces (major)**: przy `follow_redirects=False` (anty-SSRF)
+  przekierowanie dawało puste ciało, a `_raise_for_status` nie miało gałęzi dla 3xx —
+  `list_repositories` zwracało `[]` („brak repozytoriów"), a `create_pull_request` obiekt
+  z pustym URL, czyli operator widział „PR utworzony", choć żaden nie powstał. Teraz `GitError`
+  (parytet z konektorem MCP).
+- **Niedomknięta własna bramka `api_base` (minor)**: warunek sprawdzał WARTOŚCI
+  `split.query`/`split.fragment`, a dla `https://host/api/v4?` i `.../v4#` `urlsplit` zwraca
+  PUSTY łańcuch (falsy) — przypadek brzegowy przechodził, a gałąź literału IP niosła `api_base`
+  verbatim, więc żądanie z tokenem szło pod korzeń API. Testujemy teraz OBECNOŚĆ separatora.
+- **Brak `chunk_size` w transporcie MCP (minor)**: utwardzenie anty-OOM objęło `web` i Git, ale
+  ominęło wtyczki — `iter_bytes()` bez `chunk_size` oddaje cały zdekompresowany blok naraz, więc
+  odpowiedź gzip mogła przekroczyć `max_bytes` ~67× przed sprawdzeniem warunku. Wyrównane.
+- **Martwe pole (nit)**: `HttpxGitTransport.__init__(timeout=...)` zapisywał `self._timeout`,
+  którego `__call__` nigdy nie czytał — konstruktor obiecywał nastawę, której kod nie honorował.
+  Parametr usunięty (limit czasu przychodzi z każdym wywołaniem).
+- **Dokumentacja (minor)**: ADR-0011 twierdził, że `build_provider` woła `check_endpoint_allowed`
+  — nieprawda od Etapu 14; dopisano notę korygującą z odsyłaczem do ADR-0020.
+- Testy: +11 (m.in. integracyjna regresja kill-switcha z kontrolą, że przebudowa nie gubi
+  połączeń, oraz kontrola chunkowanego odczytu we WSZYSTKICH trzech transportach).
+
+### Zmienione (Etap 15b — zaostrzenie polityki adresów dla Gita, ścieżka aktualizacji)
+- Git blokuje teraz adresy, które przed Etapem 15b **przechodziły**: CGNAT `100.64.0.0/10`
+  (m.in. sieci Tailscale), TEST-NET, sieci benchmarkowe, klasa E, multicast, IPv6 site-local
+  i tunele osadzające IPv4 — a także **nazwy** rozwiązujące się na te zakresy (dawna walidacja
+  w ogóle nie rozwiązywała nazw). Dla typowych wdrożeń to bez zmian: `api.github.com`,
+  `gitlab.com` i samodzielnie hostowany GitLab pod RFC 1918/ULA działają jak wcześniej.
+  **Migracja:** jeśli Twój serwer Git jest dostępny przez CGNAT (Tailscale/CGNAT ISP), zaadresuj
+  go nazwą lub adresem z zakresu RFC 1918/ULA albo publicznym — inaczej połączenie da `403`.
+
 ### Dodane (higiena testów — bezpiecznik offline)
 - `tests/conftest.py`: autouse fixture blokujący `socket.getaddrinfo` dla CAŁEGO zestawu.
   Po wprowadzeniu pinowania testy z hostem `api.github.com`/`gitlab.com` po cichu wychodziły

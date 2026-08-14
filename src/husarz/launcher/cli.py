@@ -137,13 +137,18 @@ def _build_accounts(config: HusarzConfig) -> Any:
         raise ConfigError(str(exc)) from exc
 
 
-def _build_git(config: HusarzConfig) -> Any:
-    """Buduje usługę integracji Git z configu (lub None, gdy wyłączona). Import leniwy."""
+def _build_git(config: HusarzConfig, store: Any = None) -> Any:
+    """Buduje usługę integracji Git z configu (lub None, gdy wyłączona). Import leniwy.
+
+    ``store`` (opcjonalny) to DOTYCHCZASOWY magazyn połączeń — przekazywany przy przebudowie
+    po nadpisaniu konfiguracji w runtime, żeby świeża polityka egress nie kasowała połączeń
+    dodanych przez API (patrz ``git_service_factory`` w ``create_app``).
+    """
     if not config.git.enabled:
         return None
     from husarz.git import build_git_service  # noqa: PLC0415
 
-    return build_git_service(config.git, config.security, secrets=_SchemeSecrets())
+    return build_git_service(config.git, config.security, secrets=_SchemeSecrets(), store=store)
 
 
 def _build_plugins(config: HusarzConfig) -> Any:
@@ -229,6 +234,11 @@ def _cmd_up(args: argparse.Namespace) -> int:
         api_token=api_token,
         accounts=accounts,
         git_service=git_service,
+        # Fabryka: po `POST /api/config/runtime` serwis Git jest przebudowywany z NOWĄ
+        # polityką egress, ale z tym samym magazynem połączeń (bez utraty danych).
+        git_service_factory=lambda cfg: _build_git(
+            cfg, store=git_service.store if git_service is not None else None
+        ),
         plugin_service=plugin_service,
         # Fabryka: przy nadpisaniu runtime serwis wtyczek (polityka konektorów: allow_call/
         # call_allowlist/enabled/egress) jest przebudowywany z NOWEGO configu — jak router.

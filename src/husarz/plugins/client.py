@@ -45,6 +45,8 @@ from husarz.ssrf import (
 
 _DEFAULT_TIMEOUT = 30
 _DEFAULT_MAX_BYTES = 1_000_000
+# Maksymalny rozmiar JEDNEJ iteracji odczytu (parytet z `web`/Git — patrz niżej).
+_READ_CHUNK_BYTES = 64 * 1024
 
 # Re-eksport dla zgodności wołających (``PluginService`` importuje z tego modułu).
 __all__ = [
@@ -199,7 +201,11 @@ class HttpxPluginTransport:
                     extensions=extensions,
                 ) as response,
             ):
-                for chunk in response.iter_bytes():
+                # `chunk_size` ogranicza JEDNĄ iterację: bez niego httpx oddaje cały
+                # zdekompresowany blok naraz (żądanie wysyła `Accept-Encoding: gzip`), więc
+                # odpowiedź-bomba mogłaby przekroczyć `max_bytes` o rzędy wielkości ZANIM
+                # sprawdzimy warunek. Parytet z `HttpxFetcher`/`HttpxGitTransport`.
+                for chunk in response.iter_bytes(chunk_size=_READ_CHUNK_BYTES):
                     buffer += chunk
                     if len(buffer) > max_bytes:
                         raise PluginTransportError(

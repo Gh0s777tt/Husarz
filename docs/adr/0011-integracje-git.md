@@ -29,6 +29,14 @@ testach wstrzykiwany fake → zero sieci. GitLab wymaga URL-encode ścieżki pro
 ### Bramka egress (deny-all) na hoście dostawcy
 
 `build_provider` wywołuje `check_endpoint_allowed(api_base, egress)` — host dostawcy
+
+> **Aktualizacja (Etap 14/15b).** Powyższy opis jest historyczny: `build_provider` NIE woła
+> już `check_endpoint_allowed`. Ta funkcja przepuszcza bez warunków „endpointy lokalne"
+> (po samej NAZWIE, m.in. sufiksy `.local`/`.internal`) — bezpieczne dla lokalnego Ollamy,
+> ale nie dla ścieżki niosącej token z prawem zapisu do repozytoriów. Git egzekwuje
+> allowlistę własną, wąską bramką w `_endpoint_target` i od Etapu 15b korzysta ze
+> współdzielonej warstwy anty-SSRF z **pinowaniem IP** — patrz
+> [ADR-0020](0020-pinowanie-ip-anty-ssrf.md) i [GIT.md](../GIT.md).
 musi być na `security.egress.allowlist`, inaczej `EgressError` → HTTP 403. Bez jawnej
 zgody operatora Husarz nie łączy się z WAN (ta sama warstwa co router modeli).
 

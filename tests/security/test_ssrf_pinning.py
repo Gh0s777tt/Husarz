@@ -455,3 +455,69 @@ def test_git_denied_egress_does_not_even_resolve_dns() -> None:
     with pytest.raises(EgressError, match="Egress zabroniony"):
         service.provider_for("gh").list_repositories()
     assert resolver.calls == [] and transport.targets == []
+
+
+@pytest.mark.parametrize(
+    "api_base",
+    [
+        "https://gitlab.com/api/v4?x=1",
+        "https://gitlab.com/api/v4#frag",
+        # PUSTY separator: `urlsplit` zwraca dla nich pusty łańcuch (falsy), więc bramka
+        # sprawdzająca WARTOŚCI przepuszczała własny przypadek brzegowy, a gałąź literału IP
+        # niosła `api_base` verbatim → żądanie z tokenem szło pod korzeń API.
+        "https://gitlab.com/api/v4?",
+        "https://gitlab.com/api/v4#",
+        "https://192.168.1.10/api/v4#",
+    ],
+)
+def test_git_rejects_api_base_with_query_or_fragment(api_base: str) -> None:
+    """Ścieżki zasobów doklejamy do bazy, więc query/fragment w `api_base` dałyby URL
+    z dwoma '?' albo ze ścieżką za '#' — odrzucamy fail-closed, bez wysyłania żądania."""
+    from husarz.git.errors import GitError
+
+    transport, resolver = RecordingGitTransport(), CountingResolver(_PUBLIC)
+    service = GitService(
+        secrets=DictSecrets({"env:GH": "sekret-pat"}),
+        egress=EgressConfig(default_policy=EgressPolicy.ALLOW),
+        transport=transport,
+        resolve=resolver,
+    )
+    service.add(
+        GitConnection(
+            name="gl", provider=GitProviderKind.GITLAB, api_base=api_base, token_ref="env:GH"
+        )
+    )
+    with pytest.raises(GitError, match="query ani fragmentu"):
+        service.provider_for("gl").list_repositories()
+    assert transport.targets == [] and resolver.calls == []
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_git_redirect_is_error_not_silent_success(status: int) -> None:
+    """`follow_redirects=False` (anty-SSRF) sprawia, że 3xx nie jest sukcesem. Bez jawnej
+    gałęzi `list_repositories` zwracało [] („brak repozytoriów"), a `create_pull_request`
+    obiekt z pustym URL — operator dostawał „PR utworzony", mimo że żaden nie powstał."""
+    from husarz.git.errors import GitError
+
+    class RedirectTransport:
+        def __call__(self, method, target, headers, json, timeout):  # type: ignore[no-untyped-def]
+            return status, None
+
+    service = GitService(
+        secrets=DictSecrets({"env:GH": "sekret-pat"}),
+        egress=EgressConfig(allowlist=["github.com"]),
+        transport=RedirectTransport(),
+        resolve=CountingResolver(_PUBLIC),
+    )
+    service.add(
+        GitConnection(
+            name="gh",
+            provider=GitProviderKind.GITHUB,
+            api_base="https://api.github.com",
+            token_ref="env:GH",
+        )
+    )
+    with pytest.raises(GitError, match="przekierowanie"):
+        service.provider_for("gh").list_repositories()
+    with pytest.raises(GitError, match="przekierowanie"):
+        service.provider_for("gh").create_pull_request("o/n", title="T", head="h", base="main")

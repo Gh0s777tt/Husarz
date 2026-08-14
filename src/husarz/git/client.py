@@ -88,7 +88,17 @@ def _endpoint_target(
     host = parsed.hostname
     if not host:
         raise GitError("api_base nie zawiera hosta.")
-    safe_port(urlsplit(api_base), api_base)
+    split = urlsplit(api_base)
+    if "?" in api_base or "#" in api_base:
+        # Ścieżki zasobów doklejamy do bazy (``_request_target``), więc query/fragment w bazie
+        # dałyby URL z dwoma '?' albo ze ścieżką za '#'. Testujemy OBECNOŚĆ separatora, a nie
+        # prawdziwość `split.query`/`split.fragment`: dla `.../v4?` i `.../v4#` urlsplit zwraca
+        # PUSTY łańcuch (falsy), więc bramka na wartościach przepuszczałaby własny przypadek
+        # brzegowy — a gałąź literału IP niesie `api_base` VERBATIM, więc separator by przetrwał.
+        # Baza API ich nie potrzebuje — odrzucamy fail-closed, zamiast wysyłać zniekształcone
+        # żądanie z tokenem pod niewłaściwy endpoint.
+        raise GitError("api_base nie może zawierać query ani fragmentu (to baza API, nie zasób).")
+    safe_port(split, api_base)
     if is_loopback_host(host) or is_loopback_name(host):
         raise EgressError(f"Host '{host}' zablokowany dla Git (loopback — SSRF).")
     literal = parse_ip_literal(host)
@@ -159,10 +169,9 @@ class HttpxGitTransport:
     httpx, które trafiłyby do audytu/API (parytet z konektorem MCP).
     """
 
-    def __init__(
-        self, timeout: int = _DEFAULT_TIMEOUT, *, max_bytes: int = _DEFAULT_MAX_BYTES
-    ) -> None:
-        self._timeout = timeout
+    def __init__(self, *, max_bytes: int = _DEFAULT_MAX_BYTES) -> None:
+        # Limit czasu przychodzi z KAŻDYM wywołaniem (providerzy podają własny), więc
+        # konstruktor go nie przyjmuje — pole `self._timeout` byłoby martwe i mylące.
         self._max_bytes = max_bytes
 
     def __call__(
@@ -222,9 +231,20 @@ class HttpxGitTransport:
 
 
 def _raise_for_status(status: int, data: Any, action: str) -> None:
-    """Mapuje kod odpowiedzi na wyjątek Git (401/403 → auth; 4xx/5xx → GitError)."""
+    """Mapuje kod odpowiedzi na wyjątek Git (401/403 → auth; 3xx i 4xx/5xx → GitError).
+
+    Kody 3xx są BŁĘDEM, nie sukcesem: ``follow_redirects=False`` (anty-SSRF — przekierowanie
+    omijałoby walidację i pin), więc przekierowania nie realizujemy. Bez tej gałęzi 301/302
+    dawałoby puste ciało i cichą degradację — „brak repozytoriów" albo `PullRequest` z pustym
+    URL-em, mimo że żaden PR nie powstał (parytet z ``husarz.plugins.client``).
+    """
     if status in (401, 403):
         raise GitAuthError(f"{action}: brak autoryzacji u dostawcy (HTTP {status}).")
+    if 300 <= status < 400:
+        raise GitError(
+            f"{action}: dostawca zwrócił przekierowanie (HTTP {status}) — nie podążamy za nim "
+            f"(anty-SSRF, pin IP). Popraw 'api_base' połączenia."
+        )
     if status >= 400:
         message = ""
         if isinstance(data, dict):

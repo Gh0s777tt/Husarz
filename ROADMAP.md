@@ -136,7 +136,13 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `HttpxGitTransport` z parytetem: `trust_env=False`, cap rozmiaru + deadline, generyczny
   błąd (dotąd echował URL i wnętrzności httpx do audytu/API).
 - ✅ Bezpiecznik offline w `tests/conftest.py` (blokada `socket.getaddrinfo`) — wykrył
-  5 testów po cichu wychodzących na sieć. Testy: +8. Docs: ADR-0020, GIT.md, BEZPIECZENSTWO.md.
+  5 testów po cichu wychodzących na sieć.
+- ✅ Utwardzenia z adwersaryjnego przeglądu (3 soczewki, 8 potwierdzonych findingów): domknięty
+  **fail-open kill-switch** (`git_service_factory` — polityka egress obowiązywała dopiero po
+  restarcie), 3xx dostawcy jako błąd, pusty separator `?`/`#` w `api_base`, chunkowany odczyt
+  także w transporcie MCP, usunięte martwe pole, sprostowany ADR-0011.
+- ✅ Testy: +19. Docs: ADR-0020, ADR-0011 (nota), GIT.md, BEZPIECZENSTWO.md, CHANGELOG (nota
+  migracyjna: Git blokuje teraz CGNAT/Tailscale i inne zakresy, które wcześniej przechodziły).
 
 ## ✅ Etap 13 — Pętla narzędziowa (function-calling)
 - ✅ Pętla ReAct (`agents/tool_loop.py`) — pierwszy egzekutor narzędzi; prompt-based

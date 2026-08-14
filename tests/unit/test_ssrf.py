@@ -435,3 +435,41 @@ def test_httpx_git_transport_pins_ip_and_keeps_host_sni_and_bearer(
     assert httpx_recorder["host"] == "api.github.com"
     assert httpx_recorder["sni"] == "api.github.com"
     assert httpx_recorder["authorization"] == "Bearer sekret-pat"
+
+
+def test_all_production_transports_read_in_bounded_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Wszystkie trzy transporty MUSZĄ czytać chunkami: bez `chunk_size` httpx oddaje cały
+    zdekompresowany blok naraz (żądania wysyłają `Accept-Encoding: gzip`), więc sprawdzenie
+    limitu następuje PO doklejeniu — odpowiedź-bomba przekracza `max_bytes` o rzędy wielkości."""
+    import httpx
+
+    from husarz.git.client import HttpxGitTransport
+    from husarz.plugins.client import HttpxPluginTransport
+    from husarz.tools.web import HttpxFetcher
+
+    seen: list[int | None] = []
+    real_iter = httpx.Response.iter_bytes
+
+    def spy(self: httpx.Response, chunk_size: int | None = None):  # type: ignore[no-untyped-def]
+        seen.append(chunk_size)
+        return real_iter(self, chunk_size=chunk_size)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {}})
+
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw)
+    )
+    monkeypatch.setattr(httpx.Response, "iter_bytes", spy)
+
+    target = pin_fields("https://example.com/x", "93.184.216.34")
+    HttpxFetcher()(target, timeout=5, max_bytes=1000)
+    HttpxPluginTransport()(target, {}, {"jsonrpc": "2.0", "id": 1}, 5, 1000)
+    HttpxGitTransport()("GET", target, {}, None, 5)
+
+    # httpx wywołuje `iter_bytes()` także wewnętrznie (bez chunk_size) przy materializacji
+    # odpowiedzi — liczą się WYWOŁANIA NASZEGO kodu, czyli te z jawnym rozmiarem.
+    explicit = [size for size in seen if size is not None]
+    assert len(explicit) == 3  # po jednym z każdego transportu produkcyjnego
+    assert all(0 < size <= 64 * 1024 for size in explicit)

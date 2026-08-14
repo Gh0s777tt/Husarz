@@ -207,6 +207,7 @@ def create_app(
     rbac: Rbac | None = None,
     accounts: AccountService | None = None,
     git_service: GitService | None = None,
+    git_service_factory: Callable[[HusarzConfig], GitService | None] | None = None,
     plugin_service: PluginService | None = None,
     plugin_service_factory: Callable[[HusarzConfig], PluginService | None] | None = None,
     chat_model: str | None = None,
@@ -247,6 +248,16 @@ def create_app(
     role = api_role if api_role is not None else config.security.auth.api_role
     authz = rbac if rbac is not None else Rbac()
 
+    def _active_git(cfg: HusarzConfig) -> GitService | None:
+        # Serwis Git PRZEBUDOWANY z bieżącego configu (jak router i wtyczki) — inaczej
+        # nadpisanie runtime nie propagowałoby polityki egress na JEDYNĄ ścieżkę wychodzącą
+        # niosącą token z prawem ZAPISU do repozytoriów (fail-open kill-switch: przełączenie
+        # na profil `airgap` nie blokowałoby Gita aż do restartu). Magazyn połączeń jest
+        # PRZEKAZYWANY dalej, więc przebudowa nie gubi połączeń dodanych przez API.
+        if git_service_factory is None:
+            return git_service
+        return git_service_factory(cfg)
+
     def _active_plugins(cfg: HusarzConfig) -> PluginService | None:
         # Serwis wtyczek PRZEBUDOWANY z bieżącego configu (jak router) — inaczej nadpisanie
         # runtime nie propagowałoby polityki konektora (allow_call/call_allowlist/enabled/egress),
@@ -255,11 +266,18 @@ def create_app(
 
     def _build_stack(
         cfg: HusarzConfig,
-    ) -> tuple[SupportsComplete | None, Orchestrator | None, PluginService | None, ToolLoop | None]:
+    ) -> tuple[
+        SupportsComplete | None,
+        Orchestrator | None,
+        PluginService | None,
+        ToolLoop | None,
+        GitService | None,
+    ]:
+        git = _active_git(cfg)
         plugins = _active_plugins(cfg)
         active = router_factory(cfg) if router_factory is not None else router
         if active is None:
-            return None, None, plugins, None
+            return None, None, plugins, None, git
         # Pętla narzędziowa: pierwszy egzekutor narzędzi. Zależności są leniwe
         # (executor/fetcher/rag budowane domyślnie), więc konstrukcja jest bezpieczna
         # bez Dockera — realne wykonanie potrzebują tylko agenci z opt-in (tool_loop_enabled).
@@ -272,18 +290,19 @@ def create_app(
             plugin_service=plugins,  # ten sam (świeży) serwis co /api/plugins — jedno źródło prawdy
         )
         orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir, tool_loop=loop)
-        return active, orch, plugins, loop
+        return active, orch, plugins, loop, git
 
     def _resolve_chat_model(cfg: HusarzConfig) -> str:
         return chat_model or cfg.models.chat or cfg.models.default
 
-    initial_router, initial_orch, initial_plugins, initial_loop = _build_stack(config)
+    initial_router, initial_orch, initial_plugins, initial_loop, initial_git = _build_stack(config)
     state: dict[str, Any] = {
         "config": config,
         "config_dir": config_dir,
         "router": initial_router,
         "orchestrator": initial_orch,
         "plugin_service": initial_plugins,
+        "git_service": initial_git,
         "tool_loop": initial_loop,
         "runtime_overrides": {},
         "orchestrations": 0,
@@ -606,13 +625,14 @@ def create_app(
         # Przebuduj router+orkiestrator, by /api/orchestrate i /api/chat używały
         # NOWEJ konfiguracji (a nie starej sprzed nadpisania). Budowa poza zamkiem,
         # atomowa podmiana pod zamkiem — spójna para (config, router) dla /api/chat.
-        new_router, new_orch, new_plugins, new_loop = _build_stack(merged)
+        new_router, new_orch, new_plugins, new_loop, new_git = _build_stack(merged)
         with counter_lock:
             state["config"] = merged
             state["runtime_overrides"] = request.overrides
             state["router"] = new_router
             state["orchestrator"] = new_orch
             state["plugin_service"] = new_plugins
+            state["git_service"] = new_git
             old_loop = state["tool_loop"]
             state["tool_loop"] = new_loop
         # Zamknij STARĄ pętlę (zwalnia np. połączenie sqlite RAG) PO atomowej podmianie —
@@ -712,9 +732,12 @@ def create_app(
     # --- Integracje Git (GitHub/GitLab): połączenia, repozytoria, tworzenie PR ---
 
     def _require_git() -> GitService:
-        if git_service is None:
+        # Czyta BIEŻĄCY serwis ze stanu (przebudowywany przy nadpisaniu runtime), nie domknięcie
+        # — inaczej zmiana polityki egress nie obowiązywałaby aż do restartu (fail-open).
+        svc: GitService | None = state.get("git_service")
+        if svc is None:
             raise HTTPException(status_code=404, detail="Integracje Git nie są włączone.")
-        return git_service
+        return svc
 
     @app.get(
         "/api/git/connections",

@@ -605,6 +605,16 @@ odwrotnie do celu projektu. Luz jest WĄSKI i jawny (`_LAN_NETWORKS` = RFC 1918 
 także loopback, link-local (metadane chmury) i zakresy testowe — „przepuść prywatne"
 odblokowałoby wtedy dokładnie to, co ma zostać zamknięte.
 
+#### Hardening po adwersaryjnym przeglądzie 15b (3 soczewki, 8 potwierdzonych findingów)
+
+| Poprawka | Test |
+|---|---|
+| **Fail-open kill-switch**: `git_service` przebudowywany przy `POST /api/config/runtime` (zmiana polityki egress / przejście na `airgap` obowiązuje bez restartu); magazyn połączeń przekazywany, więc przebudowa nie kasuje danych | `test_git_service_rebuilt_on_runtime_override` |
+| 3xx dostawcy → `GitError` (było: `[]` „brak repozytoriów" i PR z pustym URL — cicha degradacja) | `test_git_redirect_is_error_not_silent_success` |
+| Pusty separator `?`/`#` w `api_base` odrzucany (bramka na WARTOŚCIACH przepuszczała własny przypadek brzegowy) | `test_git_rejects_api_base_with_query_or_fragment` |
+| Chunkowany odczyt we WSZYSTKICH trzech transportach (transport MCP był pominięty przy utwardzeniu 15) | `test_all_production_transports_read_in_bounded_chunks` |
+| Konstruktor transportu nie obiecuje nastawy, której kod nie honoruje (martwe `self._timeout`) | (usunięty parametr) |
+
 **Ograniczenia:** ryzyko rezydualne `allow_lan` jest realne i świadome — operator, który
 doda do `security.egress.allowlist` domenę kontrolowaną przez atakującego, może zostać
 przekierowany w obręb własnej sieci (nie do metadanych chmury). Barierą pozostaje sama
