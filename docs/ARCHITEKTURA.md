@@ -64,10 +64,11 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   za niezmienionym `RagBackend`, trwały magazyn SQLite i szyfrowanie at-rest.
   Szczegóły: [ADR-0017](adr/0017-pamiec-dlugoterminowa-rag.md),
   [ADR-0018](adr/0018-pamiec-trwala-at-rest.md).
-- **Moduł `husarz.ssrf`** (Etap 15/15b) — wspólna warstwa anty-SSRF z **pinowaniem IP** dla
-  WSZYSTKICH ścieżek wychodzących (`web`, wtyczki MCP, integracje Git): nazwa rozwiązywana
-  raz, adres przypinany, `Host`/SNI po nazwie. Ścieżki różnią się tylko dwiema flagami
-  polityki (`allow_loopback`, `allow_lan`). Domyka okno TOCTOU DNS-rebindingu. Szczegóły:
+- **Moduł `husarz.ssrf`** (Etap 15/15b/15c) — wspólna warstwa anty-SSRF z **pinowaniem IP** dla
+  WSZYSTKICH pięciu ścieżek wychodzących (`web`, wtyczki MCP, integracje Git, embedder pamięci,
+  router modeli): nazwa rozwiązywana raz, adres przypinany, `Host`/SNI po nazwie. Ścieżki
+  różnią się tylko dwiema flagami polityki (`allow_loopback`, `allow_lan`), a metadane chmury
+  są zablokowane niezależnie od nich. Domyka okno TOCTOU DNS-rebindingu. Szczegóły:
   [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md), [ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md).
 - Pakiet `core` to na razie zaślepka; mTLS/OIDC oraz runtime egress/sandbox — Etap 6.
 

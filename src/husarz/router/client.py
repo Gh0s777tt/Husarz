@@ -12,19 +12,25 @@ from typing import Any, Protocol, runtime_checkable
 
 from husarz.config.schema import ModelBackend, ModelSpec
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
+from husarz.router.egress import EgressError
 from husarz.router.errors import ModelBackendError, TransportError
 from husarz.router.types import ChatMessage, ChatRequest, ChatResponse, Usage
+from husarz.ssrf import HostResolver, PinnedTarget, build_pinned_target, default_resolve
 
 DEFAULT_TIMEOUT_SECONDS = 60
 
 
 @runtime_checkable
 class Transport(Protocol):
-    """Warstwa transportu HTTP. Zwraca sparsowany JSON lub rzuca ``TransportError``."""
+    """Warstwa transportu HTTP. Zwraca sparsowany JSON lub rzuca ``TransportError``.
+
+    Przyjmuje ``PinnedTarget`` (a NIE goły URL) celowo: pin jest częścią kontraktu, więc
+    implementacja nie może go pominąć i rozwiązać nazwy ponownie (okno TOCTOU — ADR-0020).
+    """
 
     def __call__(
         self,
-        url: str,
+        target: PinnedTarget,
         headers: dict[str, str],
         payload: dict[str, Any],
         timeout: int,
@@ -41,14 +47,24 @@ class ModelClient(Protocol):
 
 
 class HttpxTransport:
-    """Transport oparty o httpx. Import leniwy — biblioteka wymagana dopiero przy wywołaniu."""
+    """Transport oparty o httpx. Import leniwy — biblioteka wymagana dopiero przy wywołaniu.
+
+    Łączy się z ``target.connect_url`` (literał IP dla nazw domenowych), a nagłówek ``Host``
+    i SNI/weryfikacja certyfikatu idą po ORYGINALNEJ nazwie — pin nie degraduje TLS.
+    ``trust_env=False``: zmienne ``HTTP(S)_PROXY`` ze środowiska nie mogą przekierować
+    przypiętego połączenia do modelu (a więc i klucza API) przez cudzy serwer.
+    ``follow_redirects=False`` — przekierowanie omijałoby walidację i pin.
+
+    Komunikat błędu jest GENERYCZNY (bez URL-a i wnętrzności httpx): trafia do
+    ``ModelBackendError`` i dalej do odpowiedzi API/audytu.
+    """
 
     def __init__(self, timeout: int | None = None) -> None:
         self._timeout = timeout
 
     def __call__(
         self,
-        url: str,
+        target: PinnedTarget,
         headers: dict[str, str],
         payload: dict[str, Any],
         timeout: int | None = None,
@@ -62,15 +78,32 @@ class HttpxTransport:
         effective_timeout = (
             timeout if timeout is not None else (self._timeout or DEFAULT_TIMEOUT_SECONDS)
         )
+        sent_headers = dict(headers)
+        if target.host_header is not None:
+            sent_headers["Host"] = target.host_header
+        extensions: dict[str, Any] = {}
+        if target.sni_hostname is not None:
+            extensions["sni_hostname"] = target.sni_hostname
         try:
-            response = httpx.post(url, headers=headers, json=payload, timeout=effective_timeout)
-            response.raise_for_status()
-            # ValueError (json.JSONDecodeError) nie jest httpx.HTTPError — też opakowujemy,
-            # by dotrzymać kontraktu transportu (zwraca JSON albo rzuca TransportError).
-            data: dict[str, Any] = response.json()
-            return data
+            with httpx.Client(
+                timeout=effective_timeout,
+                follow_redirects=False,
+                verify=True,
+                trust_env=False,
+            ) as client:
+                response = client.post(
+                    target.connect_url,
+                    headers=sent_headers,
+                    json=payload,
+                    extensions=extensions,
+                )
+                response.raise_for_status()
+                # ValueError (json.JSONDecodeError) nie jest httpx.HTTPError — też opakowujemy,
+                # by dotrzymać kontraktu transportu (zwraca JSON albo rzuca TransportError).
+                data: dict[str, Any] = response.json()
+                return data
         except (httpx.HTTPError, ValueError) as exc:
-            raise TransportError(f"Błąd HTTP przy {url}: {exc}") from exc
+            raise TransportError("Błąd HTTP przy wywołaniu modelu.") from exc
 
 
 def _parse_openai_response(data: dict[str, Any], model_id: str) -> ChatResponse:
@@ -131,11 +164,13 @@ class OpenAICompatClient:
         *,
         api_key: str | None,
         transport: Transport,
+        resolve: HostResolver | None = None,
     ) -> None:
         self.spec = spec
         self.model_id = model_id
         self._api_key = api_key
         self._transport = transport
+        self._resolve: HostResolver = resolve if resolve is not None else default_resolve
         timeout = spec.request_timeout_seconds
         self._timeout = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
 
@@ -144,6 +179,15 @@ class OpenAICompatClient:
             raise ModelBackendError(self.model_id, "Model nie ma skonfigurowanego endpointu.")
 
         url = self.spec.endpoint.rstrip("/") + "/chat/completions"
+        # Anty-SSRF + pin IP (ADR-0020). Endpoint modelu to własna infrastruktura operatora,
+        # więc loopback i LAN są dozwolone — ale nazwa NIE może rozwiązać się na metadane
+        # chmury ani inny zakres infrastrukturalny (tam poleciałby klucz API modelu).
+        try:
+            target = build_pinned_target(
+                url, allow_loopback=True, allow_lan=True, resolve=self._resolve
+            )
+        except EgressError as exc:
+            raise ModelBackendError(self.model_id, str(exc)) from exc
         # Priorytet parametrów (rosnąco): params modelu -> extra (escape hatch) ->
         # jawne pola żądania. Kanoniczne 'model'/'messages' ustawiamy NA KOŃCU,
         # aby params/extra nie mogły ich nadpisać (integralność routingu i treści).
@@ -163,7 +207,7 @@ class OpenAICompatClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         try:
-            data = self._transport(url, headers, payload, self._timeout)
+            data = self._transport(target, headers, payload, self._timeout)
         except TransportError as exc:
             raise ModelBackendError(self.model_id, str(exc)) from exc
         return _parse_openai_response(data, self.model_id)
@@ -191,6 +235,7 @@ def build_client(
     *,
     secrets: SecretsProvider | None = None,
     transport: Transport | None = None,
+    resolve: HostResolver | None = None,
 ) -> ModelClient:
     """Buduje klienta dla modelu.
 
@@ -215,4 +260,6 @@ def build_client(
         api_key = resolved.strip()
 
     active_transport = transport or HttpxTransport(timeout=spec.request_timeout_seconds)
-    return OpenAICompatClient(spec, model_id, api_key=api_key, transport=active_transport)
+    return OpenAICompatClient(
+        spec, model_id, api_key=api_key, transport=active_transport, resolve=resolve
+    )

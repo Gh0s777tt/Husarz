@@ -17,6 +17,7 @@ from husarz.config.errors import ConfigError
 from husarz.config.schema import EgressConfig, EmbedderConfig
 from husarz.memory import EmbeddingRagBackend, FakeEmbedder, InMemoryVectorStore, build_embedder
 from husarz.router.egress import EgressError
+from husarz.ssrf import PinnedTarget
 
 pytestmark = pytest.mark.security
 
@@ -28,8 +29,8 @@ class FakeTransport:
         self.calls = 0
 
     def __call__(
-        self, url: str, headers: dict[str, str], json: dict[str, Any], timeout: int
-    ) -> tuple[int, Any]:  # noqa: E501
+        self, target: PinnedTarget, headers: dict[str, str], json: dict[str, Any], timeout: int
+    ) -> tuple[int, Any]:
         self.calls += 1
         return 200, {"embedding": [0.5] * 4}
 

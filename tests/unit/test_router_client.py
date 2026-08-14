@@ -37,8 +37,16 @@ class CapturingTransport:
         self._response = response if response is not None else _OPENAI_RESPONSE
         self._error = error
 
-    def __call__(self, url, headers, payload, timeout):  # noqa: ANN001 - sygnatura protokołu
-        self.calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+    def __call__(self, target, headers, payload, timeout):  # noqa: ANN001 - sygnatura protokołu
+        self.calls.append(
+            {
+                "url": target.connect_url,
+                "target": target,
+                "headers": headers,
+                "payload": payload,
+                "timeout": timeout,
+            }
+        )
         if self._error is not None:
             raise self._error
         return self._response

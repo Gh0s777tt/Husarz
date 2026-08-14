@@ -19,6 +19,7 @@ from husarz.memory import (
 )
 from husarz.memory.errors import EmbedderError, RagBackendError
 from husarz.router.egress import EgressError
+from husarz.ssrf import PinnedTarget
 
 pytestmark = pytest.mark.unit
 
@@ -32,8 +33,8 @@ class FakeTransport:
         self._status = status
 
     def __call__(
-        self, url: str, headers: dict[str, str], json: dict[str, Any], timeout: int
-    ) -> tuple[int, Any]:  # noqa: E501
+        self, target: PinnedTarget, headers: dict[str, str], json: dict[str, Any], timeout: int
+    ) -> tuple[int, Any]:
         self.calls += 1
         return self._status, {"embedding": [0.5] * self._dim}
 

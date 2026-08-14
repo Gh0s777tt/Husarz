@@ -2,7 +2,7 @@
 
 - Status: przyjęty
 - Data: 2026-08-14
-- Etap: 15 (rozszerzony w 15b o `husarz.git`)
+- Etap: 15 (rozszerzony w 15b o `husarz.git`, w 15c o embedder pamięci i router modeli)
 - Domyka ograniczenia z: [ADR-0011](0011-integracje-git.md) (integracje Git),
   [ADR-0015](0015-konektor-mcp.md) (konektor MCP),
   [ADR-0016](0016-petla-narzedziowa.md) (narzędzie `web` w pętli),
@@ -44,6 +44,13 @@ flagami polityki** — cała reszta logiki jest wspólna:
 | narzędzie `web` | `False` | `False` | model steruje URL-em — nie może sięgnąć ani usług operatora, ani jego LAN |
 | konektor MCP | `True` | `False` | lokalny serwer wtyczki to GŁÓWNY przypadek; LAN nie jest potrzebny |
 | integracje Git | `False` | `True` | Git nigdy nie jest usługą lokalną Husarza, ale samodzielnie hostowany GitLab pod RFC 1918 to podstawowy scenariusz suwerenności |
+| embedder pamięci | `True` | `True` | serwer embeddingów to z założenia własny model operatora (domyślnie `127.0.0.1:11434`) |
+| router modeli | `True` | `True` | endpointy modeli to własna infrastruktura (vLLM/Ollama/SGLang), lokalna lub w LAN |
+
+Dla dwóch ostatnich ścieżek pin nie ogranicza legalnego użycia (loopback i LAN przechodzą),
+ale nadal blokuje metadane chmury i zakresy infrastrukturalne — czyli miejsca, w których
+wylądowałby **klucz API modelu** albo **wektor embeddingu** (odwracalny do PII), gdyby nazwa
+endpointu została przejęta lub przez pomyłkę wskazała `169.254.169.254`.
 
 `allow_lan` obejmuje WYŁĄCZNIE wąską listę `_LAN_NETWORKS` (RFC 1918 + ULA). Świadomie
 **nie** realizujemy go przez `ipaddress.is_private`: ta właściwość obejmuje także loopback,
@@ -194,6 +201,7 @@ allowlistowanej domeny od egressu do metadanych.
 
 - ~~`husarz.git` na wspólnej warstwie~~ — **zrealizowane** (Etap 15b): Git korzysta z tej
   samej warstwy z `allow_lan=True`; poprzednia walidacja nie rozwiązywała nazw wcale.
-- Pinowanie dla routera modeli (dziś endpointy modeli to typowo loopback/LAN operatora).
+- ~~Pinowanie dla routera modeli~~ i embeddera pamięci — **zrealizowane** (Etap 15c).
+  Wszystkie pięć ścieżek wychodzących jest teraz na jednej warstwie.
 - Wsparcie dla przekierowań (obecnie `follow_redirects=False` — przekierowanie omijałoby
   walidację i pin; ewentualna obsługa musiałaby przypinać KAŻDY skok osobno).

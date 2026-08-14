@@ -46,6 +46,26 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
   (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
 
+### Dodane (Etap 15c — embedder pamięci i router modeli na wspólnej warstwie)
+- Dwie ostatnie ścieżki wychodzące przeszły na `husarz.ssrf`. Po tym etapie **wszystkie pięć**
+  dróg, którymi Husarz wychodzi na sieć (`web`, wtyczki MCP, Git, embedder RAG, router modeli),
+  korzysta z JEDNEJ implementacji anty-SSRF — różnią się wyłącznie dwiema flagami polityki.
+- Polaryzacja `allow_loopback=True, allow_lan=True` (endpointy modeli to z założenia własna
+  infrastruktura operatora), ale metadane chmury, CGNAT, zakresy zarezerwowane i tunele
+  osadzające IPv4 pozostają zablokowane — to tam wylądowałby **klucz API modelu** albo
+  **wektor embeddingu** (odwracalny do PII), gdyby nazwa endpointu została przejęta.
+- `HttpxEmbeddingTransport` i `HttpxTransport` (router): `trust_env=False` (proxy z ENV nie
+  przekieruje przypiętego połączenia), `verify=True` jawnie, `follow_redirects=False`,
+  chunkowany odczyt z twardym sufitem — parytet z pozostałymi trzema transportami.
+- Protokoły `EmbeddingTransport` i `Transport` (router) przyjmują `PinnedTarget` zamiast URL;
+  `resolve` przewleczony przez `build_rag_backend`/`build_embedder` (router: istniejącym
+  szwem `client_factory`). Testy: +4 niezmienniki (łącznie 797).
+
+### Poprawione (Etap 15c — wyciek w komunikacie błędu routera)
+- `HttpxTransport` echował w błędzie pełny URL i wnętrzności httpx
+  (`f"Błąd HTTP przy {url}: {exc}"`), a komunikat trafia przez `ModelBackendError` do
+  odpowiedzi API oraz audytu. Teraz generyczny — parytet z pozostałymi transportami.
+
 ### Dodane (Etap 15b — `husarz.git` na wspólnej warstwie anty-SSRF)
 - Integracje Git przeszły na `husarz.ssrf` — trzecia i ostatnia ścieżka wychodząca. Stawka
   jest tu najwyższa: połączenie niesie **token PAT z prawem zapisu do repozytoriów**,

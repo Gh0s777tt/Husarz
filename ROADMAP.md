@@ -123,8 +123,8 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   brak wycieku rozwiązanego adresu do modelu, chunkowany odczyt, walidacja schematu, 3xx MCP.
 - ✅ Testy: +118 (offline), w tym pierwsze testy REALNYCH transportów httpx (`MockTransport`).
   Docs: ADR-0020, BEZPIECZENSTWO/NARZEDZIA/WTYCZKI/ARCHITEKTURA.
-- ⬜ Pinowanie dla routera modeli; obsługa przekierowań (dziś `follow_redirects=False` —
-  przekierowanie omijałoby walidację i pin).
+- ⬜ Obsługa przekierowań (dziś `follow_redirects=False` — przekierowanie omijałoby
+  walidację i pin; ewentualne wsparcie musiałoby przypinać KAŻDY skok osobno).
 
 ## ✅ Etap 15b — `husarz.git` na wspólnej warstwie anty-SSRF
 - ✅ Trzecia (ostatnia) ścieżka wychodząca przeszła na `husarz.ssrf`. Poprzednia walidacja
@@ -143,6 +143,19 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   także w transporcie MCP, usunięte martwe pole, sprostowany ADR-0011.
 - ✅ Testy: +19. Docs: ADR-0020, ADR-0011 (nota), GIT.md, BEZPIECZENSTWO.md, CHANGELOG (nota
   migracyjna: Git blokuje teraz CGNAT/Tailscale i inne zakresy, które wcześniej przechodziły).
+
+## ✅ Etap 15c — Embedder pamięci i router modeli na wspólnej warstwie
+- ✅ Dwie ostatnie ścieżki wychodzące przeszły na `husarz.ssrf`. Po tym etapie **wszystkie
+  pięć** dróg wyjścia na sieć (`web`, wtyczki MCP, Git, embedder RAG, router modeli) korzysta
+  z JEDNEJ implementacji anty-SSRF — różnią się tylko dwiema flagami polityki.
+- ✅ Polaryzacja `allow_loopback=True, allow_lan=True` (własne modele operatora), ale metadane
+  chmury, CGNAT, zakresy zarezerwowane i tunele osadzające IPv4 nadal zablokowane — tam
+  wylądowałby klucz API modelu albo wektor embeddingu (odwracalny do PII).
+- ✅ Poprawka wycieku: `HttpxTransport` routera echował pełny URL i wnętrzności httpx do
+  `ModelBackendError` → odpowiedzi API i audytu. Komunikat generyczny (parytet z resztą).
+- ✅ Transporty embeddera i routera: `trust_env=False`, chunkowany odczyt z sufitem, `verify=True`.
+- ✅ Testy: +4 niezmienniki bezpieczeństwa; łącznie 797. Docs: ADR-0020, BEZPIECZENSTWO.md,
+  ARCHITEKTURA.md.
 
 ## ✅ Etap 13 — Pętla narzędziowa (function-calling)
 - ✅ Pętla ReAct (`agents/tool_loop.py`) — pierwszy egzekutor narzędzi; prompt-based

@@ -24,6 +24,7 @@ from husarz.router import (
     build_client,
     select_candidates,
 )
+from husarz.ssrf import PinnedTarget
 
 pytestmark = pytest.mark.unit
 
@@ -39,8 +40,16 @@ class CapturingTransport:
         self._response = response if response is not None else _OPENAI_RESPONSE
         self._error = error
 
-    def __call__(self, url, headers, payload, timeout):  # noqa: ANN001
-        self.calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+    def __call__(self, target, headers, payload, timeout):  # noqa: ANN001
+        self.calls.append(
+            {
+                "url": target.connect_url,
+                "target": target,
+                "headers": headers,
+                "payload": payload,
+                "timeout": timeout,
+            }
+        )
         if self._error is not None:
             raise self._error
         return self._response
@@ -161,9 +170,19 @@ def test_httpx_transport_wraps_json_error(monkeypatch: pytest.MonkeyPatch) -> No
         def json(self) -> Any:
             raise ValueError("to nie JSON")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: FakeResp())
+    class FakeClient:
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            return None
+
+        def post(self, *a: Any, **k: Any) -> Any:
+            return FakeResp()
+
+    monkeypatch.setattr(httpx, "Client", lambda **k: FakeClient())
     with pytest.raises(TransportError):
-        HttpxTransport()("http://x/v1/chat/completions", {}, {}, 5)
+        HttpxTransport()(PinnedTarget.direct("http://x/v1/chat/completions"), {}, {}, 5)
 
 
 def test_invalid_message_role_rejected() -> None:

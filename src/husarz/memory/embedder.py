@@ -3,9 +3,16 @@
 Embeddingi są odwracalne do treści/PII, więc traktujemy je jak dane wrażliwe:
 - domyślnie i we WSZYSTKICH testach ``FakeEmbedder`` (deterministyczny, offline),
 - produkcyjnie ``OllamaEmbedder`` (lokalny ``/api/embeddings``, transport WSTRZYKIWALNY),
-  z twardą bramką ``check_endpoint_allowed`` PRZED każdym wywołaniem (deny-all egress).
+  z twardą bramką ``check_endpoint_allowed`` PRZED każdym wywołaniem (deny-all egress)
+  oraz **pinowaniem IP** ze wspólnej warstwy ``husarz.ssrf`` (ADR-0020).
 
 Transport (HTTP) jest oddzielony od logiki — testy nie wykonują połączeń sieciowych.
+
+Polaryzacja tej ścieżki: ``allow_loopback=True`` i ``allow_lan=True`` — serwer embeddingów
+to z założenia własna infrastruktura operatora (domyślnie ``http://127.0.0.1:11434``).
+Pin i tak wnosi realną obronę: nazwa endpointu NIE może rozwiązać się na metadane chmury
+ani inny zakres infrastrukturalny, a token (gdy embedder stoi za proxy) nie trafi wtedy
+w niepowołane ręce.
 """
 
 from __future__ import annotations
@@ -18,16 +25,25 @@ from husarz.config.schema import EgressConfig, EmbedderConfig
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
 from husarz.memory.errors import EmbedderError
 from husarz.router.egress import check_endpoint_allowed
+from husarz.ssrf import HostResolver, PinnedTarget, build_pinned_target, default_resolve
 
 _DEFAULT_TIMEOUT = 30
+# Maksymalny rozmiar JEDNEJ iteracji odczytu (parytet z web/MCP/Git — anty-OOM).
+_READ_CHUNK_BYTES = 64 * 1024
+# Twardy sufit odpowiedzi serwera embeddingów (wektor to kilka–kilkadziesiąt KB).
+_DEFAULT_MAX_BYTES = 5_000_000
 
 
 @runtime_checkable
 class EmbeddingTransport(Protocol):
-    """Warstwa transportu HTTP embeddera. Zwraca ``(status, sparsowany_json_lub_None)``."""
+    """Warstwa transportu HTTP embeddera. Zwraca ``(status, sparsowany_json_lub_None)``.
+
+    Przyjmuje ``PinnedTarget`` (a NIE goły URL) celowo: pin jest częścią kontraktu, więc
+    implementacja nie może go pominąć i rozwiązać nazwy ponownie (okno TOCTOU).
+    """
 
     def __call__(
-        self, url: str, headers: dict[str, str], json: dict[str, Any], timeout: int
+        self, target: PinnedTarget, headers: dict[str, str], json: dict[str, Any], timeout: int
     ) -> tuple[int, Any]: ...
 
 
@@ -94,8 +110,10 @@ class OllamaEmbedder:
         dim: int,
         token: str | None = None,
         timeout: int = _DEFAULT_TIMEOUT,
+        resolve: HostResolver | None = None,
     ) -> None:
         self._endpoint = endpoint.rstrip("/")
+        self._resolve: HostResolver = resolve if resolve is not None else default_resolve
         self._model = model
         self._transport = transport
         self._egress = egress
@@ -121,8 +139,13 @@ class OllamaEmbedder:
         # Bramka egress (deny-all) — druga warstwa poza walidacją configu; embeddingi
         # (odwracalne do PII) NIE mogą wyjść do hosta spoza allowlisty (rzuca EgressError).
         check_endpoint_allowed(url, self._egress)
+        # Trzecia warstwa: anty-SSRF + pin IP. Loopback i LAN operatora są dozwolone (własny
+        # serwer embeddingów), ale metadane chmury i zakresy infrastrukturalne — nie.
+        target = build_pinned_target(
+            url, allow_loopback=True, allow_lan=True, resolve=self._resolve
+        )
         status, data = self._transport(
-            url, self._headers(), {"model": self._model, "prompt": text}, self._timeout
+            target, self._headers(), {"model": self._model, "prompt": text}, self._timeout
         )
         if status >= 400:
             raise EmbedderError(f"Serwer embeddingów zwrócił HTTP {status}.")
@@ -139,31 +162,59 @@ class OllamaEmbedder:
 
 
 class HttpxEmbeddingTransport:
-    """Transport oparty o httpx (import leniwy). ``verify=True`` jawnie, bez redirectów."""
+    """Transport oparty o httpx (import leniwy). ``verify=True`` jawnie, bez redirectów.
+
+    Łączy się z ``target.connect_url`` (literał IP dla nazw), a ``Host`` i SNI/weryfikacja
+    certyfikatu idą po ORYGINALNEJ nazwie — pin nie degraduje TLS. ``trust_env=False``:
+    zmienne ``HTTP(S)_PROXY`` ze środowiska nie mogą przekierować przypiętego połączenia.
+    Ciało czytane strumieniowo z twardym sufitem (anty-OOM) — parytet z pozostałymi
+    trzema transportami.
+    """
 
     def __call__(
-        self, url: str, headers: dict[str, str], json: dict[str, Any], timeout: int
+        self, target: PinnedTarget, headers: dict[str, str], json: dict[str, Any], timeout: int
     ) -> tuple[int, Any]:
         try:
             import httpx  # noqa: PLC0415
         except ImportError as exc:  # pragma: no cover - httpx w pyproject
             raise EmbedderError("Pakiet 'httpx' nie jest zainstalowany.") from exc
+        import json as _json  # noqa: PLC0415
+
+        sent_headers = dict(headers)
+        if target.host_header is not None:
+            sent_headers["Host"] = target.host_header
+        extensions: dict[str, Any] = {}
+        if target.sni_hostname is not None:
+            extensions["sni_hostname"] = target.sni_hostname
+
+        buffer = bytearray()
         try:
-            response = httpx.post(
-                url,
-                headers=headers,
-                json=json,
-                timeout=timeout,
-                follow_redirects=False,
-                verify=True,
-            )
+            with (
+                httpx.Client(
+                    timeout=timeout, follow_redirects=False, verify=True, trust_env=False
+                ) as client,
+                client.stream(
+                    "POST",
+                    target.connect_url,
+                    headers=sent_headers,
+                    json=json,
+                    extensions=extensions,
+                ) as response,
+            ):
+                for chunk in response.iter_bytes(chunk_size=_READ_CHUNK_BYTES):
+                    buffer += chunk
+                    if len(buffer) > _DEFAULT_MAX_BYTES:
+                        raise EmbedderError("Odpowiedź serwera embeddingów przekracza limit.")
+                status = response.status_code
+        except EmbedderError:
+            raise
         except httpx.HTTPError as exc:
             raise EmbedderError("Błąd transportu do serwera embeddingów.") from exc
         try:
-            parsed: Any = response.json()
+            parsed: Any = _json.loads(bytes(buffer)) if buffer else None
         except ValueError:
             parsed = None
-        return response.status_code, parsed
+        return status, parsed
 
 
 def build_embedder(
@@ -172,6 +223,7 @@ def build_embedder(
     *,
     transport: EmbeddingTransport | None = None,
     secrets: SecretsProvider | None = None,
+    resolve: HostResolver | None = None,
 ) -> Embedder:
     """Buduje embedder wg konfiguracji (``fake`` — dev/test; ``ollama`` — produkcja).
 
@@ -198,5 +250,6 @@ def build_embedder(
             egress=egress,
             dim=config.dim,
             token=token,
+            resolve=resolve,
         )
     raise EmbedderError(f"Nieznany rodzaj embeddera: '{config.kind}'.")

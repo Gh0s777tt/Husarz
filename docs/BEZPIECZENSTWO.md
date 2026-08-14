@@ -620,3 +620,30 @@ doda do `security.egress.allowlist` domenę kontrolowaną przez atakującego, mo
 przekierowany w obręb własnej sieci (nie do metadanych chmury). Barierą pozostaje sama
 allowlista (jawna decyzja operatora) oraz to, że `api_base` pochodzi z konfiguracji,
 nie od modelu.
+
+### Etap 15c — embedder pamięci i router modeli na wspólnej warstwie (data: 2026-08-15)
+
+**Zakres:** dwie ostatnie ścieżki wychodzące. Po tym etapie **wszystkie pięć** dróg, którymi
+Husarz wychodzi na sieć, korzysta z jednej implementacji anty-SSRF (`husarz.ssrf`).
+Obie celują we WŁASNĄ infrastrukturę operatora (lokalny Ollama/vLLM), więc mają najbardziej
+permisywną polaryzację (`allow_loopback=True`, `allow_lan=True`) — ale pin nadal blokuje
+metadane chmury i zakresy infrastrukturalne, czyli miejsca, w których wylądowałby **klucz API
+modelu** albo **wektor embeddingu** (odwracalny do PII).
+
+| Niezmiennik | Test |
+|---|---|
+| Nazwa endpointu embeddera rozwiązana na metadane chmury → blok, wektor NIE wychodzi | `test_embedder_blocks_name_resolving_to_metadata` |
+| Loopback (domyślny Ollama) bez DNS; LAN operatora przypinany normalnie | `test_embedder_local_and_lan_endpoints_work` |
+| Endpoint modelu rozwiązany na metadane → `ModelBackendError`, transport nietknięty (klucz API nie leci) | `test_model_endpoint_resolving_to_metadata_is_blocked` |
+| Połączenie do modelu po PRZYPIĘTYM IP; `Host`/SNI po nazwie | `test_model_endpoint_is_pinned_with_host_and_sni` |
+| `trust_env=False` w obu transportach (proxy z ENV nie przekieruje pinu) | (`HttpxTransport`, `HttpxEmbeddingTransport`) |
+| Odczyt embeddera chunkowany z twardym sufitem (anty-OOM) | (parytet z pozostałymi transportami) |
+
+**Zmiana ubocza (poprawka wycieku):** `HttpxTransport` routera echował w błędzie pełny URL
+i wnętrzności httpx (`f"Błąd HTTP przy {url}: {exc}"`), a komunikat trafia przez
+`ModelBackendError` do odpowiedzi API i audytu. Teraz jest generyczny — parytet z pozostałymi
+czterema transportami.
+
+**Ograniczenia:** router nie przewleka `resolve` przez `ModelRouter` — wstrzyknięcie w testach
+idzie istniejącym szwem `client_factory`. Endpointy modeli są konfiguracją operatora (nie są
+sterowane przez model), więc powierzchnia ataku jest tu najwęższa z pięciu ścieżek.

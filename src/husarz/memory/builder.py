@@ -17,6 +17,7 @@ from husarz.memory.embedder import EmbeddingTransport, build_embedder
 from husarz.memory.errors import RagBackendError
 from husarz.memory.sqlite_store import SqliteVectorStore
 from husarz.memory.store import InMemoryVectorStore, VectorStore
+from husarz.ssrf import HostResolver
 from husarz.tools.rag import InMemoryRagBackend, RagBackend
 
 
@@ -55,13 +56,22 @@ def build_rag_backend(
     data_dir: Path,
     transport: EmbeddingTransport | None = None,
     secrets: SecretsProvider | None = None,
+    resolve: HostResolver | None = None,
 ) -> RagBackend:
-    """Buduje backend pamięci wg ``config.backend``. Transport embeddera wstrzykiwalny (testy)."""
+    """Buduje backend pamięci wg ``config.backend``. Transport embeddera wstrzykiwalny (testy).
+
+    ``resolve`` (opcjonalny) to resolver DNS dla pinowania IP endpointu embeddera —
+    przewleczony jak w ``build_tools``/``build_git_service`` (ADR-0020).
+    """
     if config.backend == "memory":
         return InMemoryRagBackend()
     if config.backend == "embedding":
         embedder = build_embedder(
-            config.embedder, security.egress, transport=transport, secrets=secrets
+            config.embedder,
+            security.egress,
+            transport=transport,
+            secrets=secrets,
+            resolve=resolve,
         )
         store = _build_store(config, security, data_dir=data_dir, secrets=secrets)
         return EmbeddingRagBackend(

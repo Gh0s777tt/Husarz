@@ -113,7 +113,7 @@ def _build_rag(ctx: BuildContext) -> Tool:
     settings = {key: value for key, value in ctx.tool_config.config.items() if value is not None}
     rag_config = RagBackendConfig(**settings)
     backend = build_rag_backend(
-        rag_config, ctx.security, data_dir=ctx.data_dir, secrets=ctx.secrets
+        rag_config, ctx.security, data_dir=ctx.data_dir, secrets=ctx.secrets, resolve=ctx.resolve
     )
     return RagTool(backend, top_k=rag_config.top_k)
 

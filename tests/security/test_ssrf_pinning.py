@@ -521,3 +521,119 @@ def test_git_redirect_is_error_not_silent_success(status: int) -> None:
         service.provider_for("gh").list_repositories()
     with pytest.raises(GitError, match="przekierowanie"):
         service.provider_for("gh").create_pull_request("o/n", title="T", head="h", base="main")
+
+
+# --- Embedder pamięci i router modeli (Etap 15c) ---------------------------
+# Czwarta i piąta ścieżka wychodząca. Obie celują we WŁASNĄ infrastrukturę operatora,
+# więc mają najbardziej permisywną polaryzację (loopback + LAN) — ale pin i tak wnosi
+# realną obronę: nazwa endpointu NIE może rozwiązać się na metadane chmury, gdzie
+# poleciałby klucz API modelu albo token embeddera (a embeddingi są odwracalne do PII).
+
+
+class RecordingEmbeddingTransport:
+    def __init__(self) -> None:
+        self.targets: list[PinnedTarget] = []
+
+    def __call__(
+        self, target: PinnedTarget, headers: dict[str, str], json: dict[str, Any], timeout: int
+    ) -> tuple[int, Any]:
+        self.targets.append(target)
+        return 200, {"embedding": [0.5] * 4}
+
+
+class RecordingModelTransport:
+    def __init__(self) -> None:
+        self.targets: list[PinnedTarget] = []
+
+    def __call__(
+        self, target: PinnedTarget, headers: dict[str, str], payload: dict[str, Any], timeout: int
+    ) -> dict[str, Any]:
+        self.targets.append(target)
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+
+def test_embedder_blocks_name_resolving_to_metadata() -> None:
+    """Embeddingi są odwracalne do PII — nie mogą trafić na endpoint metadanych chmury."""
+    from husarz.memory.embedder import OllamaEmbedder
+
+    transport, resolver = RecordingEmbeddingTransport(), CountingResolver(_METADATA)
+    embedder = OllamaEmbedder(
+        "https://emb.firma.pl",
+        "nomic",
+        transport=transport,
+        egress=EgressConfig(default_policy=EgressPolicy.ALLOW),
+        dim=4,
+        resolve=resolver,
+    )
+    with pytest.raises(EgressError):
+        embedder.embed(["tajny tekst"])
+    assert transport.targets == []  # wektor NIE wyszedł
+
+
+def test_embedder_local_and_lan_endpoints_work() -> None:
+    """Loopback (domyślny Ollama) i LAN operatora pozostają dozwolone."""
+    from husarz.memory.embedder import OllamaEmbedder
+
+    transport, resolver = RecordingEmbeddingTransport(), CountingResolver("10.0.0.9")
+    OllamaEmbedder(
+        "http://127.0.0.1:11434",
+        "nomic",
+        transport=transport,
+        egress=EgressConfig(),
+        dim=4,
+        resolve=resolver,
+    ).embed(["x"])
+    assert transport.targets[0].connect_url == "http://127.0.0.1:11434/api/embeddings"
+    assert resolver.calls == []  # loopback bez DNS
+
+    # `.internal` jest „lokalne" dla `check_endpoint_allowed`, więc przechodzi warstwę 2 —
+    # ale warstwa 3 i tak rozwiązuje nazwę i pinuje adres (tu: LAN operatora, dozwolony).
+    OllamaEmbedder(
+        "http://emb.internal:11434",
+        "nomic",
+        transport=transport,
+        egress=EgressConfig(),
+        dim=4,
+        resolve=resolver,
+    ).embed(["x"])
+    assert transport.targets[1].connect_url == "http://10.0.0.9:11434/api/embeddings"
+
+
+def test_model_endpoint_resolving_to_metadata_is_blocked() -> None:
+    """Klucz API modelu nie może polecieć na endpoint metadanych chmury."""
+    from husarz.config.schema import ModelSpec
+    from husarz.router.client import OpenAICompatClient
+    from husarz.router.errors import ModelBackendError
+    from husarz.router.types import ChatMessage, ChatRequest
+
+    transport, resolver = RecordingModelTransport(), CountingResolver(_METADATA)
+    client = OpenAICompatClient(
+        ModelSpec(backend="openai_compat", model="m", endpoint="https://model.firma.pl/v1"),
+        "m1",
+        api_key="sekret-klucz",
+        transport=transport,
+        resolve=resolver,
+    )
+    with pytest.raises(ModelBackendError):
+        client.chat(ChatRequest(messages=[ChatMessage("user", "cześć")]))
+    assert transport.targets == []
+
+
+def test_model_endpoint_is_pinned_with_host_and_sni() -> None:
+    from husarz.config.schema import ModelSpec
+    from husarz.router.client import OpenAICompatClient
+    from husarz.router.types import ChatMessage, ChatRequest
+
+    transport, resolver = RecordingModelTransport(), CountingResolver(_PUBLIC)
+    client = OpenAICompatClient(
+        ModelSpec(backend="openai_compat", model="m", endpoint="https://model.firma.pl/v1"),
+        "m1",
+        api_key=None,
+        transport=transport,
+        resolve=resolver,
+    )
+    client.chat(ChatRequest(messages=[ChatMessage("user", "cześć")]))
+    target = transport.targets[0]
+    assert target.connect_url == f"https://{_PUBLIC}/v1/chat/completions"
+    assert target.host_header == "model.firma.pl"
+    assert target.sni_hostname == "model.firma.pl"

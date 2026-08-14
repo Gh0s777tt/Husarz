@@ -1,16 +1,23 @@
 """Wspólna warstwa anty-SSRF i pinowania IP dla WSZYSTKICH ścieżek wychodzących.
 
-Używają jej: narzędzie ``web``, konektor MCP (``husarz.plugins``) i integracje Git
-(``husarz.git``). Różnią się WYŁĄCZNIE dwiema flagami polityki — ``allow_loopback``
-(cel na tej maszynie) i ``allow_lan`` (prywatna sieć operatora):
+Używa jej KAŻDA ścieżka, którą Husarz wychodzi na sieć. Różnią się WYŁĄCZNIE dwiema flagami
+polityki — ``allow_loopback`` (cel na tej maszynie) i ``allow_lan`` (prywatna sieć operatora):
 
-===================  ================  ===========
-Ścieżka              allow_loopback    allow_lan
-===================  ================  ===========
-``web``              nie               nie
-konektor MCP         tak               nie
-integracje Git       nie               tak
-===================  ================  ===========
+=========================  ================  ===========
+Ścieżka                    allow_loopback    allow_lan
+=========================  ================  ===========
+narzędzie ``web``          nie               nie
+konektor MCP (wtyczki)     tak               nie
+integracje Git             nie               tak
+embedder pamięci (RAG)     tak               tak
+router modeli              tak               tak
+=========================  ================  ===========
+
+Polaryzacja wynika z tego, CZYJA infrastruktura jest celem: ``web`` sterowane jest przez model
+(najostrzejsze), konektor MCP celuje w usługę na tej maszynie, Git w serwer operatora (własny
+albo publiczny), a embedder i router — w modele operatora (z założenia lokalne). NIEZALEŻNIE
+od flag zablokowane pozostają metadane chmury (link-local), CGNAT, zakresy zarezerwowane
+i tunele osadzające IPv4.
 
 Domyka okno TOCTOU DNS-rebindingu: nazwę rozwiązujemy DOKŁADNIE RAZ, sprawdzamy KAŻDY
 zwrócony adres wobec blokady (prywatne/link-local/metadane/zarezerwowane), PRZYPINAMY jeden
