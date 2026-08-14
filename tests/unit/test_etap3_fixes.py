@@ -8,6 +8,7 @@ import pytest
 
 from husarz.config import load_config
 from husarz.config.schema import EgressConfig, SandboxConfig
+from husarz.ssrf import PinnedTarget
 from husarz.tools import (
     ExecResult,
     FileEditTool,
@@ -44,9 +45,14 @@ class RecFetcher:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def __call__(self, url: str, *, timeout: int, max_bytes: int) -> tuple[int, str]:
-        self.calls.append((url, timeout, max_bytes))
+    def __call__(self, target: PinnedTarget, *, timeout: int, max_bytes: int) -> tuple[int, str]:
+        self.calls.append((target.connect_url, timeout, max_bytes))
         return 200, "ok"
+
+
+def _fake_resolve(host: str) -> list[str]:
+    """Resolver testowy: każda nazwa → adres publiczny (żaden test nie odpytuje DNS)."""
+    return ["93.184.216.34"]
 
 
 # --------------------------------------------------------------------------
@@ -186,6 +192,7 @@ def test_web_propagates_timeout_and_max_bytes() -> None:
         egress=EgressConfig(default_policy="allow"),
         max_bytes=123,
         timeout=7,
+        resolve=_fake_resolve,
     )
     tool.fetch("https://example.com/x")
     assert fetcher.calls[0][1] == 7

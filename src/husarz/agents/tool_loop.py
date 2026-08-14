@@ -32,6 +32,7 @@ from husarz.config.secrets import SecretsProvider
 from husarz.fencing import fence_untrusted
 from husarz.router.types import ChatMessage, ChatRequest
 from husarz.security.audit import AuditLog
+from husarz.ssrf import HostResolver
 from husarz.tools.base import ToolResult
 from husarz.tools.dispatch import ToolDispatcher
 from husarz.tools.loader import build_tools
@@ -223,17 +224,19 @@ class ToolLoop:
         if not budget.try_spend():
             return None
         result = self._dispatcher.dispatch(action.tool, action.action, action.args)
-        self._audit.record(
-            agent.name,
-            "tool.call",
-            {
-                "tool": action.tool[:64],
-                "action": action.action[:64],
-                "ok": result.ok,
-                "args": _arg_summary(action.args),
-                "bytes": len(result.output.encode("utf-8")),
-            },
-        )
+        entry: dict[str, Any] = {
+            "tool": action.tool[:64],
+            "action": action.action[:64],
+            "ok": result.ok,
+            "args": _arg_summary(action.args),
+            "bytes": len(result.output.encode("utf-8")),
+        }
+        pinned_ip = result.metadata.get("pinned_ip")
+        if isinstance(pinned_ip, str):
+            # Z JAKIM adresem faktycznie się połączyliśmy (narzędzie web, ADR-0020) — bez tego
+            # audyt zna tylko nazwę hosta, a przy pinowaniu to nazwa jest mniej informatywna.
+            entry["pinned_ip"] = pinned_ip[:64]
+        self._audit.record(agent.name, "tool.call", entry)
         return result
 
 
@@ -249,12 +252,14 @@ def build_tool_loop(
     data_dir: str | Path | None = None,
     plugin_service: PluginService | None = None,
     registry: ToolProviderRegistry | None = None,
+    resolve: HostResolver | None = None,
 ) -> ToolLoop:
     """Buduje ``ToolLoop`` z konfiguracji (mirror ``build_tools``/``build_plugin_service``).
 
     ``secrets``/``data_dir`` przewleczone do budowy trwałej pamięci RAG (sqlite + at-rest);
     domyślnie ``data_dir`` z ``config.platform``. ``plugin_service`` (ten sam co ``/api/plugins``)
     zasila narzędzia ``kind=plugin`` (``list``/``call``); ``None`` → degradacja do ``ok=False``.
+    ``resolve`` — resolver DNS dla pinowania IP narzędzia ``web`` (ADR-0020).
     """
     tools = build_tools(
         config,
@@ -266,6 +271,7 @@ def build_tool_loop(
         data_dir=data_dir if data_dir is not None else config.platform.data_dir,
         plugin_service=plugin_service,
         registry=registry,
+        resolve=resolve,
     )
     kind_of = {name: tool_config.kind for name, tool_config in config.tools.items()}
     descriptions = {name: tool_config.description for name, tool_config in config.tools.items()}

@@ -26,6 +26,7 @@ from husarz.plugins.errors import (
     PluginNotFoundError,
     PluginSecretError,
 )
+from husarz.ssrf import PinnedTarget
 
 pytestmark = pytest.mark.unit
 
@@ -44,13 +45,15 @@ class FakePluginTransport:
 
     def __call__(
         self,
-        url: str,
+        target: PinnedTarget,
         headers: dict[str, str],
         json: dict[str, Any],
         timeout: int,
         max_bytes: int,
     ) -> tuple[int, Any]:
-        self.calls.append({"url": url, "headers": headers, "json": json, "max_bytes": max_bytes})
+        self.calls.append(
+            {"url": target.connect_url, "headers": headers, "json": json, "max_bytes": max_bytes}
+        )
         return self._status, {"jsonrpc": "2.0", "id": json.get("id"), "result": self._result}
 
 
@@ -72,7 +75,7 @@ def _plugin(**kwargs: Any) -> PluginConfig:
 
 def test_list_tools_builds_jsonrpc_envelope_and_bearer() -> None:
     transport = FakePluginTransport()
-    client = McpClient("http://127.0.0.1:8808/mcp", "sekret-abc", transport)
+    client = McpClient(PinnedTarget.direct("http://127.0.0.1:8808/mcp"), "sekret-abc", transport)
     tools = client.list_tools()
     assert tools == [RemoteTool("echo", "Echo"), RemoteTool("add", "")]
     call = transport.calls[0]
@@ -83,13 +86,13 @@ def test_list_tools_builds_jsonrpc_envelope_and_bearer() -> None:
 
 def test_list_tools_no_token_omits_authorization() -> None:
     transport = FakePluginTransport()
-    McpClient("http://127.0.0.1:8808", "", transport).list_tools()
+    McpClient(PinnedTarget.direct("http://127.0.0.1:8808"), "", transport).list_tools()
     assert "Authorization" not in transport.calls[0]["headers"]
 
 
 def test_list_tools_skips_malformed_entries() -> None:
     transport = FakePluginTransport(result={"tools": [{"description": "brak name"}, "nie-dict", 5]})
-    assert McpClient("http://127.0.0.1:8808", "", transport).list_tools() == []
+    assert McpClient(PinnedTarget.direct("http://127.0.0.1:8808"), "", transport).list_tools() == []
 
 
 def test_build_connector_uses_plugin_limits() -> None:
@@ -169,3 +172,17 @@ def test_loads_plugins_from_config_dir(write_config, tmp_path: Path) -> None:  #
     config = load_config(config_dir)
     assert set(config.plugins) == {"local"}
     assert config.plugins["local"].endpoint == "http://127.0.0.1:9000"
+
+
+def test_redirect_response_is_error_not_empty_tool_list() -> None:
+    """``follow_redirects=False`` (anty-SSRF) sprawia, że 3xx nie jest sukcesem — bez jawnej
+    gałęzi 301/302 degradowałoby się do cichego „serwer nie udostępnił narzędzi"."""
+    from husarz.plugins.errors import PluginError
+
+    class RedirectTransport:
+        def __call__(self, target, headers, json, timeout, max_bytes):  # type: ignore[no-untyped-def]
+            return 302, None
+
+    client = McpClient(PinnedTarget.direct("http://127.0.0.1:8808"), "", RedirectTransport())
+    with pytest.raises(PluginError, match="przekierowaniem"):
+        client.list_tools()

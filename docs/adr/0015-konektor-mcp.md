@@ -66,9 +66,10 @@ wnętrzności). Wpisy `security.egress.allowlist` walidowane (bez pustych/kszta�
   wykonania w MVP.
 - (−) Bez wywoływania narzędzi konektor jeszcze nie „działa" dla agenta — to celowa
   granica: `tools/call` wchodzi z pętlą function-calling (i autoryzacją per-wywołanie).
-- (−) Rozwiązanie nazwy blokuje trywialny DNS-rebinding, ale bez **pinowania IP** okno
-  TOCTOU (zmiana rekordu między walidacją a połączeniem) pozostaje — pełne pinowanie
-  odłożone (jak `web`/`git`).
+- (−) ~~Rozwiązanie nazwy blokuje trywialny DNS-rebinding, ale bez **pinowania IP** okno
+  TOCTOU (zmiana rekordu między walidacją a połączeniem) pozostaje.~~
+  **DOMKNIĘTE w Etapie 15** — [ADR-0020](0020-pinowanie-ip-anty-ssrf.md): nazwa rozwiązywana
+  raz, adres przypinany, `Host`/SNI po nazwie.
 
 ## Alternatywy odrzucone
 

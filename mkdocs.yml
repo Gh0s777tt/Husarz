@@ -113,3 +113,4 @@ nav:
       - 0017 · Pamięć długoterminowa (RAG): adr/0017-pamiec-dlugoterminowa-rag.md
       - 0018 · Trwałość + szyfrowanie at-rest: adr/0018-pamiec-trwala-at-rest.md
       - 0019 · Wywołanie MCP (tools/call): adr/0019-wywolanie-mcp-tools-call.md
+      - 0020 · Pinowanie IP (anty-SSRF): adr/0020-pinowanie-ip-anty-ssrf.md

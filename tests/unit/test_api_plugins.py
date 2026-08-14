@@ -16,6 +16,7 @@ from husarz.config import load_config
 from husarz.config.schema import EgressConfig, PluginConfig
 from husarz.plugins import PluginService
 from husarz.security import AuditLog
+from husarz.ssrf import PinnedTarget
 
 pytestmark = pytest.mark.unit
 
@@ -25,7 +26,12 @@ class FakePluginTransport:
         self.calls = 0
 
     def __call__(
-        self, url: str, headers: dict[str, str], json: dict[str, Any], timeout: int, max_bytes: int
+        self,
+        target: PinnedTarget,
+        headers: dict[str, str],
+        json: dict[str, Any],
+        timeout: int,
+        max_bytes: int,
     ) -> tuple[int, Any]:
         self.calls += 1
         return 200, {

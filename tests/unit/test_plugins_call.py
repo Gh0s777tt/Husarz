@@ -23,6 +23,7 @@ from husarz.plugins import (
 )
 from husarz.plugins.client import _parse_call_result
 from husarz.plugins.errors import PluginError, PluginSecretError
+from husarz.ssrf import PinnedTarget
 from husarz.tools.plugin import PluginTool
 
 pytestmark = pytest.mark.unit
@@ -39,13 +40,15 @@ class FakePluginTransport:
 
     def __call__(
         self,
-        url: str,
+        target: PinnedTarget,
         headers: dict[str, str],
         json: dict[str, Any],
         timeout: int,
         max_bytes: int,
     ) -> tuple[int, Any]:
-        self.calls.append({"url": url, "headers": headers, "json": json, "max_bytes": max_bytes})
+        self.calls.append(
+            {"url": target.connect_url, "headers": headers, "json": json, "max_bytes": max_bytes}
+        )
         method = json.get("method")
         if method == "tools/call":
             result: Any = {"content": self._content, "isError": self._is_error}
@@ -82,7 +85,7 @@ def _service(plugin: PluginConfig, transport: FakePluginTransport, **kw: Any) ->
 
 def test_call_tool_builds_jsonrpc_envelope_and_bearer() -> None:
     transport = FakePluginTransport(content=[{"type": "text", "text": "wynik"}])
-    client = McpClient("http://127.0.0.1:8808", "sekret-xyz", transport)
+    client = McpClient(PinnedTarget.direct("http://127.0.0.1:8808"), "sekret-xyz", transport)
     result = client.call_tool("echo", {"msg": "hej"})
     assert result == RemoteCallResult(text="wynik", is_error=False)
     envelope = transport.calls[0]["json"]
@@ -93,18 +96,22 @@ def test_call_tool_builds_jsonrpc_envelope_and_bearer() -> None:
 
 def test_call_tool_is_error_maps_to_result_flag() -> None:
     transport = FakePluginTransport(content=[{"type": "text", "text": "boom"}], is_error=True)
-    result = McpClient("http://127.0.0.1:8808", "", transport).call_tool("echo", {})
+    result = McpClient(PinnedTarget.direct("http://127.0.0.1:8808"), "", transport).call_tool(
+        "echo", {}
+    )
     assert result.is_error is True and result.text == "boom"
 
 
 def test_call_tool_jsonrpc_error_raises_plugin_error() -> None:
     class ErrTransport(FakePluginTransport):
-        def __call__(self, url, headers, json, timeout, max_bytes):  # type: ignore[no-untyped-def]
+        def __call__(self, target, headers, json, timeout, max_bytes):  # type: ignore[no-untyped-def]
             self.calls.append({"json": json})
             return 200, {"jsonrpc": "2.0", "id": json.get("id"), "error": {"code": -32000}}
 
     with pytest.raises(PluginError):
-        McpClient("http://127.0.0.1:8808", "", ErrTransport()).call_tool("echo", {})
+        McpClient(PinnedTarget.direct("http://127.0.0.1:8808"), "", ErrTransport()).call_tool(
+            "echo", {}
+        )
 
 
 def test_parse_call_result_shapes() -> None:

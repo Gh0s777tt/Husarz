@@ -139,7 +139,8 @@ Wdrożone poprawki bezpieczeństwa:
 **Ograniczenia (świadome):**
 - `shell` sprawdza tylko `argv[0]` — argumenty są dowolne; realną granicą jest sandbox,
   dlatego sekrety/wagi muszą być POZA montowanym workspace (deny-globi to warstwa dodatkowa).
-- SSRF przez DNS rebinding (allowlistowana domena → adres wewnętrzny) wymaga pinowania IP — Etap 4/6.
+- ~~SSRF przez DNS rebinding wymaga pinowania IP~~ — **DOMKNIĘTE w Etapie 15** (ADR-0020):
+  nazwa rozwiązywana raz, adres przypinany, `Host`/SNI po nazwie.
 - Realne wykonanie sandboxa (Docker+gVisor) weryfikowane w środowisku z Dockerem — Etap 6.
 
 ### Etap 4 — runtime bezpieczeństwa (data: 2026-08-13)
@@ -330,8 +331,9 @@ Przegląd (3 wymiary, 11 findingów, 11 potwierdzonych — w tym blocker SSRF) i
 | Klient: pomijanie elementów nie-dict; audyt próby PR przed budową dostawcy | `test_list_repositories_skips_non_dict_items`, `test_pull_request_egress_block_is_audited` |
 | RBAC: user bez git:write/git:pr; 502 z odmowy dostawcy | `test_rbac_user_cannot_write_or_pr`, `test_provider_auth_error_maps_502` |
 
-**Ograniczenia:** ochrona przed DNS-rebinding (walidacja po rozwiązaniu nazwy) —
-do rozważenia; egzekwowanie egress to warstwa aplikacji (pełne wymuszenie: NetworkPolicy).
+**Ograniczenia:** `husarz.git` nadal używa własnej, węższej walidacji hosta — **nie** jest
+jeszcze na współdzielonej warstwie z pinowaniem IP (Etap 15, ADR-0020: pozycja „do zrobienia").
+Egzekwowanie egress to warstwa aplikacji (pełne wymuszenie: NetworkPolicy).
 
 ### Etap 11 — zdjęcia w czacie / modele wizyjne (data: 2026-08-13)
 
@@ -389,8 +391,7 @@ kolizja ROE, DoS wynikiem, wyciek transportu do audytu).
 | RBAC: rola `user` bez `plugin:read` → 403; deny-by-default → 404 | `test_rbac_user_cannot_read_plugins`, `test_plugins_404_when_disabled` |
 | Wynik NIEZAUFANY: limit `max_output_bytes` egzekwowany; koperta JSON-RPC + Bearer | `test_build_connector_uses_plugin_limits`, `test_list_tools_builds_jsonrpc_envelope_and_bearer` |
 
-**Ograniczenia:** brak pinowania IP → DNS-rebinding endpointu możliwy (jak `web`/`git`,
-odłożone). MVP odkrywa narzędzia, nie wywołuje ich — `tools/call` z autoryzacją
+**Ograniczenia (stan na Etap 12; pinowanie IP DOMKNIĘTE w Etapie 15 — ADR-0020):** MVP odkrywa narzędzia, nie wywołuje ich — `tools/call` z autoryzacją
 per-wywołanie wchodzi z pętlą function-calling. Transport `stdio` (sandbox) poza MVP.
 Rejestr wtyczek jest first-party (bez `entry_points`) — brak wektora RCE/łańcucha dostaw.
 
@@ -407,8 +408,8 @@ Przegląd (3 wymiary, 6 potwierdzonych findingów) i utwardzenia:
 | Anty-„slow-drip": bezwzględny deadline wall-clock na pętli odczytu transportu | (obrona w kodzie: `HttpxPluginTransport`; brak realnej sieci w testach) |
 | TLS `verify=True` jawnie; martwe pole `protocol_version` usunięte | (spójność docs↔kod; walidacja schematu) |
 
-**Ograniczenia:** pełne pinowanie IP (okno TOCTOU) pozostaje odłożone; „slow-drip"
-deadline jest sprawdzany między chunkami (ograniczenie ~`timeout` + jeden odczyt).
+**Ograniczenia:** „slow-drip" deadline jest sprawdzany między chunkami (ograniczenie
+~`timeout` + jeden odczyt). Pełne pinowanie IP — **domknięte w Etapie 15** (ADR-0020).
 
 ### Etap 13 — pętla narzędziowa (function-calling) (data: 2026-08-13)
 
@@ -432,8 +433,7 @@ cap `rag.add`, wzbogacony audyt `web`, parytet ogradzania kontekstu, cięcie `To
 
 **Ograniczenia:** ogrodzenie NL to obrona miękka (nie powstrzyma perswazji wolnotekstowej —
 twardą barierą jest allowlista + sandbox); `shell` z `python` = RCE-w-sandboxie (dla takich
-agentów granicą jest sandbox); `web` model-sterowane bez pinowania IP (DNS-rebinding — jak Git);
-audyt wiąże agenta, nie użytkownika (korelacja principal↔wywołanie — follow-up). Pętla jest
+agentów granicą jest sandbox); audyt wiąże agenta, nie użytkownika (korelacja principal↔wywołanie — follow-up). Pętla jest
 **opt-in** (`tool_loop_enabled`, domyślnie false) — w dostarczonej konfiguracji wyłączona.
 
 ### Etap 14 — pamięć długoterminowa (RAG) (data: 2026-08-13)
@@ -518,6 +518,61 @@ M2 airgap-loopback) i SHOULD-FIX (cap params, cap bajtowy wyniku, TOCTOU udokume
 
 **Ograniczenia (świadome, udokumentowane w ADR-0019):** `call` to kanał egress+zdolności POZA
 bramką ROE — `call_allowlist` nie ogranicza treści `arguments` ani semantyki zdalnej (opt-in
-operatora, analogicznie do `web`/`shell`). TOCTOU DNS-rebinding: IP nie jest pinowane (jak w `web`);
-ochroną jest blokada prywatnych IP po rozwiązaniu nazwy + deny-all egress. Puszkarz (ROE) wykluczony
+operatora, analogicznie do `web`/`shell`). TOCTOU DNS-rebinding: **domknięty w Etapie 15**
+(ADR-0020 — IP przypinane per wywołanie). Puszkarz (ROE) wykluczony
 z pętli i brak endpointu HTTP `call` — `call` niedosięgalne dla ROE-agenta.
+
+### Etap 15 — pinowanie IP (anty-DNS-rebinding) (data: 2026-08-14)
+
+**Zakres:** współdzielona warstwa `husarz.ssrf` dla obu ścieżek wychodzących sterowanych
+przez model/konfigurację: narzędzie `web` i konektor MCP. Domyka ryzyko rezydualne
+zapisane w ADR-0015/0016/0019: między walidacją hosta a połączeniem następowało **drugie**
+rozwiązanie DNS, które atakujący kontrolujący strefę mógł podmienić (TOCTOU). Projekt
+i uzasadnienie — [ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md).
+
+| Niezmiennik | Test |
+|---|---|
+| Nazwa rozwiązywana DOKŁADNIE RAZ; połączenie idzie do przypiętego literału IP | `test_web_connects_to_pinned_ip_with_original_host_and_sni`, `test_plugin_connects_to_pinned_ip_and_keeps_token_out_of_url` |
+| `Host` i SNI (weryfikacja certu) po ORYGINALNEJ nazwie — pin nie degraduje TLS | `test_httpx_fetcher_connects_to_ip_and_keeps_host_and_sni`, `test_httpx_plugin_transport_pins_ip_and_keeps_host_sni_and_bearer` |
+| Domena z allowlisty rozwiązująca się na metadane chmury → blok przed siecią | `test_web_allowlisted_domain_resolving_to_metadata_is_blocked`, `test_plugin_domain_resolving_to_metadata_never_reaches_transport` |
+| Mieszane A/AAAA z JEDNYM adresem wewnętrznym → odmowa (nie „weź czysty") | `test_mixed_records_with_one_internal_are_rejected`, `test_web_mixed_records_with_one_internal_are_blocked` |
+| Nierozwiązywalna nazwa / śmieć z resolvera → fail-closed | `test_unresolvable_name_fails_closed`, `test_garbage_resolver_output_fails_closed`, `test_web_unresolvable_domain_fails_closed` |
+| `web`: loopback zabroniony także PRZEZ NAZWĘ (domknięta luka `is_local_endpoint`) | `test_web_rejects_loopback_by_name_even_when_allowlisted`, `test_loopback_rejected_when_flag_unset` |
+| Publiczna nazwa NIE może rozwiązać się na loopback (ochrona tokenu Bearer wtyczki) | `test_plugin_name_resolving_to_loopback_is_blocked`, `test_name_resolving_to_loopback_rejected_even_with_allow_loopback` |
+| IPv4-mapped (`::ffff:169.254.169.254`) rozwijane przed klasyfikacją — bypass zamknięty | `test_parse_ip_literal_normalizes`, `test_internal_literals_rejected` |
+| Pin jest ŚWIEŻY dla każdej operacji (nie cache'owany między wywołaniami) | `test_web_pin_is_fresh_for_every_fetch`, `test_plugin_pin_is_fresh_for_every_operation` |
+| Odmowa allowlisty egress NIE powoduje nawet zapytania DNS (brak wycieku nazwy) | `test_plugin_denied_egress_does_not_even_resolve_dns` |
+| Lokalny serwer MCP (loopback) łączy się wprost — bez DNS i bez pinu | `test_plugin_loopback_endpoint_needs_no_dns`, `test_public_literal_connects_directly_without_dns` |
+| `pin_fields` nie przenosi userinfo do połączenia ani do nagłówka `Host` | `test_pin_fields_drops_userinfo` |
+| `web`: ciało czytane strumieniowo z twardym sufitem (anty-OOM, było: pobierz-potem-utnij) | `test_httpx_fetcher_caps_body_at_max_bytes` |
+| Chory port w URL od modelu → `ok=False`, nie surowy `ValueError` wywracający pętlę | `test_malformed_port_is_egress_error_not_raw_valueerror`, `test_web_malformed_port_degrades_to_result_not_exception` |
+
+#### Hardening po adwersaryjnym przeglądzie (3 soczewki, 18 potwierdzonych findingów)
+
+| Poprawka | Test |
+|---|---|
+| Jawna lista sieci deny — `ipaddress` NIE uznaje za prywatne: CGNAT `100.64.0.0/10` (metadane Alibaba, pule węzłów k8s), IPv6 site-local `fec0::/10`, tunele osadzające IPv4 (6to4 `2002::/16`, Teredo `2001::/32`, NAT64 `64:ff9b::/96`) | `test_internal_addresses_always_blocked`, `test_web_blocks_addresses_stdlib_calls_public`, `test_plugin_blocks_addresses_stdlib_calls_public` |
+| `*.localhost` NIE jest przepustką — nazwa rozwiązywana, każdy adres musi być loopbackiem (RFC 6761 tylko ZALECA; glibc wysyła to do DNS) | `test_localhost_suffix_is_not_trusted_without_dns`, `test_plugin_localhost_suffix_must_prove_loopback_by_dns` |
+| `trust_env=False` — `HTTP(S)_PROXY`/`SSLKEYLOGFILE` ze środowiska nie przekierują przypiętego połączenia (obejście pinu i deny-all) | `test_production_clients_ignore_environment_proxy_settings` |
+| `UnicodeError` z kodeka `idna` (etykieta >63 znaków) łapany — brak fail-open na wyjątek | `test_resolver_unicode_error_fails_closed_not_crash` |
+| `.local`/`.internal` nie omijają allowlisty egress dla `web` (niezmiennik „brak WAN" w airgapie) | `test_web_internal_suffix_does_not_bypass_egress_allowlist` |
+| Komunikat odmowy NIE zawiera rozwiązanego adresu wewnętrznego (model = potencjalny skaner) | `test_denial_message_does_not_leak_resolved_internal_address` |
+| Odczyt chunkami (64 KiB) — `iter_bytes()` bez `chunk_size` oddawał cały zdekompresowany blok naraz | `test_httpx_fetcher_caps_body_at_max_bytes` |
+| Przekroczenie deadline'u → `FetchError` (było: ciche obcięcie z `ok=True`) | `test_web_transport_failure_degrades_to_result_not_exception` |
+| `web` przyjmuje wyłącznie `http(s)://` (było: dowolny schemat) | `test_web_rejects_non_http_schemes` |
+| 3xx od serwera MCP → czytelny `PluginError` (było: ciche „brak narzędzi") | `test_redirect_response_is_error_not_empty_tool_list` |
+| Audyt `tool.call` zapisuje `pinned_ip` — z JAKIM adresem faktycznie się połączono | (`tool_loop.py`, metadata `web`) |
+
+**Kod wrażliwy — czy da się go usunąć?** Nie. Bez pinowania walidacja adresu i połączenie
+korzystają z DWÓCH niezależnych rozwiązań DNS, więc atakujący kontrolujący strefę wchodzi
+między nie. Pinowanie **zawęża** powierzchnię (usuwa drugie rozwiązanie) i nie osłabia TLS:
+`verify=True` pozostaje włączone, a certyfikat jest weryfikowany wobec nazwy przez
+`sni_hostname`. Alternatywy (własny resolver w prywatnym API `httpcore`, kontrola
+`getpeername` po połączeniu, cache DNS z minimalnym TTL) są słabsze lub kruche — analiza
+w ADR-0020.
+
+**Ograniczenia (świadome):** pin dotyczy JEDNEGO adresu — brak automatycznego przejścia na
+kolejny rekord A przy awarii (odtworzyłoby to zamykane okno). `husarz.git` nie jest jeszcze
+na wspólnej warstwie. Router modeli nie pinuje (endpointy modeli to typowo loopback/LAN
+operatora). Przekierowania pozostają wyłączone. Pełne wymuszenie sieciowe (NetworkPolicy
+deny-all, sandbox bez sieci) jest warstwą komplementarną, nie zastępczą.

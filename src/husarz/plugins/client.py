@@ -12,102 +12,84 @@ leniwie i wysyłana wyłącznie w nagłówku ``Authorization`` (nigdy w URL, nig
 bramkowane deny-by-default przez ``PluginService`` (``allow_call``/``call_allowlist``) i pętlę
 agenta (patrz ADR-0015 i ADR-0019). Wynik ``tools/call`` jest NIEZAUFANY: sklejamy tylko bloki
 tekstowe, bloki binarne/``resource`` POMIJAMY (zero dereferencji — anti-SSRF-by-proxy).
+
+Klasyfikacja hosta i **pinowanie IP** (domknięcie okna TOCTOU DNS-rebindingu) są współdzielone
+z narzędziem ``web`` — patrz ``husarz.ssrf`` i ADR-0020.
 """
 
 from __future__ import annotations
 
-import ipaddress
-import socket
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from husarz.config.schema import EgressConfig, EgressPolicy, PluginConfig
 from husarz.fencing import truncate_utf8
 from husarz.plugins.errors import PluginAuthError, PluginError, PluginTransportError
 from husarz.plugins.models import RemoteCallResult, RemoteTool
 from husarz.router.egress import EgressError
+from husarz.ssrf import (
+    HostResolver,
+    PinnedTarget,
+    default_resolve,
+    is_blocked_address,
+    is_loopback_host,
+    is_loopback_name,
+    parse_ip_literal,
+    pin_fields,
+    resolve_and_pin,
+    resolve_loopback_name,
+    safe_port,
+)
 
 _DEFAULT_TIMEOUT = 30
 _DEFAULT_MAX_BYTES = 1_000_000
 
-_IpAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
-# Resolver hosta → lista adresów IP (str). Wstrzykiwalny (testy bez DNS).
-HostResolver = Callable[[str], list[str]]
+# Re-eksport dla zgodności wołających (``PluginService`` importuje z tego modułu).
+__all__ = [
+    "HostResolver",
+    "HttpxPluginTransport",
+    "McpClient",
+    "PluginTransport",
+    "build_connector",
+]
 
 
-def _resolve_ip(host: str) -> _IpAddress | None:
-    """Parsuje host jako literał IP; rozwija IPv4-mapped IPv6 (``::ffff:a.b.c.d``).
-
-    Zwraca ``None``, gdy host nie jest literałem IP (nazwa domenowa). Rozwinięcie
-    IPv4-mapped domyka bypass, w którym ``::ffff:169.254.169.254`` udawałby adres
-    „nie-link-local" (cel metadanych chmury).
-    """
-    h = host.strip("[]")
-    try:
-        ip: _IpAddress = ipaddress.ip_address(h)
-    except ValueError:
-        return None
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        return ip.ipv4_mapped
-    return ip
-
-
-def _ip_is_blocked(ip: _IpAddress) -> bool:
-    """True dla adresu wewnętrznego/zarezerwowanego POZA loopbackiem (SSRF).
-
-    Blokuje prywatne (RFC1918/ULA), link-local (169.254 — metadane chmury), multicast,
-    zarezerwowane i ``0.0.0.0``. Loopback jest dozwolony (lokalny serwer MCP).
-    """
-    if ip.is_loopback:
-        return False
-    return (
-        ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
-    )
-
-
-def _is_loopback_host(host: str) -> bool:
-    """True dla ``localhost``/``*.localhost`` oraz literałów loopback (127/8, ::1)."""
-    h = host.strip("[]").lower()
-    if h == "localhost" or h.endswith(".localhost"):
-        return True
-    ip = _resolve_ip(h)
-    return ip is not None and ip.is_loopback
-
-
-def _is_blocked_internal(host: str) -> bool:
-    """True dla LITERAŁU IP wewnętrznego/zarezerwowanego (poza loopbackiem)."""
-    ip = _resolve_ip(host)
-    return ip is not None and _ip_is_blocked(ip)
-
-
-def _default_resolve(host: str) -> list[str]:
-    """Rozwiązuje host do adresów IP (A i AAAA). Pusta lista, gdy brak rozwiązania."""
-    try:
-        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-    except OSError:
-        return []
-    return [str(info[4][0]) for info in infos]
-
-
-def _validate_mcp_endpoint(
+def _endpoint_target(
     endpoint: str, egress: EgressConfig, *, resolve: HostResolver | None = None
-) -> None:
-    """Twarda walidacja endpointu MCP (anty-SSRF, odwrócona polaryzacja vs Git).
+) -> PinnedTarget:
+    """Waliduje endpoint MCP (anty-SSRF, odwrócona polaryzacja vs Git) i zwraca cel połączenia.
 
-    Kolejność: brak userinfo → blok literałów wewnętrznych/metadanych → loopback OK
-    (http dozwolony, bo nie wychodzi z hosta) → host publiczny wymaga https + allowlisty
-    egress (deny-all). Dla nazwy domenowej dodatkowo **rozwiązuje host i sprawdza KAŻDY
-    adres** wobec ``_ip_is_blocked`` (anty-DNS-rebinding; nazwa wskazująca metadane/
-    adres wewnętrzny jest blokowana mimo wpisu w allowliście). Nie zamyka pełnego okna
-    TOCTOU (bez pinowania IP), ale domyka trywialny rebinding do sieci wewnętrznej.
+    Kolejność bram — celowo taka, by ODMOWA nie powodowała nawet zapytania DNS:
+
+    1. schemat ``http(s)`` i brak userinfo w URL,
+    2. literał adresu wewnętrznego/metadanych → twardy blok,
+    3. loopback → połączenie wprost (``http`` OK, ruch nie opuszcza hosta) — główny przypadek,
+    4. host publiczny musi być ``https`` (token nie leci plaintextem),
+    5. host publiczny musi przejść allowlistę egress (deny-all),
+    6. dopiero nazwa domenowa jest rozwiązywana — RAZ — i **przypinana** do jednego adresu.
+
+    Krok 6 domyka okno TOCTOU: transport łączy się z literałem IP, więc nie ma drugiego
+    rozwiązania DNS, które atakujący mógłby podmienić. Rozwiązane adresy klasyfikujemy z
+    ``allow_loopback=False`` — publiczna nazwa NIE może wskazywać na loopback (inaczej zatruty
+    DNS przekierowałby token Bearer do usługi na tej maszynie). Lokalny serwer MCP konfiguruje
+    się adresem ``127.0.0.1``/``localhost`` (krok 3), nie nazwą rozwiązywaną na loopback.
+
+    Args:
+        endpoint: adres serwera MCP z ``config/plugins/*.yaml``.
+        egress: globalna polityka egress (deny-all).
+        resolve: resolver DNS (wstrzykiwalny; ``None`` → stdlib).
+
+    Returns:
+        ``PinnedTarget``: połączenie wprost (loopback/literał) albo z przypiętym IP.
 
     Raises:
         PluginError: zły scheme, userinfo w URL, brak hosta, http poza loopbackiem.
         EgressError: host wewnętrzny/metadanych (literał lub po rozwiązaniu) albo
             publiczny spoza allowlisty; brak rozwiązania nazwy (fail-closed).
     """
+    active_resolve = resolve if resolve is not None else default_resolve
     parsed = urlparse(endpoint)
     if parsed.scheme not in ("http", "https"):
         raise PluginError("endpoint musi być adresem http(s)://.")
@@ -116,10 +98,19 @@ def _validate_mcp_endpoint(
     host = parsed.hostname
     if not host:
         raise PluginError("endpoint nie zawiera hosta.")
-    if _is_blocked_internal(host):
+    # Port spoza 0–65535 / nieliczbowy → EgressError, nie surowy ValueError ze stdlib.
+    safe_port(urlsplit(endpoint), endpoint)
+    literal = parse_ip_literal(host)
+    if literal is not None and is_blocked_address(literal, allow_loopback=True):
         raise EgressError(f"Host '{host}' zablokowany (wewnętrzny/metadanych — SSRF).")
-    if _is_loopback_host(host):
-        return  # lokalny serwer MCP — główny przypadek; http OK (ruch nie opuszcza hosta)
+    if is_loopback_host(host):
+        # Lokalny serwer MCP — główny przypadek; http OK (ruch nie opuszcza hosta).
+        return PinnedTarget.direct(endpoint)
+    if is_loopback_name(host):
+        # `*.localhost` NIE jest gwarancją loopbacku (glibc potrafi wysłać to do DNS) —
+        # rozwiązujemy i wymagamy, by każdy adres był lokalny, inaczej odmowa. Bez tego
+        # nazwa `mcp.localhost` omijałaby wymóg https i allowlistę egress poniżej.
+        return pin_fields(endpoint, resolve_loopback_name(host, resolve=active_resolve))
     if parsed.scheme != "https":
         raise PluginError(
             "endpoint nie-loopback musi być https:// (token nie może lecieć plaintextem)."
@@ -130,31 +121,26 @@ def _validate_mcp_endpoint(
         raise EgressError(
             f"Egress zabroniony dla hosta '{host}' — dodaj go do security.egress.allowlist."
         )
-    # Nazwa domenowa: sprawdź KAŻDY rozwiązany adres (anty-DNS-rebinding do wewnętrznych).
-    if _resolve_ip(host) is None:
-        addresses = (resolve or _default_resolve)(host)
-        if not addresses:
-            raise EgressError(f"Nie udało się rozwiązać hosta '{host}' (fail-closed).")
-        for addr in addresses:
-            resolved = _resolve_ip(addr)
-            if resolved is not None and _ip_is_blocked(resolved):
-                raise EgressError(
-                    f"Host '{host}' rozwiązuje się na adres wewnętrzny/metadanych "
-                    f"({addr}) — SSRF/DNS-rebinding."
-                )
+    if literal is not None:
+        # Publiczny literał IP — nie ma nazwy do rozwiązania, więc nie ma czego przypinać.
+        return PinnedTarget.direct(endpoint)
+    pinned = resolve_and_pin(host, allow_loopback=False, resolve=active_resolve)
+    return pin_fields(endpoint, pinned)
 
 
 @runtime_checkable
 class PluginTransport(Protocol):
     """Warstwa transportu MCP (POST JSON-RPC). Zwraca ``(status, sparsowany_json_lub_None)``.
 
+    Przyjmuje ``PinnedTarget`` (a NIE goły URL) celowo: pin jest częścią kontraktu, więc
+    implementacja nie może go pominąć i rozwiązać nazwy ponownie (okno TOCTOU).
     ``max_bytes`` egzekwuje twardy limit ciała PODCZAS odczytu (ochrona OOM przed
     złośliwym/przejętym serwerem MCP) — nie po sparsowaniu.
     """
 
     def __call__(
         self,
-        url: str,
+        target: PinnedTarget,
         headers: dict[str, str],
         json: dict[str, Any],
         timeout: int,
@@ -165,16 +151,19 @@ class PluginTransport(Protocol):
 class HttpxPluginTransport:
     """Transport oparty o httpx (import leniwy). TLS ``verify=True`` jawnie, na sztywno.
 
-    Ciało czytane strumieniowo z twardym sufitem ``max_bytes`` (przerwanie po
-    przekroczeniu, przed ``json.loads``). ``follow_redirects=False`` (anty-SSRF-redirect).
-    Dodatkowo bezwzględny **deadline wall-clock** (``timeout``) na całą pętlę odczytu —
-    ochrona przed „slow-drip" (serwer sączący bajty w nieskończoność blokowałby wątek
-    puli), bo per-read timeout httpx resetuje się przy każdym chunku.
+    Łączy się z ``target.connect_url`` (literał IP dla nazw domenowych), a nagłówek ``Host``
+    i SNI/weryfikacja certyfikatu idą po ORYGINALNEJ nazwie — połączenie po IP nie degraduje
+    TLS. Ciało czytane strumieniowo z twardym sufitem ``max_bytes`` (przerwanie po
+    przekroczeniu, przed ``json.loads``). ``follow_redirects=False`` (anty-SSRF-redirect;
+    przekierowanie omijałoby walidację i pin). Dodatkowo bezwzględny **deadline wall-clock**
+    (``timeout``) na całą pętlę odczytu — ochrona przed „slow-drip" (serwer sączący bajty
+    w nieskończoność blokowałby wątek puli), bo per-read timeout httpx resetuje się przy
+    każdym chunku.
     """
 
     def __call__(
         self,
-        url: str,
+        target: PinnedTarget,
         headers: dict[str, str],
         json: dict[str, Any],
         timeout: int,
@@ -186,18 +175,30 @@ class HttpxPluginTransport:
             raise PluginTransportError("Pakiet 'httpx' nie jest zainstalowany.") from exc
         import json as _json  # noqa: PLC0415
 
+        sent_headers = dict(headers)
+        if target.host_header is not None:
+            sent_headers["Host"] = target.host_header
+        extensions: dict[str, Any] = {}
+        if target.sni_hostname is not None:
+            # httpcore używa tego jako ``server_hostname`` w start_tls → certyfikat jest
+            # weryfikowany wobec NAZWY, mimo że łączymy się z literałem IP.
+            extensions["sni_hostname"] = target.sni_hostname
+
         buffer = bytearray()
         deadline = time.monotonic() + timeout
         try:
-            with httpx.stream(
-                "POST",
-                url,
-                headers=headers,
-                json=json,
-                timeout=timeout,
-                follow_redirects=False,
-                verify=True,
-            ) as response:
+            with (
+                httpx.Client(
+                    timeout=timeout, follow_redirects=False, verify=True, trust_env=False
+                ) as client,
+                client.stream(
+                    "POST",
+                    target.connect_url,
+                    headers=sent_headers,
+                    json=json,
+                    extensions=extensions,
+                ) as response,
+            ):
                 for chunk in response.iter_bytes():
                     buffer += chunk
                     if len(buffer) > max_bytes:
@@ -222,9 +223,20 @@ class HttpxPluginTransport:
 
 
 def _raise_for_status(status: int, action: str) -> None:
-    """Mapuje kod HTTP na wyjątek wtyczki. NIE echuje treści serwera (mniej zaufany)."""
+    """Mapuje kod HTTP na wyjątek wtyczki. NIE echuje treści serwera (mniej zaufany).
+
+    Kody 3xx są BŁĘDEM, nie sukcesem: ``follow_redirects=False`` (anty-SSRF — przekierowanie
+    omijałoby walidację i pin), więc przekierowania nie realizujemy. Bez tej gałęzi 301/302
+    kończyłoby się pustym ciałem i cichą degradacją do „serwer nie udostępnił narzędzi"
+    zamiast czytelnego błędu konfiguracji endpointu.
+    """
     if status in (401, 403):
         raise PluginAuthError(f"{action}: brak autoryzacji u serwera wtyczki (HTTP {status}).")
+    if 300 <= status < 400:
+        raise PluginError(
+            f"{action}: serwer wtyczki odpowiedział przekierowaniem (HTTP {status}) — "
+            f"nie podążamy za nim (anty-SSRF). Popraw 'endpoint' w config/plugins/."
+        )
     if status >= 400:
         raise PluginError(f"{action}: serwer wtyczki zwrócił HTTP {status}.")
 
@@ -255,18 +267,24 @@ def _parse_call_result(result: Any, *, max_bytes: int) -> RemoteCallResult:
 
 
 class McpClient:
-    """Klient MCP nad ``PluginTransport`` (JSON-RPC 2.0): ``tools/list`` i ``tools/call``."""
+    """Klient MCP nad ``PluginTransport`` (JSON-RPC 2.0): ``tools/list`` i ``tools/call``.
+
+    Przyjmuje gotowy ``PinnedTarget`` (zwalidowany i przypięty przez ``build_connector``),
+    a nie goły URL — dzięki temu nie da się skonstruować klienta z pominięciem bram
+    anty-SSRF. Klient jest budowany PER OPERACJĘ, więc pin jest świeży dla każdego
+    ``list``/``call`` (nie starzeje się między wywołaniami).
+    """
 
     def __init__(
         self,
-        endpoint: str,
+        target: PinnedTarget,
         token: str,
         transport: PluginTransport,
         *,
         timeout: int = _DEFAULT_TIMEOUT,
         max_output_bytes: int = _DEFAULT_MAX_BYTES,
     ) -> None:
-        self._url = endpoint
+        self._target = target
         self._token = token
         self._t = transport
         self._timeout = timeout
@@ -286,7 +304,9 @@ class McpClient:
     def _rpc(self, method: str, params: dict[str, Any]) -> Any:
         self._id += 1
         envelope = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
-        status, data = self._t(self._url, self._headers(), envelope, self._timeout, self._max_bytes)
+        status, data = self._t(
+            self._target, self._headers(), envelope, self._timeout, self._max_bytes
+        )
         _raise_for_status(status, method)
         if isinstance(data, dict) and data.get("error"):
             # Błąd JSON-RPC — nie ujawniamy wnętrzności serwera (tylko kategoria).
@@ -325,17 +345,17 @@ def build_connector(
     transport: PluginTransport | None = None,
     resolve: HostResolver | None = None,
 ) -> McpClient:
-    """Buduje klienta MCP dla wtyczki. Waliduje endpoint + egress PRZED połączeniem.
+    """Buduje klienta MCP dla wtyczki: walidacja endpointu + egress + **pin IP** przed połączeniem.
 
     Raises:
         EgressError: host endpointu wewnętrzny (literał lub po rozwiązaniu) albo publiczny
             spoza allowlisty; nierozwiązywalna nazwa (fail-closed).
         PluginError: endpoint nie jest poprawnym http(s) bez userinfo (lub http poza loopbackiem).
     """
-    _validate_mcp_endpoint(plugin.endpoint, egress, resolve=resolve)
+    target = _endpoint_target(plugin.endpoint, egress, resolve=resolve)
     active = transport if transport is not None else HttpxPluginTransport()
     return McpClient(
-        plugin.endpoint,
+        target,
         token,
         active,
         timeout=plugin.timeout_seconds,

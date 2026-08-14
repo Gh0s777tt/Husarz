@@ -105,6 +105,27 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ⬜ Przyszłe adaptery za `RagBackend`/`VectorStore`: pgvector (serwer), mem0/graphiti;
   KMS/rotacja klucza (obecnie DEK=SHA-256 sekretu, KDF-lite).
 
+## ✅ Etap 15 — Pinowanie IP (anty-DNS-rebinding)
+- ✅ `husarz.ssrf` — WSPÓLNA warstwa anty-SSRF dla `web` i wtyczek MCP (koniec trzech kopii
+  logiki). Czysty stdlib (bez `httpx`), resolver wstrzykiwalny → testy w pełni offline.
+- ✅ Pin: nazwa rozwiązywana RAZ, KAŻDY adres sprawdzany, jeden przypinany; transport łączy
+  się z literałem IP, a `Host` + **SNI/weryfikacja certu** idą po nazwie (`verify=True` w mocy).
+  Domyka okno TOCTOU zapisane jako ryzyko rezydualne w ADR-0015/0016/0019.
+- ✅ Fail-closed: pusty DNS / jakikolwiek adres wewnętrzny (także mieszane A/AAAA) / śmieć
+  z resolvera / URL bez hosta → `EgressError`. Odmowa egress nie powoduje nawet zapytania DNS.
+- ✅ Domknięte przy okazji: loopback przez NAZWĘ w `web` (dotąd blokowany tylko jako literał);
+  `HttpxFetcher` czyta strumieniowo z sufitem bajtowym + deadline (było: pobierz-potem-utnij).
+- ✅ Kontrakt „narzędzie nie rzuca" także dla chorych URL-i (port spoza 0–65535 → `ok=False`).
+- ✅ Utwardzenia z adwersaryjnego przeglądu (3 soczewki, 18 potwierdzonych findingów): jawna
+  lista sieci deny (CGNAT 100.64/10, IPv6 site-local, 6to4/Teredo/NAT64 — stdlib ich NIE zna),
+  `*.localhost` weryfikowany przez DNS (nie po sufiksie), `trust_env=False` (proxy z ENV omijało
+  pin!), `UnicodeError` z kodeka idna, `.local`/`.internal` bez obejścia allowlisty egress,
+  brak wycieku rozwiązanego adresu do modelu, chunkowany odczyt, walidacja schematu, 3xx MCP.
+- ✅ Testy: +118 (offline), w tym pierwsze testy REALNYCH transportów httpx (`MockTransport`).
+  Docs: ADR-0020, BEZPIECZENSTWO/NARZEDZIA/WTYCZKI/ARCHITEKTURA.
+- ⬜ `husarz.git` na wspólnej warstwie; pinowanie dla routera modeli; obsługa przekierowań
+  (dziś `follow_redirects=False` — przekierowanie omijałoby walidację i pin).
+
 ## ✅ Etap 13 — Pętla narzędziowa (function-calling)
 - ✅ Pętla ReAct (`agents/tool_loop.py`) — pierwszy egzekutor narzędzi; prompt-based
   (przenośne na lokalne modele), zero zmian w routerze. Dispatch (`tools/dispatch.py`)
@@ -114,8 +135,8 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Limity: `max_iterations` + `security.tool_loop` (`max_result_bytes`, `max_total_calls`,
   `max_plan_steps`); ogrodzenie wyniku (`husarz/fencing.py`). Wpięcie w orkiestrator/API.
 - ✅ Testy: +35 (offline). Docs: ADR-0016.
-- ⬜ Natywny adapter `tool_calls` (function-calling API); korelacja principal↔wywołanie;
-  pinowanie IP dla `web`/`plugin` (domknięcie TOCTOU rebindingu).
+- ✅ Pinowanie IP dla `web`/`plugin` (domknięcie TOCTOU rebindingu) — Etap 15 (ADR-0020).
+- ⬜ Natywny adapter `tool_calls` (function-calling API); korelacja principal↔wywołanie.
 
 ## ✅ Etap 13b — Wywołanie narzędzi wtyczki MCP (`tools/call`)
 - ✅ `kind: plugin` (narzędzie agenta) wiąże JEDEN konektor przez `config.plugin`; akcje
@@ -126,6 +147,7 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Wynik NIEZAUFANY (bez SSRF-by-proxy, ogrodzony); token tylko w nagłówku; `arguments`
   VERBATIM; audyt `{bytes, sha256}`. Utwardzenia z krytyki (M1/M2/S4/S5). Przewleczenie
   `plugin_service` do pętli. Testy: +30 (offline). Docs: ADR-0019, WTYCZKI.md.
+- ✅ TOCTOU DNS-rebinding (ryzyko rezydualne z ADR-0019) — domknięte w Etapie 15 (ADR-0020).
 
 ## ✅ Etap 12 — System wtyczek (rejestr narzędzi + konektor MCP)
 - ✅ 12a: `ToolProviderRegistry` (open/closed) zastępuje `if/elif` w `build_tools`;

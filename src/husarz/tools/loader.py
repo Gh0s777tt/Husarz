@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from husarz.config.schema import HusarzConfig
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
+from husarz.ssrf import HostResolver
 from husarz.tools.base import Tool
 from husarz.tools.errors import ToolError
 from husarz.tools.file_edit import DEFAULT_MAX_BYTES, FileEditTool
@@ -94,6 +95,7 @@ def _build_web(ctx: BuildContext) -> Tool:
         egress=ctx.security.egress,
         max_bytes=_int_setting(settings, "max_bytes", WEB_MAX_BYTES),
         timeout=_int_setting(settings, "timeout_seconds", DEFAULT_TIMEOUT),
+        resolve=ctx.resolve,
     )
 
 
@@ -160,6 +162,7 @@ def build_tools(
     data_dir: str | Path = "./data",
     plugin_service: PluginService | None = None,
     registry: ToolProviderRegistry | None = None,
+    resolve: HostResolver | None = None,
 ) -> dict[str, Tool]:
     """Buduje mapę ``nazwa -> narzędzie`` z konfiguracji.
 
@@ -167,7 +170,8 @@ def build_tools(
     kończy się ``ToolError``. ``registry`` (opcjonalny) pozwala rozszerzyć lub
     podmienić zestaw rodzajów (domyślnie ``default_registry``). ``rag_backend``
     jawnie wstrzyknięty ma pierwszeństwo; gdy ``None`` — narzędzie rag buduje backend
-    z własnej konfiguracji (``memory``/``embedding``).
+    z własnej konfiguracji (``memory``/``embedding``). ``resolve`` (opcjonalny) to
+    resolver DNS dla pinowania IP narzędzia ``web`` — w testach fałszywy (bez sieci).
     """
     workspace_path = Path(workspace)
     workspace_host = str(workspace_path.resolve())
@@ -196,6 +200,7 @@ def build_tools(
                 secrets=active_secrets,
                 data_dir=Path(data_dir),
                 plugin_service=plugin_service,
+                resolve=resolve,
             )
         )
     return tools

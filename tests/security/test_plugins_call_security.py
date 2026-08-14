@@ -26,8 +26,8 @@ class RecordingTransport:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def __call__(self, url, headers, json, timeout, max_bytes):  # type: ignore[no-untyped-def]
-        self.calls.append({"url": url, "headers": headers, "json": json})
+    def __call__(self, target, headers, json, timeout, max_bytes):  # type: ignore[no-untyped-def]
+        self.calls.append({"url": target.connect_url, "headers": headers, "json": json})
         return 200, {
             "jsonrpc": "2.0",
             "id": json.get("id"),

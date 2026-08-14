@@ -5,6 +5,103 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 15 — pinowanie IP / domknięcie TOCTOU DNS-rebindingu)
+- Nowy moduł `husarz.ssrf` — WSPÓLNA warstwa anty-SSRF dla ścieżek wychodzących (`web`,
+  wtyczki MCP): klasyfikacja hostów (literał/loopback/nazwa), `resolve_and_pin`, `pin_fields`
+  i `PinnedTarget`. Bez zależności od `httpx` (czysty stdlib) → w pełni testowalny offline;
+  resolver DNS wstrzykiwalny. Koniec trzech rozjeżdżających się kopii tej logiki.
+- **Pinowanie IP**: nazwa rozwiązywana DOKŁADNIE RAZ, KAŻDY zwrócony adres sprawdzany, jeden
+  adres przypinany. Transport łączy się z literałem IP, a nagłówek `Host` i **SNI/weryfikacja
+  certyfikatu** idą po ORYGINALNEJ nazwie (`extensions={"sni_hostname": ...}` → `server_hostname`
+  w `start_tls`), więc `verify=True` pozostaje w mocy — pin ZAWĘŻA powierzchnię ataku, nie
+  osłabia TLS. Domyka ryzyko rezydualne z ADR-0015/0016/0019. Docs: ADR-0020.
+- Fail-closed w każdym rozgałęzieniu: pusta odpowiedź DNS, JAKIKOLWIEK adres wewnętrzny
+  (także w mieszanych A/AAAA), niesparsowalny wynik resolvera lub URL bez hosta → `EgressError`.
+  Świadomie NIE wybieramy „czystego" adresu z odpowiedzi zawierającej adres wewnętrzny.
+- Kolejność bram taka, by ODMOWA nie kosztowała nawet zapytania DNS: schemat/userinfo →
+  literał wewnętrzny → loopback → https → allowlista egress → dopiero DNS + pin.
+- Publiczna nazwa NIE może rozwiązać się na loopback (ochrona przed zatrutym DNS kierującym
+  token Bearer wtyczki do usługi na maszynie operatora). Loopback intencjonalny konfiguruje
+  się literałem `127.0.0.1`/`localhost` — idzie osobną gałęzią, bez DNS.
+- Kontrakt „narzędzie NIGDY nie rzuca" utrzymany także dla chorych URL-i: port spoza
+  0–65535 lub nieliczbowy (`https://host:99999/x`) daje `EgressError` → `ToolResult(ok=False)`,
+  a nie surowy `ValueError` ze stdlib wywracający pętlę agenta (`safe_port`, sprawdzany PRZED
+  rozwiązaniem nazwy).
+- Testy: +118 (offline; `tests/unit/test_ssrf.py`, `tests/security/test_ssrf_pinning.py`) —
+  w tym testy REALNYCH transportów httpx przez `MockTransport` (dotąd produkcyjna ścieżka
+  `HttpxFetcher`/`HttpxPluginTransport` nie była pokryta wcale).
+
+### Poprawione (Etap 15 — luki domknięte przy okazji)
+- **`web`: loopback przez NAZWĘ** (`http://localhost:8000/admin`) był blokowany wyłącznie jako
+  literał IP — nazwa przechodziła przez `is_local_endpoint` jako „endpoint lokalny" i, przy
+  `localhost` na allowliście narzędzia, otwierała dostęp do usług na maszynie operatora.
+  Teraz odrzucana (`allow_loopback=False` dla tej ścieżki).
+- **`HttpxFetcher`: pobieranie całej odpowiedzi przed przycięciem** (`response.text[:max_bytes]`)
+  — ryzyko OOM przy złośliwym/przejętym serwerze. Teraz odczyt strumieniowy z twardym sufitem
+  bajtowym ORAZ bezwzględnym deadline'em wall-clock (anty-„slow-drip", parytet z transportem MCP).
+- Dokumentacja: usunięte nieaktualne adnotacje „brak pinowania IP / TOCTOU odłożone" z
+  `BEZPIECZENSTWO.md`, `WTYCZKI.md`, `NARZEDZIA.md` oraz z sekcji „Konsekwencje" ADR-0015/
+  0016/0019 (przekreślone + odsyłacz do ADR-0020 — ADR-y pozostają zapisem historycznym).
+  `ARCHITEKTURA.md` przestała opisywać zaimplementowane pakiety `husarz.memory`/`husarz.plugins`
+  jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
+  (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
+
+### Poprawione (adwersaryjny przegląd Etapu 15 — 3 soczewki, 18 potwierdzonych findingów)
+- **Bypass klasyfikacji adresów (major)**: `is_blocked_address` opierał się wyłącznie na
+  właściwościach `ipaddress`, a stdlib NIE uznaje za prywatne m.in. **CGNAT 100.64.0.0/10**
+  (endpoint metadanych Alibaba Cloud, typowe pule węzłów k8s/EKS) ani **IPv6 site-local
+  `fec0::/10``**. Domena z allowlisty rozwiązana na taki adres przechodziła przez bramkę:
+  `web` zwracał metadane modelowi, a konektor MCP wysyłał tam `Authorization: Bearer`.
+  Dodano jawną listę sieci deny (CGNAT, site-local, 6to4 `2002::/16`, Teredo `2001::/32`,
+  NAT64 `64:ff9b::/96` — tunele osadzające IPv4, plus benchmark/TEST-NET/klasa E, których
+  `ipaddress` nie zna na Pythonie 3.11.0–3.11.8 dopuszczonym przez `requires-python`).
+- **`*.localhost` jako przepustka (major)**: sufiks był uznawany za loopback po samym
+  łańcuchu znaków, więc `mcp.localhost` łączył się WPROST — z pominięciem pinu, wymogu
+  `https` i allowlisty egress (RFC 6761 tylko ZALECA mapowanie na loopback; glibc bez
+  systemd-resolved wysyła taką nazwę do zwykłego DNS). Teraz `*.localhost` jest
+  rozwiązywane, a KAŻDY adres musi być loopbackiem — inaczej odmowa.
+- **`trust_env=True` w klientach httpx (major)**: `HTTP(S)_PROXY`/`ALL_PROXY` ze środowiska
+  przekierowałyby PRZYPIĘTE połączenie przez cudzy serwer (a `SSLKEYLOGFILE` zrzucił klucze
+  sesji) — czyli obeszłyby całą warstwę pinowania i deny-all egress. Ustawione `trust_env=False`
+  w `HttpxFetcher` i `HttpxPluginTransport`.
+- **Fail-open na wyjątek w resolverze (major)**: `default_resolve` łapał tylko `OSError`,
+  a `getaddrinfo` koduje nazwę kodekiem `idna` i dla etykiety >63 znaków rzuca
+  `UnicodeEncodeError` (podklasa `ValueError`) — wyjątek uciekał poza bramkę i wywracał
+  orkiestrację zamiast dać odmowę. Łapane `(OSError, UnicodeError)`.
+- **Obejście allowlisty egress przez `.local`/`.internal` (major)**: `check_endpoint_allowed`
+  przepuszcza „endpointy lokalne" po samej NAZWIE (poprawne dla routera modeli — lokalny
+  vLLM/Ollama), więc nazwa `cokolwiek.internal` na allowliście narzędzia `web` omijała
+  politykę egress, także w profilu `airgap`. `WebTool` egzekwuje teraz allowlistę bez tego skrótu.
+- **Wyciek rozpoznania do modelu (minor)**: komunikat odmowy zawierał ROZWIĄZANY adres
+  wewnętrzny (`…rozwiązuje się na (10.0.0.7)`) i wracał do modelu jako wynik narzędzia —
+  czyli skaner sieci wewnętrznej przez komunikaty błędów. Adres usunięty z komunikatu.
+- **Limit `max_bytes` przekraczalny o rzędy wielkości (minor)**: `iter_bytes()` bez
+  `chunk_size` oddaje cały zdekompresowany blok naraz (domyślne `Accept-Encoding: gzip`),
+  więc sprawdzenie limitu następowało PO doklejeniu. Odczyt chunkami po 64 KiB.
+- **Ciche obcięcie przy deadlinie (minor)**: przekroczenie limitu czasu urywało treść
+  i raportowało `ok=True`. Teraz `FetchError` (parytet z transportem MCP).
+- **Schemat URL niewalidowany (minor)**: `web` przyjmował dowolny schemat (`ftp://`,
+  `ws://`) — teraz wyłącznie `http(s)://`, odrzucane przed jakąkolwiek pracą.
+- **3xx od serwera MCP jako „brak narzędzi" (minor)**: przy `follow_redirects=False`
+  przekierowanie dawało puste ciało i cichą degradację; teraz czytelny `PluginError`.
+- **`build_plugin_service` nie przewlekał `resolve` (minor)** — resolver dało się wstrzyknąć
+  tylko przez konstruktor `PluginService`, niespójnie z `build_tools`/`build_tool_loop`.
+- **Audyt**: `tool.call` zapisuje `pinned_ip` (z JAKIM adresem faktycznie się połączono) —
+  przy pinowaniu sama nazwa hosta jest mniej informatywna. Docstring `is_loopback_endpoint`
+  wskazywał na przemianowaną funkcję `_validate_mcp_endpoint`.
+- Testy: +36 niezmienników dla powyższych (m.in. parametryczne adresy, których `ipaddress`
+  nie uznaje za prywatne, oraz kontrola `trust_env`/`verify`/`follow_redirects`).
+
+### Zmienione (Etap 15 — kontrakt wewnętrzny, BREAKING dla kodu first-party)
+- Protokoły `Fetcher` (narzędzie `web`) i `PluginTransport` (konektor MCP) oraz `McpClient`
+  przyjmują `PinnedTarget` zamiast gołego `str`/URL. Świadome: opcjonalny pin byłby fail-open
+  (implementacja mogłaby go po cichu zignorować i rozwiązać nazwę po raz drugi).
+- `build_tools` / `build_tool_loop` / `BuildContext` przyjmują `resolve` (resolver DNS) —
+  ten sam szew wstrzykiwania, co `executor`/`fetcher`/`rag_backend`.
+- `_validate_mcp_endpoint` → `_endpoint_target` (zwraca cel połączenia, nie `None`).
+- `.gitignore`: `._*` — macOS na woluminach exFAT/NTFS tworzy sidecary AppleDouble,
+  które zaśmiecały repo i wywracały `ruff` („stream did not contain valid UTF-8").
+
 ### Poprawione (follow-up 14b — zwalnianie zasobów przy rekonfiguracji)
 - Domknięte udokumentowane ograniczenie z Etapu 14b: `SqliteVectorStore` trzymał połączenie do
   pliku przez cykl życia stacku i przy `POST /api/config/runtime` powstawało nowe bez zamknięcia

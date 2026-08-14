@@ -7,10 +7,16 @@ from pathlib import Path
 import pytest
 
 from husarz.config import load_config
+from husarz.ssrf import PinnedTarget
 from husarz.tools import ExecResult, InMemoryRagBackend, SandboxSpec, build_tools
 from husarz.tools.dispatch import ActionRegistry, ToolDispatcher, default_action_registry
 
 pytestmark = pytest.mark.unit
+
+
+def _fake_resolve(host: str) -> list[str]:
+    """Resolver testowy: każda nazwa → adres publiczny (żaden test nie odpytuje DNS)."""
+    return ["93.184.216.34"]
 
 
 class FakeExecutor:
@@ -26,8 +32,8 @@ class FakeFetcher:
     def __init__(self) -> None:
         self.urls: list[str] = []
 
-    def __call__(self, url: str, *, timeout: int, max_bytes: int) -> tuple[int, str]:
-        self.urls.append(url)
+    def __call__(self, target: PinnedTarget, *, timeout: int, max_bytes: int) -> tuple[int, str]:
+        self.urls.append(target.connect_url)
         return 200, "TREŚĆ"
 
 
@@ -42,6 +48,7 @@ def _dispatcher(tmp_path: Path, repo_config_dir: Path, **kw: object) -> ToolDisp
         executor=kw.get("executor") or FakeExecutor(),  # type: ignore[arg-type]
         fetcher=kw.get("fetcher") or FakeFetcher(),  # type: ignore[arg-type]
         rag_backend=kw.get("rag") or InMemoryRagBackend(),  # type: ignore[arg-type]
+        resolve=_fake_resolve,
     )
     kind_of = {name: tc.kind for name, tc in config.tools.items()}
     descriptions = {name: tc.description for name, tc in config.tools.items()}
@@ -68,7 +75,8 @@ def test_web_fetch_dispatches_to_fetcher(tmp_path: Path, repo_config_dir: Path) 
     fetcher = FakeFetcher()
     disp = _dispatcher(tmp_path, repo_config_dir, fetcher=fetcher, allow_egress=True)
     res = disp.dispatch("web", "fetch", {"url": "https://docs.python.org/3/"})
-    assert res.ok and fetcher.urls == ["https://docs.python.org/3/"]
+    # Fetcher dostaje URL z PRZYPIĘTYM adresem (nazwa rozwiązana dokładnie raz, w narzędziu).
+    assert res.ok and fetcher.urls == ["https://93.184.216.34/3/"]
 
 
 def test_rag_add_then_search(tmp_path: Path, repo_config_dir: Path) -> None:

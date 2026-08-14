@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from husarz.config import load_config
+from husarz.ssrf import PinnedTarget
 from husarz.tools import (
     ExecResult,
     FileEditTool,
@@ -28,7 +29,7 @@ class FakeExecutor:
 
 
 class FakeFetcher:
-    def __call__(self, url: str, *, timeout: int, max_bytes: int) -> tuple[int, str]:
+    def __call__(self, target: PinnedTarget, *, timeout: int, max_bytes: int) -> tuple[int, str]:
         return 200, "ok"
 
 

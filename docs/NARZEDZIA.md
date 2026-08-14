@@ -18,7 +18,7 @@ Kod: `husarz.tools`.
 | `shell`     | `ShellTool`      | allowlista binarek + sandbox (bez sieci, limity) |
 | `git`       | `GitTool`        | allowlista podkomend; `push` tylko gdy `allow_push` |
 | `run_tests` | `RunTestsTool`   | skonfigurowane polecenie testów w sandboxie |
-| `web`       | `WebTool`        | allowlista domen narzędzia **oraz** globalny egress + blok wewnętrznych IP |
+| `web`       | `WebTool`        | allowlista domen narzędzia **oraz** globalny egress **oraz** anty-SSRF z pinowaniem IP |
 | `rag`       | `RagTool`        | pamięć/wyszukiwanie; backend `memory` (słowny, domyślny) lub `embedding` (wektorowy, `husarz.memory`) — patrz niżej i ADR-0017 |
 
 ## Sandbox
@@ -51,11 +51,46 @@ w testach wstrzykujemy własny executor (zapisuje `SandboxSpec`, nie uruchamia n
 - domyślne deny-globi z `config/tools/file_edit.yaml`: `**/.env`, `**/*.key`,
   `**/*.pem`, `models/**`.
 
-## Dwuwarstwowy egress (web)
+## Trójwarstwowy egress (web)
 
-`WebTool.fetch` dopuszcza żądanie tylko gdy **obie** warstwy zezwalają:
-allowlista domen narzędzia (`config/tools/web.yaml`) **i** globalna polityka
-`security.egress` (ta sama `check_endpoint_allowed`, co w routerze).
+`WebTool.fetch` dopuszcza żądanie tylko gdy **wszystkie trzy** warstwy zezwalają — w tej
+kolejności (odmowa na dowolnym poziomie nie dotyka sieci):
+
+0. **schemat URL** — wyłącznie `http(s)://` (odrzucane przed jakąkolwiek pracą),
+1. **allowlista domen narzędzia** (`config/tools/web.yaml`) — grant per-narzędzie,
+2. **globalna polityka `security.egress`** — ta sama `check_endpoint_allowed`, co w routerze,
+   ale dla `web` **bez skrótu „endpoint lokalny jest zawsze wolny"**: nazwy `.local`/`.internal`
+   muszą przejść allowlistę jak każde inne (inaczej byłyby furtką omijającą egress, także
+   w profilu `airgap`),
+3. **anty-SSRF z pinowaniem IP** (`husarz.ssrf`) — patrz niżej.
+
+### Pinowanie IP (anty-DNS-rebinding)
+
+Nazwa domenowa jest rozwiązywana **dokładnie raz**, KAŻDY zwrócony adres jest sprawdzany
+wobec blokady (prywatne, link-local/metadane chmury, zarezerwowane, multicast, `0.0.0.0`),
+po czym pierwszy adres zostaje **przypięty**: fetcher łączy się z literałem IP, a nagłówek
+`Host` i weryfikacja certyfikatu TLS (SNI) idą po oryginalnej nazwie. Dzięki temu nie
+istnieje drugie rozwiązanie DNS, które atakujący mógłby podmienić między walidacją
+a połączeniem (okno TOCTOU — patrz [ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md)).
+
+Zasady dla narzędzia `web`:
+
+- **loopback jest zabroniony** — także przez nazwę (`http://localhost:8000/…` jest
+  odrzucane, nawet gdy `localhost` trafi na allowlistę domen),
+- pusta odpowiedź DNS albo **jakikolwiek** adres wewnętrzny (także w mieszanych A/AAAA)
+  → odmowa (fail-closed; nie wybieramy „czystego" adresu z zatrutej odpowiedzi),
+- przekierowania są wyłączone (`follow_redirects=False`) — omijałyby walidację i pin,
+- przypięty adres trafia do `ToolResult.metadata["pinned_ip"]` i do wpisu audytu
+  `tool.call` — audyt pokazuje, z JAKIM adresem faktycznie się połączono,
+- komunikat odmowy **nie** zawiera rozwiązanego adresu: wynik narzędzia wraca do modelu,
+  więc byłby kanałem rozpoznania sieci wewnętrznej,
+- blokada obejmuje też sieci, których `ipaddress` nie uznaje za prywatne (CGNAT
+  `100.64.0.0/10`, IPv6 site-local `fec0::/10`, tunele 6to4/Teredo/NAT64 osadzające IPv4),
+- klient HTTP działa z `trust_env=False` — zmienne `HTTP(S)_PROXY` ze środowiska nie
+  przekierują przypiętego połączenia (egress pochodzi z configu, nie ze środowiska).
+
+Resolver DNS jest **wstrzykiwalny** (`build_tools(..., resolve=...)` → `WebTool(resolve=...)`),
+więc testy klasyfikują hosty bez odpytywania sieci.
 
 ## Ładowarka i użycie
 

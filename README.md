@@ -92,9 +92,9 @@ Konfiguracja Husarza wczytana poprawnie.
   profil:            dev
   log_level:         INFO
   model domyślny:    glm-main
-  modele (rejestr):  bielik, glm-main, hermes
+  modele (rejestr):  bielik, glm-main, hermes, husarz-local, husarz-vision
   agenci:            bielik, chorazy, husarz, kanclerz, kopijnik, puszkarz, zwiadowca
-  narzędzia:         file_edit, git, rag, run_tests, shell, web
+  narzędzia:         file_edit, git, plugin_example, rag, run_tests, shell, web
   ROE (zlecenia):    example-zlecenie
   egress:            deny
   sandbox:           docker+gvisor (sieć: nie)
@@ -141,6 +141,9 @@ Nadpisania przez ENV: prefiks `HUSARZ_`, zagnieżdżenie przez `__`, np.
 Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md)):
 
 - **Deny-all egress** domyślnie; profil `airgap` = brak WAN.
+- **Anty-SSRF z pinowaniem IP** na ścieżkach wychodzących (`web`, wtyczki MCP): nazwa
+  rozwiązywana raz, adres przypinany, `Host`/SNI po nazwie — okno DNS-rebindingu zamknięte
+  ([ADR-0020](docs/adr/0020-pinowanie-ip-anty-ssrf.md)).
 - **Sekrety** wyłącznie w Vault/SOPS — nigdy w repo, obrazach ani logach (hook gitleaks).
 - **Sandbox** narzędzi bez sieci, limity CPU/RAM/czasu, allowlisty komend i ścieżek.
 - **Szyfrowanie at-rest** i mTLS; **OIDC + RBAC**; **niemodyfikowalny audit log**.

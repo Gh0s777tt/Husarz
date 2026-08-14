@@ -11,6 +11,7 @@ from husarz.tools.base import Tool, ToolResult
 from husarz.tools.errors import (
     CommandNotAllowedError,
     EgressNotAllowedError,
+    FetchError,
     PathNotAllowedError,
     SandboxError,
     ToolError,
@@ -41,6 +42,7 @@ __all__ = [
     "DockerSandboxExecutor",
     "EgressNotAllowedError",
     "ExecResult",
+    "FetchError",
     "Fetcher",
     "FileEditTool",
     "GitTool",

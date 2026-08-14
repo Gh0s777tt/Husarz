@@ -18,9 +18,18 @@ a rdzeń pozostaje nienaruszony.
   wymaga `https` **oraz** wpisu w `security.egress.allowlist`. Adresy wewnętrzne i
   metadanych (`169.254.169.254`, `10.x`, `192.168.x`, `172.16–31.x`, `0.0.0.0`,
   multicast, a także zapis IPv4-mapped `::ffff:…`) są **twardo blokowane**. Dla nazwy
-  domenowej host jest **rozwiązywany**, a każdy zwrócony adres sprawdzony wobec bloku
-  wewnętrznego (anty-DNS-rebinding); nierozwiązywalna nazwa → odmowa (fail-closed).
-  Pełne pinowanie IP (okno TOCTOU) pozostaje do zrobienia, jak w narzędziu `web`.
+  domenowej host jest **rozwiązywany dokładnie raz**, każdy zwrócony adres sprawdzony wobec
+  bloku wewnętrznego, a jeden adres **przypięty** — transport łączy się z literałem IP,
+  natomiast nagłówek `Host` i weryfikacja certyfikatu TLS (SNI) idą po oryginalnej nazwie.
+  Domyka to okno TOCTOU DNS-rebindingu (nie ma drugiego rozwiązania nazwy do podmiany);
+  nierozwiązywalna nazwa → odmowa (fail-closed). Patrz [ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md).
+  **Uwaga konfiguracyjna:** publiczna nazwa NIE może rozwiązywać się na loopback (inaczej
+  zatruty DNS wysłałby token do usługi na maszynie operatora) — lokalny serwer MCP adresuj
+  wprost `127.0.0.1`/`localhost`. Nazwy `*.localhost` są dopuszczalne, ale **weryfikowane
+  przez DNS**: każdy zwrócony adres musi być loopbackiem (RFC 6761 tylko ZALECA takie
+  mapowanie, a `getaddrinfo` potrafi wysłać taką nazwę do zwykłego DNS). Serwer MCP
+  odpowiadający przekierowaniem (3xx) to błąd konfiguracji `endpoint` — nie podążamy
+  za przekierowaniami (omijałyby walidację i pin).
 - **Token wyłącznie jako referencja** (`env:` / `file:` / `vault:` / `sops:`), nigdy
   wartość. Rozwiązywany leniwie przy operacji; nigdy nie trafia do configu na dysku,
   logów, audytu ani odpowiedzi API. Brak/nierozwiązywalny token przy ustawionym
@@ -101,7 +110,9 @@ egress/RBAC/audyt, token jako referencja, limity żądania i odpowiedzi.
 
 **Poza zakresem (świadomie):** transport `stdio` (spawnowanie procesów, wymaga sandboxa);
 ładowanie wtyczek jako kodu Pythona (`entry_points`); pełny handshake MCP (`initialize`,
-streaming/SSE, `resources`). Pełne **pinowanie IP** (domknięcie okna TOCTOU rebindingu) —
-rozwiązanie nazwy już blokuje trywialny rebinding, ale pinowanie połączenia do zwalidowanego
-adresu pozostaje odłożone (ten sam brak co w narzędziu `web`; dla `call` większy promień rażenia
-— patrz ADR-0019).
+streaming/SSE, `resources`); podążanie za przekierowaniami (`follow_redirects=False` —
+przekierowanie omijałoby walidację i pin).
+
+**Domknięte w Etapie 15:** pełne **pinowanie IP** (okno TOCTOU rebindingu) — patrz
+[ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md). Klasyfikacja hostów i pin są współdzielone
+z narzędziem `web` (moduł `husarz.ssrf`), więc obie ścieżki wychodzące mają tę samą obronę.

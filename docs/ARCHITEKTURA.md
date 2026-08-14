@@ -56,8 +56,19 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md), [ADR-0006](adr/0006-bezpieczenstwo-roe.md).
 - **Pakiet `husarz.api`** (Etap 5) — REST API (FastAPI) + serwowana konsola WWW,
   launcher `husarz up`. Szczegóły: [API.md](API.md), [ADR-0007](adr/0007-api-launcher-web.md).
-- Pozostałe pakiety (`core`, `memory`) to na razie zaślepki; mTLS/OIDC oraz runtime
-  egress/sandbox — Etap 6.
+- **Pakiet `husarz.plugins`** (Etap 12b/13b) — konektor MCP nad wstrzykiwalnym transportem:
+  odkrywanie (`tools/list`) i wywołanie (`tools/call`, deny-by-default). Szczegóły:
+  [WTYCZKI.md](WTYCZKI.md), [ADR-0015](adr/0015-konektor-mcp.md),
+  [ADR-0019](adr/0019-wywolanie-mcp-tools-call.md).
+- **Pakiet `husarz.memory`** (Etap 14/14b) — pamięć długoterminowa (RAG): wektorowy backend
+  za niezmienionym `RagBackend`, trwały magazyn SQLite i szyfrowanie at-rest.
+  Szczegóły: [ADR-0017](adr/0017-pamiec-dlugoterminowa-rag.md),
+  [ADR-0018](adr/0018-pamiec-trwala-at-rest.md).
+- **Moduł `husarz.ssrf`** (Etap 15) — wspólna warstwa anty-SSRF z **pinowaniem IP** dla
+  ścieżek wychodzących (`web`, wtyczki MCP): nazwa rozwiązywana raz, adres przypinany,
+  `Host`/SNI po nazwie. Domyka okno TOCTOU DNS-rebindingu. Szczegóły:
+  [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md), [ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md).
+- Pakiet `core` to na razie zaślepka; mTLS/OIDC oraz runtime egress/sandbox — Etap 6.
 
 ## Hierarchia konfiguracji (zaimplementowana)
 

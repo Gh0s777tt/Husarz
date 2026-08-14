@@ -79,11 +79,13 @@ Eksfiltracja jest więc wykrywalna w niemodyfikowalnym dzienniku, a treść nie 
   operatora: `enabled` + `endpoint` + `allow_call` + `call_allowlist` + egress-allowlist dla hostów
   publicznych), analogiczne do `web`/`shell`. Dla serwera loopback dane nie opuszczają hosta; dla
   hosta publicznego to egress ZA ZGODĄ operatora. Semantyka zdalna jest NIEZAUFANA.
-- (−) **TOCTOU DNS-rebinding** (ryzyko rezydualne z ADR-0015): endpoint jest walidowany i
+- (−) ~~**TOCTOU DNS-rebinding** (ryzyko rezydualne z ADR-0015): endpoint jest walidowany i
   rozwiązywany, ale IP NIE jest pinowane — transport rozwiązuje ponownie przy połączeniu. Dla
-  `call` promień rażenia jest większy niż dla `list` (POST `arguments`). Domknięcie (pinowanie IP,
-  łączenie po IP z oryginalnym `Host`) odłożone; do tego czasu ochroną jest blokada prywatnych IP
-  po rozwiązaniu nazwy (anty-rebinding do sieci wewnętrznej) i deny-all egress.
+  `call` promień rażenia jest większy niż dla `list` (POST `arguments`).~~
+  **DOMKNIĘTE w Etapie 15** — [ADR-0020](0020-pinowanie-ip-anty-ssrf.md): IP jest przypinane
+  PER WYWOŁANIE (konektor budowany per operację), połączenie idzie po literale IP z oryginalnym
+  `Host` i SNI. Blokada prywatnych IP po rozwiązaniu nazwy oraz deny-all egress pozostają
+  warstwami niższymi.
 
 ## Alternatywy odrzucone
 

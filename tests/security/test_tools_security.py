@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from husarz.config.schema import EgressConfig, SandboxConfig
+from husarz.ssrf import PinnedTarget
 from husarz.tools import (
     ExecResult,
     FileEditTool,
@@ -32,8 +33,8 @@ class _FakeFetcher:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def __call__(self, url: str, *, timeout: int, max_bytes: int) -> tuple[int, str]:
-        self.calls.append(url)
+    def __call__(self, target: PinnedTarget, *, timeout: int, max_bytes: int) -> tuple[int, str]:
+        self.calls.append(target.connect_url)
         return 200, "ok"
 
 

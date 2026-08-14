@@ -25,3 +25,13 @@ class EgressNotAllowedError(ToolError):
 
 class SandboxError(ToolError):
     """Błąd sandboxa (brak obrazu, niedostępny silnik, timeout konfiguracji)."""
+
+
+class FetchError(ToolError):
+    """Awaria transportu HTTP narzędzia ``web`` (DNS, TCP, TLS, timeout, limit rozmiaru).
+
+    Odpowiednik ``PluginTransportError`` po stronie wtyczek: pozwala narzędziu ``web``
+    zdegradować awarię sieci do ``ToolResult(ok=False)`` zamiast przepuścić surowy wyjątek
+    ``httpx`` przez pętlę agenta. Komunikat jest GENERYCZNY — nie echuje URL ani wnętrzności
+    biblioteki (nie wyciekają do audytu/API).
+    """

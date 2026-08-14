@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from husarz.config.schema import SecurityConfig, ToolConfig
 from husarz.config.secrets import SecretsProvider
+from husarz.ssrf import HostResolver
 from husarz.tools.base import Tool
 from husarz.tools.errors import ToolError
 from husarz.tools.rag import RagBackend
@@ -59,6 +60,9 @@ class BuildContext:
     # TYPE_CHECKING-only import: plugins NIE importuje tools (brak cyklu). Ostatnie pole
     # z domyślną (back-compat wywołań build_tools/BuildContext bez plugin_service).
     plugin_service: PluginService | None = None
+    # Resolver DNS dla pinowania IP (kind=web). None → stdlib ``default_resolve``.
+    # Wstrzykiwalny szew: testy klasyfikują hosty bez odpytywania sieci (ADR-0020).
+    resolve: HostResolver | None = None
 
 
 # Builder: z kontekstu buduje gotowe narzędzie.

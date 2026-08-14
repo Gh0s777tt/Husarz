@@ -43,8 +43,13 @@ def is_loopback_endpoint(endpoint: str | None) -> bool:
 
     Ściślejsze niż :func:`is_local_endpoint` (które dopuszcza LAN prywatny i ``.internal``).
     Używane przez startową bramkę airgap dla wtyczek MCP, by zgadzać się z runtime egress
-    konektora (``_validate_mcp_endpoint`` przepuszcza dla hostów spoza allowlisty WYŁĄCZNIE
-    loopback) — w profilu airgap dane wtyczki nie mogą opuścić TEGO hosta.
+    konektora (``husarz.plugins.client._endpoint_target`` przepuszcza dla hostów spoza
+    allowlisty WYŁĄCZNIE loopback) — w profilu airgap dane wtyczki nie mogą opuścić TEGO hosta.
+
+    Uwaga: dla ``*.localhost`` ta funkcja ufa samej NAZWIE (bramka startowa, bez DNS).
+    Runtime jest ostrzejszy — ``_endpoint_target`` rozwiązuje taką nazwę i wymaga, by KAŻDY
+    adres był loopbackiem (ADR-0020), więc konfiguracja przepuszczona tutaj i tak nie wyjdzie
+    poza host.
     """
     if endpoint is None:
         return True

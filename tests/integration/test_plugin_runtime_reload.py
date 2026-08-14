@@ -21,7 +21,7 @@ pytestmark = pytest.mark.integration
 
 
 class FakePluginTransport:
-    def __call__(self, url, headers, json, timeout, max_bytes):  # type: ignore[no-untyped-def]
+    def __call__(self, target, headers, json, timeout, max_bytes):  # type: ignore[no-untyped-def]
         return 200, {"jsonrpc": "2.0", "id": json.get("id"), "result": {"tools": []}}
 
 

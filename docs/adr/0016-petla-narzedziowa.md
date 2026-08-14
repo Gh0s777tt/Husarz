@@ -85,13 +85,15 @@ zachowanie sprzed Etapu 13; `create_app._build_stack` buduje pętlę (zależnoś
   niezaufanej treści z egress (`web`) to najwyższe ryzyko — minimalne allowlisty wymagane.
 - (−) `shell` z `python` = RCE-w-sandboxie: dla takich agentów właściwą granicą jest sandbox,
   nie allowlista. Włączać pętlę świadomie.
-- (−) DNS-rebinding narzędzia `web` (brak pinowania IP) — udokumentowany brak (jak Git),
-  ważniejszy teraz, gdy `web` jest model-sterowane.
+- (−) ~~DNS-rebinding narzędzia `web` (brak pinowania IP) — udokumentowany brak (jak Git),
+  ważniejszy teraz, gdy `web` jest model-sterowane.~~ **DOMKNIĘTE w Etapie 15** —
+  [ADR-0020](0020-pinowanie-ip-anty-ssrf.md).
 
 ## Poza zakresem (świadomie)
 
 Natywny `tool_calls` (adapter gated tagiem modelu); plugin `tools/call` (wymaga
 `McpClient.call_tool` + modelu autoryzacji per-remote-tool — Etap 13b/ADR-0017); ROE
 zintegrowane z pętlą dla Puszkarza; wiele akcji na turę / równoległość; budżety kosztowe
-per-narzędzie; pełne pinowanie IP dla `web`; korelacja `principal↔wywołanie` (dziś audyt
-wiąże agenta, nie użytkownika — follow-up przy wielodostępie).
+per-narzędzie; korelacja `principal↔wywołanie` (dziś audyt wiąże agenta, nie użytkownika —
+follow-up przy wielodostępie). Pinowanie IP dla `web` — zrealizowane w Etapie 15
+([ADR-0020](0020-pinowanie-ip-anty-ssrf.md)).
