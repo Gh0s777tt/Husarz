@@ -1,7 +1,7 @@
 """Testy rejestru providerów narzędzi (open/closed) — Etap 12a.
 
 Sprawdzają, że dispatch po ``kind`` przeszedł na ``ToolProviderRegistry`` bez zmiany
-zachowania: 6 wbudowanych rodzajów, nieznany rodzaj -> ToolError (zachowany komunikat),
+zachowania: 7 wbudowanych rodzajów, nieznany rodzaj -> ToolError (zachowany komunikat),
 oraz że nowy rodzaj można dodać BEZ zmian w rdzeniu (wstrzyknięty rejestr).
 """
 

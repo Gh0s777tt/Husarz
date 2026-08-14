@@ -182,7 +182,7 @@ def _inv_plugin_call(tool: Tool, args: dict[str, Any]) -> ToolResult:
 def default_action_registry(
     *, max_rag_add_bytes: int = _DEFAULT_MAX_RAG_ADD_BYTES
 ) -> ActionRegistry:
-    """Rejestr akcji dla 6 wbudowanych rodzajów narzędzi (świeża instancja)."""
+    """Rejestr akcji dla 7 wbudowanych rodzajów narzędzi (świeża instancja)."""
     registry = ActionRegistry()
     registry.register(
         "file_edit",

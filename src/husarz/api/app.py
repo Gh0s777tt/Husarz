@@ -208,6 +208,7 @@ def create_app(
     accounts: AccountService | None = None,
     git_service: GitService | None = None,
     plugin_service: PluginService | None = None,
+    plugin_service_factory: Callable[[HusarzConfig], PluginService | None] | None = None,
     chat_model: str | None = None,
     trusted_hosts: list[str] | None = None,
     secrets: SecretsProvider | None = None,
@@ -246,10 +247,19 @@ def create_app(
     role = api_role if api_role is not None else config.security.auth.api_role
     authz = rbac if rbac is not None else Rbac()
 
-    def _build_stack(cfg: HusarzConfig) -> tuple[SupportsComplete | None, Orchestrator | None]:
+    def _active_plugins(cfg: HusarzConfig) -> PluginService | None:
+        # Serwis wtyczek PRZEBUDOWANY z bieżącego configu (jak router) — inaczej nadpisanie
+        # runtime nie propagowałoby polityki konektora (allow_call/call_allowlist/enabled/egress),
+        # dając fail-open kill-switch. Bez fabryki: statyczny serwis (testy/back-compat).
+        return plugin_service_factory(cfg) if plugin_service_factory is not None else plugin_service
+
+    def _build_stack(
+        cfg: HusarzConfig,
+    ) -> tuple[SupportsComplete | None, Orchestrator | None, PluginService | None]:
+        plugins = _active_plugins(cfg)
         active = router_factory(cfg) if router_factory is not None else router
         if active is None:
-            return None, None
+            return None, None, plugins
         # Pętla narzędziowa: pierwszy egzekutor narzędzi. Zależności są leniwe
         # (executor/fetcher/rag budowane domyślnie), więc konstrukcja jest bezpieczna
         # bez Dockera — realne wykonanie potrzebują tylko agenci z opt-in (tool_loop_enabled).
@@ -259,20 +269,21 @@ def create_app(
             audit=audit_log,
             secrets=secrets,
             data_dir=cfg.platform.data_dir,
-            plugin_service=plugin_service,  # ten sam serwis co /api/plugins (jedno źródło prawdy)
+            plugin_service=plugins,  # ten sam (świeży) serwis co /api/plugins — jedno źródło prawdy
         )
         orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir, tool_loop=loop)
-        return active, orch
+        return active, orch, plugins
 
     def _resolve_chat_model(cfg: HusarzConfig) -> str:
         return chat_model or cfg.models.chat or cfg.models.default
 
-    initial_router, initial_orch = _build_stack(config)
+    initial_router, initial_orch, initial_plugins = _build_stack(config)
     state: dict[str, Any] = {
         "config": config,
         "config_dir": config_dir,
         "router": initial_router,
         "orchestrator": initial_orch,
+        "plugin_service": initial_plugins,
         "runtime_overrides": {},
         "orchestrations": 0,
         "chats": 0,
@@ -594,12 +605,13 @@ def create_app(
         # Przebuduj router+orkiestrator, by /api/orchestrate i /api/chat używały
         # NOWEJ konfiguracji (a nie starej sprzed nadpisania). Budowa poza zamkiem,
         # atomowa podmiana pod zamkiem — spójna para (config, router) dla /api/chat.
-        new_router, new_orch = _build_stack(merged)
+        new_router, new_orch, new_plugins = _build_stack(merged)
         with counter_lock:
             state["config"] = merged
             state["runtime_overrides"] = request.overrides
             state["router"] = new_router
             state["orchestrator"] = new_orch
+            state["plugin_service"] = new_plugins
         audit_log.record("api", "config.runtime_override", {"keys": sorted(request.overrides)})
         return ValidateResponse(ok=True, summary=_summary(merged))
 
@@ -793,9 +805,11 @@ def create_app(
     # --- Wtyczki (konektory MCP): lista + odkrywanie narzędzi (discover) ---
 
     def _require_plugins() -> PluginService:
-        if plugin_service is None:
+        # Czyta BIEŻĄCY serwis ze stanu (przebudowywany przy nadpisaniu runtime), nie domknięcie.
+        svc: PluginService | None = state.get("plugin_service")
+        if svc is None:
             raise HTTPException(status_code=404, detail="Wtyczki nie są włączone.")
-        return plugin_service
+        return svc
 
     @app.get(
         "/api/plugins",

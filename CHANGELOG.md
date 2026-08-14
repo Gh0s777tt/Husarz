@@ -22,6 +22,18 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   BuildContext`) — ten sam serwis co `/api/plugins`. Config: `example-mcp.yaml` (+pola call),
   `example-plugin.yaml` (NOWY, `kind: plugin`). Testy: +30 (unit/security/integracja, offline).
 
+### Poprawione (adwersaryjny przegląd Etapu 13b)
+- **Fail-open kill-switch (major)**: `plugin_service` był budowany raz na starcie i NIE przebudowywany
+  przy `POST /api/config/runtime`, więc zmiana polityki konektora (`enabled`/`allow_call`/
+  `call_allowlist`/egress) nie obowiązywała aż do restartu. Dodano `plugin_service_factory`
+  (jak `router_factory`) — serwis jest przebudowywany z nowego configu; `/api/plugins` i pętla
+  czytają świeży serwis ze stanu.
+- **Wyciek audytu (minor)**: `arguments` podane jako NIE-mapa wpadały do gałęzi generycznej
+  `_arg_summary` (surowe 200 znaków). Teraz `arguments` ZAWSZE logowane jako `{bytes, sha256}`.
+- **Cicha odmowa (minor)**: `call_allowlist` z białymi znakami nie dopasowywała się w runtime —
+  wpisy są przycinane przy walidacji (`field_validator`).
+- Docstringi „6 wbudowanych rodzajów" → „7" (dispatch, test). Testy: +3.
+
 ### Dodane (portal dokumentacji + PDF)
 - Portal dokumentacji **MkDocs Material** (`mkdocs.yml`, extra `husarz[docs]`) generowany z
   `docs/` — jedno źródło prawdy dla strony HTML i **interaktywnego PDF** (plugin `print-site`,

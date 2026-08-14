@@ -275,3 +275,22 @@ def test_cross_validate_plugin_tool_requires_existing_connector() -> None:
                 "plugin_x": ToolConfig(name="plugin_x", kind="plugin", config={"plugin": "brak"})
             },
         )
+
+
+def test_arg_summary_hashes_arguments_even_when_not_dict() -> None:
+    # M1 (regresja z przeglądu): 'arguments' ZAWSZE {bytes, sha256} — także gdy model poda
+    # STRING zamiast mapy (inaczej surowa treść wpadłaby do gałęzi generycznej i wyciekła).
+    from husarz.agents.tool_loop import _arg_summary
+
+    out = _arg_summary({"name": "search", "arguments": "SEKRET-PII-1234567890"})
+    assert set(out["arguments"]) == {"bytes", "sha256"}
+    assert "SEKRET" not in str(out["arguments"])  # surowa treść NIE trafia do audytu
+    assert set(_arg_summary({"arguments": {"q": "x"}})["arguments"]) == {"bytes", "sha256"}
+
+
+def test_call_allowlist_whitespace_normalized() -> None:
+    # Wpisy z białymi znakami przycinane → runtime dopasowuje czystą nazwę (brak cichej odmowy).
+    cfg = PluginConfig(
+        name="p", endpoint="http://127.0.0.1:8808", allow_call=True, call_allowlist=[" echo "]
+    )
+    assert cfg.call_allowlist == ["echo"]

@@ -66,8 +66,11 @@ Eksfiltracja jest więc wykrywalna w niemodyfikowalnym dzienniku, a treść nie 
   re-walidowany PER wywołanie (dziedziczone z ADR-0015); token tylko jako referencja, tylko w
   nagłówku `Authorization`; `arguments` przekazywane VERBATIM (modelowy `env:...` NIE rozwiązywany
   — sekret nie jest eksfiltrowany).
-- (+) `PluginService` pozostaje bezstanowy; jedno źródło prawdy z `/api/plugins` (ten sam serwis).
-  Rdzeń dispatchu/pętli bez zmian (open/closed): nowy kind = builder + `ActionSpec`.
+- (+) `PluginService` jest bezstanowy i **przebudowywany z bieżącego configu** przez
+  `plugin_service_factory` (jak router) przy `POST /api/config/runtime` — dzięki temu zmiana
+  polityki konektora (`enabled`/`allow_call`/`call_allowlist`/egress) realnie obowiązuje bez
+  restartu (kill-switch nie jest fail-open). `/api/plugins` i pętla czytają ten sam, świeży serwis
+  ze stanu (jedno źródło prawdy). Rdzeń dispatchu/pętli bez zmian (open/closed): kind = builder + `ActionSpec`.
 - (−) **`call` to pełnoprawny kanał EGRESS i ZDOLNOŚCI, POZA bramką ROE.** `call_allowlist`
   bramkuje KTÓRE narzędzie, egress KĄD, ale nic nie ogranicza CO model wsadzi w `arguments`
   ani co robi zdalne narzędzie. Agent (nie-Puszkarz) z wtyczką na host publiczny + `allow_call`

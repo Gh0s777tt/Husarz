@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from husarz.config.net import is_local_endpoint, is_loopback_endpoint
 
@@ -544,6 +544,13 @@ class PluginConfig(_StrictModel):
     allow_call: bool = False  # master-switch: bez tego 'call' jest odmawiane (list działa)
     call_allowlist: list[str] = Field(default_factory=list)  # dozwolone nazwy zdalnych narzędzi
     max_call_bytes: int = Field(default=64_000, ge=1)  # cap zserializowanych params PRZED egress
+
+    @field_validator("call_allowlist", mode="after")
+    @classmethod
+    def _strip_call_allowlist(cls, value: list[str]) -> list[str]:
+        # Normalizacja: runtime porównuje czystą nazwę narzędzia (name z koperty JSON-RPC),
+        # więc wpisy z otaczającymi białymi znakami dawałyby cichą odmowę — przycinamy je tu.
+        return [entry.strip() for entry in value]
 
     @model_validator(mode="after")
     def _validate(self) -> PluginConfig:

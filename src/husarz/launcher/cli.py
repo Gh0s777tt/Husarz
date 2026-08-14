@@ -230,6 +230,9 @@ def _cmd_up(args: argparse.Namespace) -> int:
         accounts=accounts,
         git_service=git_service,
         plugin_service=plugin_service,
+        # Fabryka: przy nadpisaniu runtime serwis wtyczek (polityka konektorów: allow_call/
+        # call_allowlist/enabled/egress) jest przebudowywany z NOWEGO configu — jak router.
+        plugin_service_factory=_build_plugins,
         router_factory=_router_factory,
         trusted_hosts=trusted,
         prompts_dir=prompts,

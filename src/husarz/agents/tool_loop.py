@@ -85,10 +85,15 @@ def _arg_summary(args: dict[str, Any]) -> dict[str, Any]:
             out["url"] = _summarize_url(value)
         elif key in ("content", "text") and isinstance(value, str):
             out[key] = {"bytes": len(value.encode("utf-8")), "sha256": _sha12(value)}
-        elif key == "arguments" and isinstance(value, dict):
+        elif key == "arguments":
             # plugin.call: 'arguments' to KANAŁ EGRESS (do max_call_bytes treści na serwer MCP).
-            # Logujemy rozmiar+skrót (jak content/text) — eksfiltracja wykrywalna, treść ukryta.
-            blob = json.dumps(value, sort_keys=True, ensure_ascii=False)
+            # ZAWSZE {rozmiar, skrót} — także gdy model poda zły typ (inaczej surowa treść wpadłaby
+            # do gałęzi generycznej i wyciekła do audytu). Eksfiltracja wykrywalna, treść ukryta.
+            blob = (
+                json.dumps(value, sort_keys=True, ensure_ascii=False)
+                if isinstance(value, dict)
+                else str(value)
+            )
             out[key] = {"bytes": len(blob.encode("utf-8")), "sha256": _sha12(blob)}
         elif key in ("command", "args", "extra_args") and isinstance(value, list):
             out[key] = " ".join(str(item) for item in value)[:200]
