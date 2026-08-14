@@ -1,4 +1,16 @@
-"""Wspólna warstwa anty-SSRF i pinowania IP dla ścieżek wychodzących (web, wtyczki MCP).
+"""Wspólna warstwa anty-SSRF i pinowania IP dla WSZYSTKICH ścieżek wychodzących.
+
+Używają jej: narzędzie ``web``, konektor MCP (``husarz.plugins``) i integracje Git
+(``husarz.git``). Różnią się WYŁĄCZNIE dwiema flagami polityki — ``allow_loopback``
+(cel na tej maszynie) i ``allow_lan`` (prywatna sieć operatora):
+
+===================  ================  ===========
+Ścieżka              allow_loopback    allow_lan
+===================  ================  ===========
+``web``              nie               nie
+konektor MCP         tak               nie
+integracje Git       nie               tak
+===================  ================  ===========
 
 Domyka okno TOCTOU DNS-rebindingu: nazwę rozwiązujemy DOKŁADNIE RAZ, sprawdzamy KAŻDY
 zwrócony adres wobec blokady (prywatne/link-local/metadane/zarezerwowane), PRZYPINAMY jeden
@@ -52,6 +64,25 @@ _EXTRA_BLOCKED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ..
     ipaddress.ip_network("64:ff9b:1::/48"),  # NAT64 local-use
 )
 
+# Sieci LAN operatora (RFC 1918 + ULA). Dopuszczane WYŁĄCZNIE dla ścieżek, które jawnie
+# o to proszą (``allow_lan``) — dziś tylko integracje Git, gdzie samodzielnie hostowany
+# GitLab pod adresem prywatnym jest legalnym scenariuszem suwerenności. Lista jest WĄSKA
+# celowo: ``ipaddress.is_private`` obejmuje także loopback, link-local (metadane chmury)
+# i zakresy testowe, więc „przepuść prywatne" nie może być realizowane tą właściwością.
+_LAN_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),  # ULA (fc00::/8 + fd00::/8)
+)
+
+
+def _in_networks(
+    ip: IpAddress, networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]
+) -> bool:
+    """True, gdy adres należy do którejkolwiek sieci z listy (porównanie tylko w tej rodzinie)."""
+    return any(ip in network for network in networks if ip.version == network.version)
+
 
 def parse_ip_literal(host: str) -> IpAddress | None:
     """Parsuje host jako literał IP; rozwija IPv4-mapped IPv6. Nazwa domenowa → ``None``.
@@ -75,30 +106,37 @@ def parse_ip_literal(host: str) -> IpAddress | None:
     return ip
 
 
-def is_blocked_address(ip: IpAddress, *, allow_loopback: bool) -> bool:
+def is_blocked_address(ip: IpAddress, *, allow_loopback: bool, allow_lan: bool = False) -> bool:
     """True dla adresu wewnętrznego/zarezerwowanego (SSRF).
 
     Blokuje prywatne (RFC 1918/ULA), link-local (169.254 — metadane chmury), zarezerwowane,
     multicast, ``0.0.0.0`` oraz jawną listę sieci, których stdlib nie klasyfikuje jako
     prywatne (:data:`_EXTRA_BLOCKED_NETWORKS` — m.in. CGNAT 100.64.0.0/10, IPv6 site-local
-    ``fec0::/10`` i tunele osadzające IPv4: 6to4/Teredo/NAT64). Loopback zależy od
-    ``allow_loopback`` (``web``: nie; konektor MCP: tak — lokalny serwer wtyczki jest
-    głównym przypadkiem użycia).
+    ``fec0::/10`` i tunele osadzające IPv4: 6to4/Teredo/NAT64).
+
+    Dwie osie luzowania, każda włączana JAWNIE przez wołającego:
+
+    - ``allow_loopback`` — 127.0.0.0/8 i ``::1``. Konektor MCP: tak (lokalny serwer wtyczki
+      to główny przypadek); ``web`` i Git: nie.
+    - ``allow_lan`` — WYŁĄCZNIE :data:`_LAN_NETWORKS` (RFC 1918 + ULA). Git: tak (samodzielnie
+      hostowany GitLab w sieci operatora); ``web`` i konektor MCP: nie. Ta oś NIE odblokowuje
+      loopbacku ani link-local — endpoint metadanych chmury pozostaje twardo zablokowany.
 
     Args:
         ip: sparsowany adres.
         allow_loopback: czy 127.0.0.0/8 oraz ``::1`` są dozwolone.
+        allow_lan: czy prywatna sieć operatora (RFC 1918/ULA) jest dozwolona.
 
     Returns:
         ``True``, gdy połączenie z tym adresem należy odrzucić.
     """
     if ip.is_loopback:
         return not allow_loopback
+    if allow_lan and _in_networks(ip, _LAN_NETWORKS):
+        return False
     if ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
         return True
-    return any(
-        ip in network for network in _EXTRA_BLOCKED_NETWORKS if ip.version == network.version
-    )
+    return _in_networks(ip, _EXTRA_BLOCKED_NETWORKS)
 
 
 def is_loopback_host(host: str) -> bool:
@@ -214,7 +252,9 @@ class PinnedTarget:
         return cls(connect_url=url, host_header=None, sni_hostname=None, pinned_ip=None)
 
 
-def resolve_and_pin(host: str, *, allow_loopback: bool, resolve: HostResolver) -> str:
+def resolve_and_pin(
+    host: str, *, allow_loopback: bool, resolve: HostResolver, allow_lan: bool = False
+) -> str:
     """Rozwiązuje nazwę RAZ, sprawdza KAŻDY adres i przypina pierwszy. Fail-closed.
 
     Pin (``addresses[0]``) jest zwracany DOPIERO po przejściu wszystkich adresów — mieszane
@@ -229,6 +269,7 @@ def resolve_and_pin(host: str, *, allow_loopback: bool, resolve: HostResolver) -
         host: nazwa domenowa (nie literał).
         allow_loopback: czy adresy loopback są dopuszczalne dla tej ścieżki.
         resolve: resolver hosta (wstrzykiwalny).
+        allow_lan: czy prywatna sieć operatora (RFC 1918/ULA) jest dopuszczalna.
 
     Returns:
         Przypięty adres IP jako łańcuch.
@@ -241,7 +282,7 @@ def resolve_and_pin(host: str, *, allow_loopback: bool, resolve: HostResolver) -
         raise EgressError(f"Nie udało się rozwiązać hosta '{host}' (fail-closed).")
     for addr in addresses:
         ip = parse_ip_literal(addr)
-        if ip is None or is_blocked_address(ip, allow_loopback=allow_loopback):
+        if ip is None or is_blocked_address(ip, allow_loopback=allow_loopback, allow_lan=allow_lan):
             raise EgressError(
                 f"Host '{host}' rozwiązuje się na adres wewnętrzny/metadanych — "
                 f"SSRF/DNS-rebinding."
@@ -297,7 +338,9 @@ def pin_fields(url: str, pinned_ip: str) -> PinnedTarget:
     return PinnedTarget(connect_url, host_header, sni_hostname, pinned_ip)
 
 
-def build_pinned_target(url: str, *, allow_loopback: bool, resolve: HostResolver) -> PinnedTarget:
+def build_pinned_target(
+    url: str, *, allow_loopback: bool, resolve: HostResolver, allow_lan: bool = False
+) -> PinnedTarget:
     """Kompozyt dla ścieżki wychodzącej: klasyfikuje host i zwraca cel połączenia.
 
     Kolejność: literał publiczny → wprost; literał wewnętrzny → odmowa; ``localhost`` → wprost
@@ -307,12 +350,15 @@ def build_pinned_target(url: str, *, allow_loopback: bool, resolve: HostResolver
     Adresy ROZWIĄZANEJ nazwy są klasyfikowane z ``allow_loopback=False`` niezależnie od
     argumentu: publiczna nazwa NIE MOŻE rozwiązać się na loopback (hardening przeciw zatrutemu
     DNS i przeciw wyciekowi tokenu do usługi lokalnej). Intencjonalny loopback idzie ścieżką
-    literału albo ``localhost`` — nie rozwiązaniem nazwy.
+    literału albo ``localhost`` — nie rozwiązaniem nazwy. ``allow_lan`` jest natomiast
+    przepuszczane do rozwiązanych adresów: samodzielnie hostowany serwer (Git) bywa
+    adresowany nazwą wskazującą na sieć operatora.
 
     Args:
         url: pełny URL docelowy.
         allow_loopback: czy ta ścieżka dopuszcza cel loopback (``web``: nie, wtyczka MCP: tak).
         resolve: resolver hosta (wstrzykiwalny).
+        allow_lan: czy ta ścieżka dopuszcza prywatną sieć operatora (Git: tak).
 
     Returns:
         ``PinnedTarget`` gotowy dla transportu.
@@ -328,7 +374,7 @@ def build_pinned_target(url: str, *, allow_loopback: bool, resolve: HostResolver
     safe_port(parts, url)  # odrzuć niepoprawny port ZANIM cokolwiek pójdzie do resolvera
     literal = parse_ip_literal(host)
     if literal is not None:
-        if is_blocked_address(literal, allow_loopback=allow_loopback):
+        if is_blocked_address(literal, allow_loopback=allow_loopback, allow_lan=allow_lan):
             raise EgressError(f"Host '{host}' to adres wewnętrzny/zarezerwowany (SSRF).")
         return PinnedTarget.direct(url)
     if is_loopback_host(host):
@@ -340,5 +386,5 @@ def build_pinned_target(url: str, *, allow_loopback: bool, resolve: HostResolver
         if not allow_loopback:
             raise EgressError(f"Host '{host}' to loopback (niedozwolony dla tej ścieżki).")
         return pin_fields(url, resolve_loopback_name(host, resolve=resolve))
-    pinned = resolve_and_pin(host, allow_loopback=False, resolve=resolve)
+    pinned = resolve_and_pin(host, allow_loopback=False, resolve=resolve, allow_lan=allow_lan)
     return pin_fields(url, pinned)

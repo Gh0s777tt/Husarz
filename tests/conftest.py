@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,26 @@ registry:
     model: test-model-2
     tags: [polish]
 """
+
+
+@pytest.fixture(autouse=True)
+def _no_real_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Twardy bezpiecznik: ŻADEN test nie odpytuje realnego DNS.
+
+    Od Etapu 15 ścieżki wychodzące (``web``, wtyczki MCP, Git) rozwiązują nazwy, żeby
+    przypiąć adres IP (ADR-0020). Bez tej blokady test z hostem `api.github.com` po cichu
+    wychodziłby do sieci — działałby lokalnie, a padał w CI bez WAN i w profilu airgap.
+    Resolver jest wstrzykiwalny wszędzie (``resolve=...``), więc poprawny test go podaje;
+    ten bezpiecznik zamienia „zapomniałem wstrzyknąć" w natychmiastowy, czytelny błąd.
+    """
+
+    def _blocked(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError(
+            "Test odpytał realny DNS (socket.getaddrinfo). Wstrzyknij resolver testowy "
+            "przez `resolve=...` (WebTool/PluginService/GitService/build_*)."
+        )
+
+    monkeypatch.setattr(socket, "getaddrinfo", _blocked)
 
 
 @pytest.fixture

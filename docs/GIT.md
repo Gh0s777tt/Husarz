@@ -11,8 +11,26 @@ nie modeli — spójna z zasadą „nie używamy cudzych API modeli".
   jest dopiero przy operacji, przez dostawcę sekretów.
 - **Bramka egress (deny-all)** — host dostawcy (`api.github.com`, `gitlab.com`) musi
   być na `security.egress.allowlist`, inaczej połączenie jest blokowane (`EgressError`
-  → HTTP 403). Suwerenność: bez jawnej zgody nie łączymy się z WAN.
-- **Transport HTTP wstrzykiwalny** — testy nie wykonują połączeń sieciowych.
+  → HTTP 403). Suwerenność: bez jawnej zgody nie łączymy się z WAN. Git **świadomie nie
+  korzysta** ze skrótu „endpoint lokalny jest zawsze wolny" (bezpiecznego dla lokalnego
+  Ollamy, nie dla ścieżki niosącej token z prawem zapisu).
+- **Anty-SSRF z pinowaniem IP** ([ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md)) — nazwa
+  `api_base` jest rozwiązywana **dokładnie raz**, każdy zwrócony adres sprawdzany, jeden
+  **przypinany**: transport łączy się z literałem IP, a nagłówek `Host` i weryfikacja
+  certyfikatu TLS (SNI) idą po oryginalnej nazwie. Zamyka to okno DNS-rebindingu, w którym
+  atakujący kontrolujący strefę allowlistowanej domeny przechwyciłby token PAT. Pin jest
+  świeży przy KAŻDEJ operacji (klient budowany per wywołanie).
+- **Polaryzacja adresów dla Git** — loopback (`127.0.0.1`, `localhost`, `*.localhost`)
+  jest **twardo zablokowany**, a **prywatna sieć operatora (RFC 1918/ULA) dozwolona**:
+  samodzielnie hostowany GitLab pod `https://git.firma.wewn/api/v4` to legalny scenariusz
+  suwerenności. Luz dotyczy WYŁĄCZNIE zakresów prywatnych — link-local (metadane chmury
+  `169.254.169.254`), CGNAT `100.64.0.0/10` i tunele osadzające IPv4 (6to4/Teredo/NAT64)
+  pozostają zablokowane.
+- **Transport HTTP wstrzykiwalny** — testy nie wykonują połączeń sieciowych (bezpiecznik
+  w `tests/conftest.py` blokuje `socket.getaddrinfo` dla CAŁEGO zestawu testów).
+  `trust_env=False` (zmienne `HTTP(S)_PROXY` nie przekierują przypiętego połączenia),
+  `follow_redirects=False`, twardy sufit rozmiaru odpowiedzi (anty-OOM) i deadline
+  wall-clock; komunikaty błędów transportu są generyczne (bez URL-a i wnętrzności httpx).
 - **RBAC** — `git:read` (lista/repozytoria), `git:write` (dodaj/usuń połączenie),
   `git:pr` (utwórz PR). Rola `operator`/`admin` je ma; `user`/`viewer` nie.
 

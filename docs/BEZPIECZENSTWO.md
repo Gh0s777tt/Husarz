@@ -331,9 +331,10 @@ Przegląd (3 wymiary, 11 findingów, 11 potwierdzonych — w tym blocker SSRF) i
 | Klient: pomijanie elementów nie-dict; audyt próby PR przed budową dostawcy | `test_list_repositories_skips_non_dict_items`, `test_pull_request_egress_block_is_audited` |
 | RBAC: user bez git:write/git:pr; 502 z odmowy dostawcy | `test_rbac_user_cannot_write_or_pr`, `test_provider_auth_error_maps_502` |
 
-**Ograniczenia:** `husarz.git` nadal używa własnej, węższej walidacji hosta — **nie** jest
-jeszcze na współdzielonej warstwie z pinowaniem IP (Etap 15, ADR-0020: pozycja „do zrobienia").
-Egzekwowanie egress to warstwa aplikacji (pełne wymuszenie: NetworkPolicy).
+**Ograniczenia:** ~~`husarz.git` nadal używa własnej, węższej walidacji hosta~~ —
+**DOMKNIĘTE w Etapie 15b**: Git korzysta ze współdzielonej warstwy `husarz.ssrf`
+z pinowaniem IP (ADR-0020). Egzekwowanie egress pozostaje kontrolą na poziomie aplikacji
+(pełne wymuszenie sieciowe: NetworkPolicy).
 
 ### Etap 11 — zdjęcia w czacie / modele wizyjne (data: 2026-08-13)
 
@@ -572,7 +573,40 @@ między nie. Pinowanie **zawęża** powierzchnię (usuwa drugie rozwiązanie) i 
 w ADR-0020.
 
 **Ograniczenia (świadome):** pin dotyczy JEDNEGO adresu — brak automatycznego przejścia na
-kolejny rekord A przy awarii (odtworzyłoby to zamykane okno). `husarz.git` nie jest jeszcze
-na wspólnej warstwie. Router modeli nie pinuje (endpointy modeli to typowo loopback/LAN
+kolejny rekord A przy awarii (odtworzyłoby to zamykane okno). Router modeli nie pinuje (endpointy modeli to typowo loopback/LAN
 operatora). Przekierowania pozostają wyłączone. Pełne wymuszenie sieciowe (NetworkPolicy
 deny-all, sandbox bez sieci) jest warstwą komplementarną, nie zastępczą.
+
+### Etap 15b — `husarz.git` na wspólnej warstwie anty-SSRF (data: 2026-08-14)
+
+**Zakres:** ostatnia ścieżka wychodząca poza wspólną warstwą. Stawka jest tu najwyższa
+z trzech: połączenie niesie **token PAT z prawem zapisu do repozytoriów**. Poprzednia,
+własna walidacja (`_is_internal_host`) blokowała tylko loopback/link-local/unspecified
+dla LITERAŁÓW i **nie rozwiązywała nazw wcale** — czyli nie było ani ochrony przed
+rebindingiem, ani pinu.
+
+| Niezmiennik | Test |
+|---|---|
+| Domena z allowlisty rozwiązana na metadane chmury → blok, token nigdzie nie leci | `test_git_domain_resolving_to_metadata_never_reaches_transport` |
+| Połączenie po PRZYPIĘTYM IP; `Host`/SNI po nazwie; token WYŁĄCZNIE w nagłówku | `test_git_connects_to_pinned_ip_and_keeps_token_in_header_only` |
+| `allow_lan`: samodzielnie hostowany GitLab (RFC 1918) działa, ale loopback/metadane/CGNAT/site-local nadal blokowane | `test_git_allows_self_hosted_lan_but_not_loopback_or_metadata` |
+| Loopback twardo zablokowany — także `localhost` i `*.localhost` (bez DNS) | `test_git_hard_blocks_loopback_endpoints` |
+| Pin ŚWIEŻY dla każdej operacji (klient budowany per wywołanie) | `test_git_pin_is_fresh_for_every_operation` |
+| Odmowa allowlisty egress NIE powoduje nawet zapytania DNS | `test_git_denied_egress_does_not_even_resolve_dns` |
+| Transport: `trust_env=False`, `follow_redirects=False`, cap rozmiaru + deadline, generyczny błąd | (`HttpxGitTransport`; parytet z MCP/`web`) |
+| **Cały zestaw testów jest offline** — `socket.getaddrinfo` zablokowany fixture'em autouse | `tests/conftest.py::_no_real_dns` |
+
+**Trzecia polaryzacja — dlaczego `allow_lan` tylko tutaj.** `web` jest sterowane przez
+model, a konektor MCP celuje w usługę na tej maszynie; żadne z nich nie ma powodu sięgać
+LAN operatora. Git przeciwnie: samodzielnie hostowany GitLab pod adresem RFC 1918 to
+podstawowy scenariusz suwerenności, a zablokowanie go wypychałoby operatora do chmury —
+odwrotnie do celu projektu. Luz jest WĄSKI i jawny (`_LAN_NETWORKS` = RFC 1918 + ULA);
+świadomie **nie** realizujemy go przez `ipaddress.is_private`, bo ta właściwość obejmuje
+także loopback, link-local (metadane chmury) i zakresy testowe — „przepuść prywatne"
+odblokowałoby wtedy dokładnie to, co ma zostać zamknięte.
+
+**Ograniczenia:** ryzyko rezydualne `allow_lan` jest realne i świadome — operator, który
+doda do `security.egress.allowlist` domenę kontrolowaną przez atakującego, może zostać
+przekierowany w obręb własnej sieci (nie do metadanych chmury). Barierą pozostaje sama
+allowlista (jawna decyzja operatora) oraz to, że `api_base` pochodzi z konfiguracji,
+nie od modelu.

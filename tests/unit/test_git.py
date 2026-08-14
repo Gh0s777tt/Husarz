@@ -21,6 +21,7 @@ from husarz.git import (
 )
 from husarz.git.errors import GitAuthError, GitConnectionError, GitError
 from husarz.router.egress import EgressError
+from husarz.ssrf import PinnedTarget
 
 pytestmark = pytest.mark.unit
 
@@ -32,12 +33,18 @@ class FakeTransport:
         self._responses = responses
         self.calls: list[tuple[str, str, Any]] = []
 
-    def __call__(self, method, url, headers, json, timeout):  # noqa: ANN001
+    def __call__(self, method, target, headers, json, timeout):  # noqa: ANN001
+        url = target.connect_url
         self.calls.append((method, url, json))
         for (m, frag), resp in self._responses.items():
             if m == method and frag in url:
                 return resp
         return 404, {"message": "not found"}
+
+
+def _fake_resolve(host: str) -> list[str]:
+    """Resolver testowy: każda nazwa → adres publiczny (żaden test nie odpytuje DNS)."""
+    return ["140.82.121.6"]
 
 
 class FakeSecrets:
@@ -67,7 +74,9 @@ def test_github_list_repositories() -> None:
             )
         }
     )
-    repos = GitHubProvider("https://api.github.com", "tok", t).list_repositories()
+    repos = GitHubProvider(
+        PinnedTarget.direct("https://api.github.com"), "tok", t
+    ).list_repositories()
     assert repos[0].full_name == "acme/app"
     assert repos[0].private is True
     assert t.calls[0][2] is None  # GET bez body
@@ -77,9 +86,9 @@ def test_github_create_pull_request() -> None:
     t = FakeTransport(
         {("POST", "/repos/acme/app/pulls"): (201, {"number": 7, "html_url": "u", "title": "Fix"})}
     )
-    pr = GitHubProvider("https://api.github.com", "tok", t).create_pull_request(
-        "acme/app", title="Fix", head="feat", base="main", body="opis"
-    )
+    pr = GitHubProvider(
+        PinnedTarget.direct("https://api.github.com"), "tok", t
+    ).create_pull_request("acme/app", title="Fix", head="feat", base="main", body="opis")
     assert pr.number == 7
     assert t.calls[0][2]["head"] == "feat"  # payload przekazany
 
@@ -87,13 +96,13 @@ def test_github_create_pull_request() -> None:
 def test_github_auth_error() -> None:
     t = FakeTransport({("GET", "/user/repos"): (401, {"message": "Bad credentials"})})
     with pytest.raises(GitAuthError):
-        GitHubProvider("https://api.github.com", "zły", t).list_repositories()
+        GitHubProvider(PinnedTarget.direct("https://api.github.com"), "zły", t).list_repositories()
 
 
 def test_github_error_status() -> None:
     t = FakeTransport({("POST", "/pulls"): (422, {"message": "PR już istnieje"})})
     with pytest.raises(GitError):
-        GitHubProvider("https://api.github.com", "t", t).create_pull_request(
+        GitHubProvider(PinnedTarget.direct("https://api.github.com"), "t", t).create_pull_request(
             "a/b", title="x", head="h", base="m"
         )
 
@@ -115,7 +124,7 @@ def test_gitlab_list_and_create_mr_urlencodes_path() -> None:
             ("POST", "/merge_requests"): (201, {"iid": 3, "web_url": "w3", "title": "Fix"}),
         }
     )
-    provider = GitLabProvider("https://gitlab.com/api/v4", "tok", t)
+    provider = GitLabProvider(PinnedTarget.direct("https://gitlab.com/api/v4"), "tok", t)
     assert provider.list_repositories()[0].full_name == "grp/app"
     pr = provider.create_pull_request("grp/app", title="Fix", head="feat", base="main")
     assert pr.number == 3
@@ -137,12 +146,16 @@ def _conn() -> GitConnection:
 
 def test_build_provider_egress_denied_by_default() -> None:
     with pytest.raises(EgressError):
-        build_provider(_conn(), "tok", EgressConfig())  # deny-all, brak allowlisty
+        build_provider(
+            _conn(), "tok", EgressConfig(), resolve=_fake_resolve
+        )  # deny-all, brak allowlisty
 
 
 def test_build_provider_egress_allowed_when_allowlisted() -> None:
     egress = EgressConfig(default_policy=EgressPolicy.DENY, allowlist=["api.github.com"])
-    provider = build_provider(_conn(), "tok", egress, transport=FakeTransport({}))
+    provider = build_provider(
+        _conn(), "tok", egress, transport=FakeTransport({}), resolve=_fake_resolve
+    )
     assert isinstance(provider, GitHubProvider)
 
 
@@ -157,20 +170,24 @@ def test_build_provider_blocks_internal_host_ssrf() -> None:
     allow = EgressConfig(default_policy=EgressPolicy.ALLOW)
     for host in ("https://169.254.169.254", "https://127.0.0.1", "https://localhost"):
         with pytest.raises(EgressError):
-            build_provider(_conn_with(host), "tok", allow)
+            build_provider(_conn_with(host), "tok", allow, resolve=_fake_resolve)
 
 
 def test_build_provider_rejects_non_https_and_userinfo() -> None:
     allow = EgressConfig(default_policy=EgressPolicy.ALLOW)
     with pytest.raises(GitError):
-        build_provider(_conn_with("http://api.github.com"), "tok", allow)  # nie-https
+        build_provider(
+            _conn_with("http://api.github.com"), "tok", allow, resolve=_fake_resolve
+        )  # nie-https
     with pytest.raises(GitError):
-        build_provider(_conn_with("https://user@api.github.com"), "tok", allow)  # userinfo
+        build_provider(
+            _conn_with("https://user@api.github.com"), "tok", allow, resolve=_fake_resolve
+        )  # userinfo
 
 
 def test_github_create_pr_encodes_repo_path() -> None:
     t = FakeTransport({("POST", "/pulls"): (201, {"number": 1, "html_url": "u", "title": "x"})})
-    GitHubProvider("https://api.github.com", "tok", t).create_pull_request(
+    GitHubProvider(PinnedTarget.direct("https://api.github.com"), "tok", t).create_pull_request(
         "acme/a b", title="x", head="h", base="m"
     )
     assert "acme/a%20b/pulls" in t.calls[0][1]  # spacja zakodowana, '/' zachowany
@@ -194,7 +211,9 @@ def test_list_repositories_skips_non_dict_items() -> None:
             )
         }
     )
-    repos = GitHubProvider("https://api.github.com", "tok", t).list_repositories()
+    repos = GitHubProvider(
+        PinnedTarget.direct("https://api.github.com"), "tok", t
+    ).list_repositories()
     assert [r.full_name for r in repos] == ["a/b"]
 
 
@@ -235,6 +254,7 @@ def test_service_provider_for_resolves_token() -> None:
         secrets=FakeSecrets("realny-token"),
         egress=EgressConfig(default_policy=EgressPolicy.ALLOW),
         transport=FakeTransport({("GET", "/user/repos"): (200, [])}),
+        resolve=_fake_resolve,
     )
     svc.add(_conn())
     assert svc.provider_for("gh").list_repositories() == []

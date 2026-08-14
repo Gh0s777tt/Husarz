@@ -21,11 +21,16 @@ class FakeTransport:
     def __init__(self, responses: dict[tuple[str, str], tuple[int, Any]]) -> None:
         self._responses = responses
 
-    def __call__(self, method, url, headers, json, timeout):  # noqa: ANN001
+    def __call__(self, method, target, headers, json, timeout):  # noqa: ANN001
         for (m, frag), resp in self._responses.items():
-            if m == method and frag in url:
+            if m == method and frag in target.connect_url:
                 return resp
         return 404, {"message": "not found"}
+
+
+def _fake_resolve(host: str) -> list[str]:
+    """Resolver testowy — testy API nie odpytują DNS."""
+    return ["140.82.121.6"]
 
 
 class FakeSecrets:
@@ -53,6 +58,7 @@ def _live_service(responses: dict[tuple[str, str], tuple[int, Any]]) -> GitServi
         secrets=FakeSecrets(),
         egress=EgressConfig(default_policy=EgressPolicy.ALLOW),
         transport=FakeTransport(responses),
+        resolve=_fake_resolve,
     )
     svc.add(_github_conn())
     return svc
@@ -211,6 +217,7 @@ def test_gitlab_merge_request_via_api(repo_config_dir: Path) -> None:
         transport=FakeTransport(
             {("POST", "/merge_requests"): (201, {"iid": 5, "web_url": "w5", "title": "Fix"})}
         ),
+        resolve=_fake_resolve,
     )
     svc.add(
         GitConnection(

@@ -41,17 +41,28 @@ class RecordingTransport:
         return 200, {"result": {"tools": []}}
 
 
+def _resolves_to(*ips: str):  # noqa: ANN202 - fabryka fałszywego resolvera (bez DNS)
+    return lambda host: list(ips)
+
+
 @pytest.mark.parametrize(
     "endpoint",
     [
         "http://127.0.0.1:8808/mcp",
         "http://localhost:9000",
         "http://[::1]:8808",
-        "http://sub.localhost:8808",
     ],
 )
 def test_loopback_allowed(endpoint: str) -> None:
-    _endpoint_target(endpoint, _DENY)  # nie rzuca
+    _endpoint_target(endpoint, _DENY)  # nie rzuca — literał/`localhost`, bez DNS
+
+
+def test_localhost_suffix_allowed_only_after_dns_proof() -> None:
+    """`*.localhost` przechodzi WYŁĄCZNIE, gdy DNS potwierdzi loopback (ADR-0020)."""
+    target = _endpoint_target("http://sub.localhost:8808", _DENY, resolve=_resolves_to("127.0.0.1"))
+    assert target.connect_url == "http://127.0.0.1:8808"
+    with pytest.raises(EgressError, match="udaje loopback"):
+        _endpoint_target("http://sub.localhost:8808", _DENY, resolve=_resolves_to("93.184.216.34"))
 
 
 @pytest.mark.parametrize(
@@ -69,10 +80,6 @@ def test_loopback_allowed(endpoint: str) -> None:
 def test_internal_and_metadata_hard_blocked(endpoint: str) -> None:
     with pytest.raises(EgressError):
         _endpoint_target(endpoint, _DENY)
-
-
-def _resolves_to(*ips: str):  # noqa: ANN202 - fabryka fałszywego resolvera (bez DNS)
-    return lambda host: list(ips)
 
 
 def test_public_http_rejected_requires_https() -> None:

@@ -2,8 +2,9 @@
 
 - Status: przyjęty
 - Data: 2026-08-14
-- Etap: 15
-- Domyka ograniczenia z: [ADR-0015](0015-konektor-mcp.md) (konektor MCP),
+- Etap: 15 (rozszerzony w 15b o `husarz.git`)
+- Domyka ograniczenia z: [ADR-0011](0011-integracje-git.md) (integracje Git),
+  [ADR-0015](0015-konektor-mcp.md) (konektor MCP),
   [ADR-0016](0016-petla-narzedziowa.md) (narzędzie `web` w pętli),
   [ADR-0019](0019-wywolanie-mcp-tools-call.md) (`tools/call`)
 
@@ -35,13 +36,19 @@ zakresem — czyli z gwarancją, że kolejna poprawka trafi tylko do jednej kopi
 ### 1. Jeden moduł: `husarz.ssrf`
 
 Klasyfikacja hostów i pinowanie żyją w jednym module bez zależności od `httpx`
-(czysty stdlib → w pełni testowalny offline). Ścieżki wychodzące parametryzują go
-jedną flagą `allow_loopback`, bo różnią się **tylko** stosunkiem do loopbacku:
+(czysty stdlib → w pełni testowalny offline). Ścieżki wychodzące parametryzują go **dwiema
+flagami polityki** — cała reszta logiki jest wspólna:
 
-| Ścieżka | `allow_loopback` | Uzasadnienie |
-|---|---|---|
-| narzędzie `web` | `False` | model steruje URL-em — nie może sięgnąć usług operatora |
-| konektor MCP | `True` | lokalny serwer wtyczki to GŁÓWNY przypadek użycia |
+| Ścieżka | `allow_loopback` | `allow_lan` | Uzasadnienie |
+|---|---|---|---|
+| narzędzie `web` | `False` | `False` | model steruje URL-em — nie może sięgnąć ani usług operatora, ani jego LAN |
+| konektor MCP | `True` | `False` | lokalny serwer wtyczki to GŁÓWNY przypadek; LAN nie jest potrzebny |
+| integracje Git | `False` | `True` | Git nigdy nie jest usługą lokalną Husarza, ale samodzielnie hostowany GitLab pod RFC 1918 to podstawowy scenariusz suwerenności |
+
+`allow_lan` obejmuje WYŁĄCZNIE wąską listę `_LAN_NETWORKS` (RFC 1918 + ULA). Świadomie
+**nie** realizujemy go przez `ipaddress.is_private`: ta właściwość obejmuje także loopback,
+link-local (metadane chmury) i zakresy testowe, więc „przepuść prywatne" odblokowałoby
+dokładnie to, co ma pozostać zamknięte.
 
 ### 2. Rozwiąż RAZ → sprawdź KAŻDY adres → PRZYPNIJ
 
@@ -135,8 +142,9 @@ działającej na maszynie operatora. Intencjonalny loopback konfiguruje się lit
 
 ## Konsekwencje
 
-- (+) Okno TOCTOU DNS-rebindingu **zamknięte** dla `web` i wtyczek MCP — ryzyko rezydualne
-  ciągnące się od ADR-0015/0016/0019 jest domknięte, nie tylko udokumentowane.
+- (+) Okno TOCTOU DNS-rebindingu **zamknięte** dla wszystkich trzech ścieżek wychodzących
+  (`web`, wtyczki MCP, Git) — ryzyko rezydualne ciągnące się od ADR-0011/0015/0016/0019
+  jest domknięte, nie tylko udokumentowane.
 - (+) Jedna implementacja zamiast trzech kopii; nowa ścieżka wychodząca = jedno wywołanie
   `build_pinned_target`.
 - (+) Domknięta luka w `web`: loopback **przez nazwę** (`http://localhost:.../admin`) był
@@ -156,8 +164,13 @@ działającej na maszynie operatora. Intencjonalny loopback konfiguruje się lit
 - (−) Pin dotyczy **jednego** adresu — brak automatycznego przejścia na kolejny rekord A
   przy awarii. Świadome: „spróbuj następnego" wymagałoby drugiego wyboru w czasie
   połączenia, czyli odtworzenia okna, które właśnie zamykamy.
-- (−) `git/client.py` (ADR-0011) NIE jest jeszcze na tej warstwie — hosty dostawców Git
-  są sprawdzane po staremu (patrz „Do zrobienia").
+- (+) `git/client.py` (ADR-0011) korzysta z tej warstwy od Etapu 15b — poprzednia
+  walidacja sprawdzała tylko LITERAŁY i nie rozwiązywała nazw, więc ścieżka niosąca token
+  z prawem zapisu do repozytoriów nie miała żadnej ochrony przed rebindingiem.
+- (−) `allow_lan` to świadome ryzyko rezydualne: operator, który wpuści na allowlistę
+  egress domenę kontrolowaną przez atakującego, może zostać przekierowany w obręb własnej
+  sieci (nie do metadanych chmury). Barierą pozostaje jawna allowlista i to, że `api_base`
+  pochodzi z konfiguracji, nie od modelu.
 
 ## Rozważone alternatywy
 
@@ -179,7 +192,8 @@ allowlistowanej domeny od egressu do metadanych.
 
 ## Do zrobienia (świadomie poza zakresem)
 
-- `husarz.git` na wspólnej warstwie (dziś: własna, węższa walidacja hosta).
+- ~~`husarz.git` na wspólnej warstwie~~ — **zrealizowane** (Etap 15b): Git korzysta z tej
+  samej warstwy z `allow_lan=True`; poprzednia walidacja nie rozwiązywała nazw wcale.
 - Pinowanie dla routera modeli (dziś endpointy modeli to typowo loopback/LAN operatora).
 - Wsparcie dla przekierowań (obecnie `follow_redirects=False` — przekierowanie omijałoby
   walidację i pin; ewentualna obsługa musiałaby przypinać KAŻDY skok osobno).

@@ -13,6 +13,7 @@ from husarz.git.client import GitProvider, GitTransport, build_provider
 from husarz.git.connections import GitConnectionStore, InMemoryGitConnectionStore
 from husarz.git.errors import GitAuthError, GitConnectionError
 from husarz.git.models import GitConnection
+from husarz.ssrf import HostResolver
 
 
 class GitService:
@@ -25,6 +26,7 @@ class GitService:
         secrets: SecretsProvider | None = None,
         egress: EgressConfig | None = None,
         transport: GitTransport | None = None,
+        resolve: HostResolver | None = None,
     ) -> None:
         self._store: GitConnectionStore = (
             store if store is not None else InMemoryGitConnectionStore()
@@ -32,6 +34,7 @@ class GitService:
         self._secrets = secrets if secrets is not None else NullSecretsProvider()
         self._egress = egress if egress is not None else EgressConfig()
         self._transport = transport
+        self._resolve = resolve
 
     def add(self, conn: GitConnection) -> None:
         """Dodaje połączenie (metadane + referencja tokenu; bez sekretu)."""
@@ -67,4 +70,10 @@ class GitService:
                 f"Nie udało się rozwiązać tokenu połączenia '{name}' "
                 f"(token_ref='{conn.token_ref}')."
             )
-        return build_provider(conn, token.strip(), self._egress, transport=self._transport)
+        return build_provider(
+            conn,
+            token.strip(),
+            self._egress,
+            transport=self._transport,
+            resolve=self._resolve,
+        )

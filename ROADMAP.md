@@ -123,8 +123,20 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   brak wycieku rozwiązanego adresu do modelu, chunkowany odczyt, walidacja schematu, 3xx MCP.
 - ✅ Testy: +118 (offline), w tym pierwsze testy REALNYCH transportów httpx (`MockTransport`).
   Docs: ADR-0020, BEZPIECZENSTWO/NARZEDZIA/WTYCZKI/ARCHITEKTURA.
-- ⬜ `husarz.git` na wspólnej warstwie; pinowanie dla routera modeli; obsługa przekierowań
-  (dziś `follow_redirects=False` — przekierowanie omijałoby walidację i pin).
+- ⬜ Pinowanie dla routera modeli; obsługa przekierowań (dziś `follow_redirects=False` —
+  przekierowanie omijałoby walidację i pin).
+
+## ✅ Etap 15b — `husarz.git` na wspólnej warstwie anty-SSRF
+- ✅ Trzecia (ostatnia) ścieżka wychodząca przeszła na `husarz.ssrf`. Poprzednia walidacja
+  sprawdzała tylko LITERAŁY i NIE rozwiązywała nazw — ścieżka niosąca token PAT z prawem
+  zapisu do repozytoriów nie miała żadnej ochrony przed rebindingiem ani pinu.
+- ✅ Nowa oś polityki `allow_lan` (obok `allow_loopback`): Git blokuje loopback, ale dopuszcza
+  prywatną sieć operatora (samodzielnie hostowany GitLab = scenariusz suwerenności). Luz WĄSKI
+  i jawny (RFC 1918 + ULA), NIE przez `ipaddress.is_private` (obejmuje loopback/link-local).
+- ✅ `HttpxGitTransport` z parytetem: `trust_env=False`, cap rozmiaru + deadline, generyczny
+  błąd (dotąd echował URL i wnętrzności httpx do audytu/API).
+- ✅ Bezpiecznik offline w `tests/conftest.py` (blokada `socket.getaddrinfo`) — wykrył
+  5 testów po cichu wychodzących na sieć. Testy: +8. Docs: ADR-0020, GIT.md, BEZPIECZENSTWO.md.
 
 ## ✅ Etap 13 — Pętla narzędziowa (function-calling)
 - ✅ Pętla ReAct (`agents/tool_loop.py`) — pierwszy egzekutor narzędzi; prompt-based

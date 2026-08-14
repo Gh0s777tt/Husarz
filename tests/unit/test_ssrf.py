@@ -404,6 +404,7 @@ def test_production_clients_ignore_environment_proxy_settings(
     """``trust_env=False`` jest OBOWIĄZKOWE: z domyślnym ``True`` zmienne ``HTTPS_PROXY``
     (oraz ``SSLKEYLOGFILE``) przekierowałyby przypięte połączenie przez cudzy serwer —
     czyli obeszłyby całą warstwę pinowania i deny-all egress."""
+    from husarz.git.client import HttpxGitTransport
     from husarz.plugins.client import HttpxPluginTransport
     from husarz.tools.web import HttpxFetcher
 
@@ -412,9 +413,25 @@ def test_production_clients_ignore_environment_proxy_settings(
 
     HttpxFetcher()(target, timeout=5, max_bytes=1000)
     HttpxPluginTransport()(target, {}, {"jsonrpc": "2.0", "id": 1}, 5, 1000)
+    HttpxGitTransport()("GET", target, {}, None, 5)
 
-    assert len(httpx_client_kwargs) == 2
+    assert len(httpx_client_kwargs) == 3
     for kwargs in httpx_client_kwargs:
         assert kwargs["trust_env"] is False
         assert kwargs["verify"] is True
         assert kwargs["follow_redirects"] is False
+
+
+def test_httpx_git_transport_pins_ip_and_keeps_host_sni_and_bearer(
+    httpx_recorder: dict[str, Any],
+) -> None:
+    """Ścieżka Git niesie token PAT z prawem ZAPISU — pin nie może degradować weryfikacji certu."""
+    from husarz.git.client import HttpxGitTransport
+
+    target = pin_fields("https://api.github.com/user/repos", "140.82.121.6")
+    status, _ = HttpxGitTransport()("GET", target, {"Authorization": "Bearer sekret-pat"}, None, 5)
+    assert status == 200
+    assert httpx_recorder["url"] == "https://140.82.121.6/user/repos"
+    assert httpx_recorder["host"] == "api.github.com"
+    assert httpx_recorder["sni"] == "api.github.com"
+    assert httpx_recorder["authorization"] == "Bearer sekret-pat"

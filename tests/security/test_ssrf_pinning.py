@@ -20,6 +20,8 @@ from typing import Any
 import pytest
 
 from husarz.config.schema import EgressConfig, EgressPolicy, PluginConfig
+from husarz.git import GitService
+from husarz.git.models import GitConnection, GitProviderKind
 from husarz.plugins import PluginService
 from husarz.router.egress import EgressError
 from husarz.ssrf import PinnedTarget
@@ -333,9 +335,123 @@ def test_denial_message_does_not_leak_resolved_internal_address() -> None:
     assert "10.11.12.13" not in result.error
 
 
-def test_resolver_unicode_error_fails_closed_not_crash() -> None:
-    """`getaddrinfo` rzuca `UnicodeError` (kodek idna) dla etykiety >63 znaków — to NIE
-    `OSError`, więc bez jawnej obsługi wyjątek wywróciłby pętlę zamiast dać odmowę."""
+def test_resolver_unicode_error_fails_closed_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`getaddrinfo` koduje nazwę kodekiem `idna` i dla etykiety >63 znaków rzuca
+    `UnicodeEncodeError` — to NIE `OSError`, więc bez jawnej obsługi wyjątek uciekłby
+    poza bramkę i wywrócił pętlę zamiast dać odmowę (fail-open na wyjątek)."""
+    import socket as _socket
+
     from husarz.ssrf import default_resolve
 
+    def _idna_boom(*args: Any, **kwargs: Any) -> Any:
+        raise UnicodeEncodeError("idna", "x", 0, 1, "label empty or too long")
+
+    monkeypatch.setattr(_socket, "getaddrinfo", _idna_boom)
     assert default_resolve("a" * 64 + ".example.invalid") == []
+
+
+# --- Integracje Git (Etap 15b) ---------------------------------------------
+# Ścieżka Git niesie token z prawem ZAPISU do repozytoriów, więc jej polaryzacja jest
+# trzecia: loopback ZABRONIONY (jak `web`), ale prywatna sieć operatora DOZWOLONA
+# (samodzielnie hostowany GitLab to legalny scenariusz suwerenności).
+
+
+class RecordingGitTransport:
+    """Transport testowy dla Git — zapisuje cele i nagłówki; wywołanie = „poszło na sieć"."""
+
+    def __init__(self) -> None:
+        self.targets: list[PinnedTarget] = []
+        self.headers: list[dict[str, str]] = []
+
+    def __call__(
+        self,
+        method: str,
+        target: PinnedTarget,
+        headers: dict[str, str],
+        json: dict[str, Any] | None,
+        timeout: int,
+    ) -> tuple[int, Any]:
+        self.targets.append(target)
+        self.headers.append(dict(headers))
+        return 200, []
+
+
+def _git_service(
+    transport: RecordingGitTransport, resolver: CountingResolver, api_base: str
+) -> GitService:
+    service = GitService(
+        secrets=DictSecrets({"env:GH": "sekret-pat"}),
+        egress=EgressConfig(allowlist=["github.com", "git.firma.pl"]),
+        transport=transport,
+        resolve=resolver,
+    )
+    service.add(
+        GitConnection(
+            name="gh", provider=GitProviderKind.GITHUB, api_base=api_base, token_ref="env:GH"
+        )
+    )
+    return service
+
+
+def test_git_domain_resolving_to_metadata_never_reaches_transport() -> None:
+    """Domena z allowlisty rozwiązana na metadane chmury — token PAT nigdzie nie leci."""
+    transport, resolver = RecordingGitTransport(), CountingResolver(_METADATA)
+    service = _git_service(transport, resolver, "https://api.github.com")
+    with pytest.raises(EgressError):
+        service.provider_for("gh").list_repositories()
+    assert transport.targets == []
+
+
+def test_git_connects_to_pinned_ip_and_keeps_token_in_header_only() -> None:
+    transport, resolver = RecordingGitTransport(), CountingResolver(_PUBLIC)
+    _git_service(transport, resolver, "https://api.github.com").provider_for(
+        "gh"
+    ).list_repositories()
+    target = transport.targets[0]
+    assert target.connect_url == f"https://{_PUBLIC}/user/repos?per_page=100&sort=updated"
+    assert target.host_header == "api.github.com"  # Host po nazwie
+    assert target.sni_hostname == "api.github.com"  # certyfikat weryfikowany po nazwie
+    assert "sekret-pat" not in target.connect_url
+    assert transport.headers[0]["Authorization"] == "Bearer sekret-pat"
+
+
+def test_git_allows_self_hosted_lan_but_not_loopback_or_metadata() -> None:
+    """`allow_lan` dotyczy WYŁĄCZNIE RFC 1918/ULA — nie luzuje loopbacku ani link-local."""
+    transport, resolver = RecordingGitTransport(), CountingResolver("10.10.0.7")
+    _git_service(transport, resolver, "https://git.firma.pl").provider_for("gh").list_repositories()
+    assert transport.targets[0].connect_url.startswith("https://10.10.0.7/")
+
+    for blocked in (_METADATA, "127.0.0.1", "100.100.100.200", "fec0::1"):
+        t2, r2 = RecordingGitTransport(), CountingResolver(blocked)
+        with pytest.raises(EgressError):
+            _git_service(t2, r2, "https://git.firma.pl").provider_for("gh").list_repositories()
+        assert t2.targets == []
+
+
+@pytest.mark.parametrize(
+    "api_base",
+    ["https://localhost/api", "https://127.0.0.1/api", "https://git.localhost/api"],
+)
+def test_git_hard_blocks_loopback_endpoints(api_base: str) -> None:
+    """Git NIGDY nie łączy się z loopbackiem — także przez nazwę `localhost`/`*.localhost`."""
+    transport, resolver = RecordingGitTransport(), CountingResolver("127.0.0.1")
+    service = _git_service(transport, resolver, api_base)
+    with pytest.raises(EgressError, match="loopback"):
+        service.provider_for("gh").list_repositories()
+    assert transport.targets == [] and resolver.calls == []
+
+
+def test_git_pin_is_fresh_for_every_operation() -> None:
+    transport, resolver = RecordingGitTransport(), CountingResolver(_PUBLIC)
+    service = _git_service(transport, resolver, "https://api.github.com")
+    service.provider_for("gh").list_repositories()
+    service.provider_for("gh").list_repositories()
+    assert resolver.calls == ["api.github.com", "api.github.com"]
+
+
+def test_git_denied_egress_does_not_even_resolve_dns() -> None:
+    transport, resolver = RecordingGitTransport(), CountingResolver(_PUBLIC)
+    service = _git_service(transport, resolver, "https://api.obcy.net")
+    with pytest.raises(EgressError, match="Egress zabroniony"):
+        service.provider_for("gh").list_repositories()
+    assert resolver.calls == [] and transport.targets == []

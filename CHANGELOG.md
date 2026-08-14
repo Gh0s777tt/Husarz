@@ -46,6 +46,36 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
   (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
 
+### Dodane (Etap 15b — `husarz.git` na wspólnej warstwie anty-SSRF)
+- Integracje Git przeszły na `husarz.ssrf` — trzecia i ostatnia ścieżka wychodząca. Stawka
+  jest tu najwyższa: połączenie niesie **token PAT z prawem zapisu do repozytoriów**,
+  a poprzednia walidacja (`_is_internal_host`) sprawdzała wyłącznie LITERAŁY IP i **wcale
+  nie rozwiązywała nazw** — nie było więc ani ochrony przed rebindingiem, ani pinu.
+- Trzecia polaryzacja polityki: nowa oś `allow_lan` (obok `allow_loopback`). Git: loopback
+  ZABRONIONY (nigdy nie jest usługą lokalną Husarza), ale prywatna sieć operatora
+  DOZWOLONA — samodzielnie hostowany GitLab pod RFC 1918 to podstawowy scenariusz
+  suwerenności. Luz jest WĄSKI i jawny (`_LAN_NETWORKS` = RFC 1918 + ULA); świadomie NIE
+  realizowany przez `ipaddress.is_private`, bo ta właściwość obejmuje też loopback,
+  link-local (metadane chmury) i zakresy testowe.
+- `HttpxGitTransport` dostał parytet z pozostałymi transportami: `trust_env=False`,
+  `follow_redirects=False`, odczyt strumieniowy chunkami z twardym sufitem (było:
+  `response.json()` wciągało całą odpowiedź dostawcy bez limitu) + deadline wall-clock,
+  oraz GENERYCZNY komunikat błędu — dotąd echował `f"Błąd HTTP {method} {url}: {exc}"`,
+  czyli URL i wnętrzności httpx trafiały do audytu/API.
+- `GitTransport` i providerzy przyjmują `PinnedTarget` zamiast łańcucha bazy API;
+  `resolve` przewleczony przez `build_git_service → GitService → build_provider`.
+- Testy: +8 niezmienników ścieżki Git. Docs: ADR-0020 (oś `allow_lan`), GIT.md, BEZPIECZENSTWO.md.
+
+### Dodane (higiena testów — bezpiecznik offline)
+- `tests/conftest.py`: autouse fixture blokujący `socket.getaddrinfo` dla CAŁEGO zestawu.
+  Po wprowadzeniu pinowania testy z hostem `api.github.com`/`gitlab.com` po cichu wychodziły
+  na sieć (działały lokalnie, padłyby w CI bez WAN i w profilu airgap) — bezpiecznik zamienia
+  „zapomniałem wstrzyknąć resolver" w natychmiastowy, czytelny błąd. Wykrył i domknął
+  5 takich miejsc (`test_git`, `test_git_api`, `test_plugins_security`).
+- Odzyskany z niezmergowanej gałęzi test integracyjny `test_config_reload_lifecycle.py`
+  (cykl życia trwałego magazynu RAG przy `POST /api/config/runtime`) — uzupełnia
+  jednostkowy `test_tool_close.py` o dowód na poziomie API.
+
 ### Poprawione (adwersaryjny przegląd Etapu 15 — 3 soczewki, 18 potwierdzonych findingów)
 - **Bypass klasyfikacji adresów (major)**: `is_blocked_address` opierał się wyłącznie na
   właściwościach `ipaddress`, a stdlib NIE uznaje za prywatne m.in. **CGNAT 100.64.0.0/10**
