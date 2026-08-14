@@ -46,6 +46,39 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
   (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
 
+### Dodane (Etap 4b — kryptograficzny podpis ROE)
+- Domknięta ostatnia otwarta pozycja rdzenia bezpieczeństwa (Etap 4). ROE to JEDYNY artefakt
+  uprawniający Puszkarza do aktywnych działań wobec konkretnych celów, a jego ważność
+  sprowadzała się do „pole `signature` jest niepuste" — dopisanie `signature: "abc"` czyniło
+  zlecenie ważnym. Kto mógł edytować plik, mógł poszerzyć zakres; skutkiem byłby **atak na
+  osobę trzecią z użyciem Husarza jako narzędzia**. Docs: ADR-0021.
+- Nowy `husarz.security.roe_signature`: kanoniczny payload + `hmac-sha256` (stdlib) i
+  `ed25519` (extra `husarz[roe]`, klucz PRYWATNY zostaje u zatwierdzającego — runtime widzi
+  tylko publiczny). `build_roe_verifier` spina config → sekrety → `RoeGate`.
+- **Podpisujemy TREŚĆ, nie plik**: payload liczony z EFEKTYWNEGO `RoeConfig`, więc poszerzenie
+  zakresu przez `POST /api/config/runtime` (które nie zmienia ani jednego bajtu na dysku)
+  również unieważnia podpis. Separacja domen prefiksem `husarz-roe-v1`.
+- Fail-closed w każdym rozgałęzieniu: zły format/base64/algorytm/klucz → odmowa; downgrade-guard
+  (algorytm z pliku musi zgadzać się z configiem); `verify_signature=true` bez `key_ref` →
+  błąd STARTU; nierozwiązywalny klucz w runtime → wyjątek, nigdy „przepuść". Klucz rozwiązywany
+  leniwie przy każdej weryfikacji (rotacja bez restartu).
+- Config `security.roe` (`verify_signature`, `algorithm`, `key_ref` — wyłącznie REFERENCJA do
+  sekretu). Profile `prod`/`airgap` z aktywnym zleceniem (`consent: true`) wymagają weryfikacji
+  i klucza; sam szablon bez zgody nie wymusza niczego (zero friction dla wdrożeń bez zleceń).
+- **Narzędzie operatora** `husarz roe sign|verify` — bez niego włączenie weryfikacji byłoby
+  wyłącznie sposobem na unieruchomienie ROE (nie dałoby się wytworzyć poprawnego podpisu).
+  `verify` zwraca kod 0 (ważny) / 2 (odrzucony) — nadaje się do CI.
+- Testy: +40 (offline), w tym parametryczne wykrywanie manipulacji każdego pola, round-trip
+  Ed25519 (PEM i base64), walidacja krzyżowa profili i pętla CLI. Łącznie 837.
+
+### Zmienione (Etap 4b — zmiana zachowania, ścieżka aktualizacji)
+- Dotychczasowe „podpisy" (dowolny tekst w polu `signature`) **przestają być ważne**. Dotyczy
+  każdego zlecenia z `consent: true`. **Migracja:** ustaw `security.roe.key_ref`, wygeneruj
+  podpis (`husarz roe sign --engagement <id>`) i wklej wynik do pliku ROE. To nie regresja —
+  to koniec akceptowania czegoś, co nigdy nie było podpisem.
+- Nowy opcjonalny extra `husarz[roe]` (`cryptography`) — potrzebny WYŁĄCZNIE dla `ed25519`;
+  wariant `hmac-sha256` działa na samej stdlib.
+
 ### Dodane (Etap 15c — embedder pamięci i router modeli na wspólnej warstwie)
 - Dwie ostatnie ścieżki wychodzące przeszły na `husarz.ssrf`. Po tym etapie **wszystkie pięć**
   dróg, którymi Husarz wychodzi na sieć (`web`, wtyczki MCP, Git, embedder RAG, router modeli),

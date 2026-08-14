@@ -47,7 +47,12 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ RBAC (role→uprawnienia z wildcardami).
 - ✅ Dostawcy sekretów File/SOPS/Vault (backendy wstrzykiwalne, testowalne).
 - ✅ Testy: blokada celu spoza ROE, wymóg `--authorized`, audyt kompletny i tamper-evident.
-- ⬜ Kryptograficzna weryfikacja podpisu ROE przez dostawcę sekretów (obecnie: obecność podpisu).
+- ✅ Kryptograficzna weryfikacja podpisu ROE (Etap 4b, ADR-0021): kanoniczny payload liczony
+  z EFEKTYWNEGO configu (wykrywa też nadpisania runtime), `hmac-sha256` (stdlib) i `ed25519`
+  (klucz prywatny poza maszyną), downgrade-guard, fail-closed w każdym rozgałęzieniu,
+  wymagane w `prod`/`airgap` przy aktywnym zleceniu. Narzędzie operatora: `husarz roe sign|verify`.
+  Testy: +40. ⬜ Pozostaje: wpięcie `RoeGate` w runtime (dziś orkiestrator pomija `roe_required`),
+  klucze prywatne z hasłem, rotacja/wersjonowanie kluczy.
 - 🚧 Uwierzytelnienie + przypisanie ról: **token Bearer + RBAC wpięte w API (Etap 5)**;
   pełny **OIDC** i **mTLS** — Etap 6.
 - ⬜ Runtime egress deny-all na warstwie sieci + izolacja sandboxa (Etap 6).

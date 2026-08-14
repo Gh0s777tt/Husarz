@@ -358,6 +358,42 @@ class EncryptionConfig(_StrictModel):
     algorithm: str = "AES-256-GCM"
 
 
+class RoeSignatureConfig(_StrictModel):
+    """Weryfikacja kryptograficznego podpisu ROE (dokumentu autoryzującego Puszkarza).
+
+    ROE to jedyny artefakt uprawniający do aktywnych działań wobec konkretnych celów, więc
+    jego integralność jest bramką bezpieczeństwa, nie formalnością. Domyślnie weryfikacja
+    jest **włączona** (fail-closed): bez poprawnego podpisu ROE pozostaje nieaktywne.
+
+    ``key_ref`` to REFERENCJA do sekretu (``env:``/``file:``/``vault:``/``sops:``), nigdy
+    materiał klucza. Dla ``hmac-sha256`` wskazuje sekret współdzielony; dla ``ed25519`` —
+    klucz PUBLICZNY (PEM albo base64 32 bajtów), który nie jest tajny, ale i tak trzymamy
+    go poza plikiem konfiguracji, by wymiana klucza nie wymagała edycji configu.
+    """
+
+    # Wyłączenie jest możliwe TYLKO w profilu dev (patrz _cross_validate) — w prod/airgap
+    # bramka bez weryfikacji podpisu byłaby autoryzacją opartą na dowolnym tekście.
+    verify_signature: bool = True
+    algorithm: Literal["hmac-sha256", "ed25519"] = "ed25519"
+    key_ref: str | None = None
+
+    @field_validator("key_ref")
+    @classmethod
+    def _key_is_reference(cls, value: str | None) -> str | None:
+        """Odrzuca surowy materiał klucza — dopuszczalna jest wyłącznie referencja."""
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if not cleaned.startswith(_SECRET_REF_SCHEMES):
+            raise ValueError(
+                "security.roe.key_ref musi być referencją do sekretu "
+                "(env:/file:/vault:/sops:), a nie samym materiałem klucza."
+            )
+        return cleaned
+
+
 class ToolLoopConfig(_StrictModel):
     """Limity pętli narzędziowej (function-calling). Feed danych NIEZAUFANYCH → bezpieczeństwo.
 
@@ -388,6 +424,7 @@ class SecurityConfig(_StrictModel):
     audit: AuditConfig = Field(default_factory=AuditConfig)
     encryption: EncryptionConfig = Field(default_factory=EncryptionConfig)
     tool_loop: ToolLoopConfig = Field(default_factory=ToolLoopConfig)
+    roe: RoeSignatureConfig = Field(default_factory=RoeSignatureConfig)
     prompt_injection_filters: bool = True
 
 
@@ -655,9 +692,11 @@ class RoeConfig(_StrictModel):
     def is_active(self) -> bool:
         """Statyczna bramka ważności ROE: zgoda + niepusta (nie-biała) referencja podpisu.
 
-        Uwaga: nie sprawdza okna czasowego — do tego służy ``is_active_at``.
-        Kryptograficzną weryfikację podpisu wykonuje ROE-gate przez wstrzykiwalny
-        weryfikator (Etap 4+); tu wymagamy jedynie, by referencja podpisu była obecna.
+        Uwaga: nie sprawdza okna czasowego (``is_active_at``) ANI kryptograficznej ważności
+        podpisu — schemat nie ma dostępu do dostawcy sekretów i nie jest miejscem na operacje
+        kryptograficzne. Realną weryfikację wykonuje ``RoeGate`` przez weryfikator zbudowany
+        przez ``husarz.security.build_roe_verifier`` (ADR-0021); tutaj sprawdzamy jedynie, czy
+        pole podpisu w ogóle wypełniono — to warunek KONIECZNY, nie wystarczający.
         """
         return self.consent and bool(self.signature and self.signature.strip())
 
@@ -793,6 +832,25 @@ class HusarzConfig(_StrictModel):
                     f"Profil '{profile_name}' wymaga szyfrowania at-rest "
                     f"(security.encryption.at_rest=true)."
                 )
+            # ROE autoryzuje AKTYWNE działania Puszkarza wobec konkretnych celów. Bez
+            # weryfikacji podpisu „autoryzacją" jest dowolny tekst w polu signature, czyli
+            # każdy, kto edytuje plik, może poszerzyć zakres ataku. Wymagamy tego jednak
+            # tylko wtedy, gdy istnieje ZLECENIE ZE ZGODĄ (consent=true) — szablon bez zgody
+            # jest nieszkodliwy i nie ma sensu żądać klucza od wdrożeń, które nie prowadzą
+            # testów. W profilu dev zostawiamy pełną elastyczność.
+            consented = sorted(name for name, roe in self.roe.items() if roe.consent)
+            if consented:
+                zlecenia = ", ".join(consented)
+                if not self.security.roe.verify_signature:
+                    errors.append(
+                        f"Profil '{profile_name}' z aktywnym ROE ({zlecenia}) wymaga "
+                        f"weryfikacji podpisu (security.roe.verify_signature=true)."
+                    )
+                elif not self.security.roe.key_ref:
+                    errors.append(
+                        f"Profil '{profile_name}' z aktywnym ROE ({zlecenia}): weryfikacja "
+                        f"podpisu wymaga security.roe.key_ref (referencji do klucza)."
+                    )
 
         # 5) Profil airgap: brak egress i brak zdalnych endpointów modeli.
         if self.platform.profile is Profile.AIRGAP:

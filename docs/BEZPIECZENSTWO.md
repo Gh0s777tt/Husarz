@@ -172,7 +172,7 @@ Wdrożone poprawki bezpieczeństwa:
 | Sekrety SOPS/Vault: błąd backendu = fail-closed (bez wycieku)  | `test_vault_provider_handles_backend_error` |
 
 **Ograniczenia (Etap 5/6):** pełna kryptograficzna weryfikacja podpisu ROE (domyślnie
-tylko obecność; weryfikator jest wstrzykiwalny); audyt bez `hmac_key` jest tamper-evident
+wówczas tylko obecność — **domknięte w Etapie 4b**, patrz ADR-0021); audyt bez `hmac_key` jest tamper-evident
 wobec przypadkowej korekty, z kluczem — wobec zmotywowanego edytora (zalecane w prod);
 uwierzytelnienie (OIDC), mTLS oraz runtime egress/sandbox enforcement — API (Etap 5) i deploy (Etap 6).
 
@@ -647,3 +647,46 @@ czterema transportami.
 **Ograniczenia:** router nie przewleka `resolve` przez `ModelRouter` — wstrzyknięcie w testach
 idzie istniejącym szwem `client_factory`. Endpointy modeli są konfiguracją operatora (nie są
 sterowane przez model), więc powierzchnia ataku jest tu najwęższa z pięciu ścieżek.
+
+### Etap 4b — kryptograficzny podpis ROE (data: 2026-08-15)
+
+**Zakres:** domknięcie ostatniej otwartej pozycji rdzenia bezpieczeństwa (Etap 4).
+ROE to JEDYNY artefakt uprawniający Puszkarza do aktywnych działań wobec konkretnych celów,
+a jego ważność sprowadzała się do „pole `signature` jest niepuste" — czyli dopisanie
+`signature: "abc"` czyniło zlecenie ważnym. Kto mógł edytować plik, mógł poszerzyć zakres;
+skutkiem byłby **atak na osobę trzecią z użyciem Husarza jako narzędzia**. Projekt i analiza
+alternatyw — [ADR-0021](adr/0021-podpis-roe.md).
+
+> **Stan wpięcia:** ryzyko było **utajone**, nie żywe — orkiestrator twardo pomija agentów
+> `roe_required` (`SKIPPED_ROE`), więc `RoeGate` nie jest jeszcze ścieżką runtime. Prymityw
+> autoryzacji domykamy ZANIM bramka trafi do produkcji.
+
+| Niezmiennik | Test |
+|---|---|
+| Podpis obejmuje całą treść autoryzacyjną — zmiana dowolnego pola go unieważnia | `test_any_field_change_invalidates_signature` |
+| **Poszerzenie zakresu** (dopisanie CIDR) → podpis nieważny | `test_scope_widening_invalidates_signature` |
+| **Usunięcie `out_of_scope`** (odsłonięcie hosta krytycznego) → podpis nieważny | `test_removing_out_of_scope_exclusion_invalidates_signature` |
+| **Wydłużenie okna** i **podniesienie `consent`** → podpis nieważny | `test_window_extension_invalidates_signature`, `test_raising_consent_invalidates_signature` |
+| Dawny „podpis" (dowolny tekst, np. `abc`) → NIEWAŻNY | `test_malformed_signature_is_denied_not_crash` |
+| Zły format/base64/algorytm → ODMOWA, nie wyjątek wywracający bramkę | `test_malformed_signature_is_denied_not_crash` |
+| Downgrade-guard: algorytm z pliku musi zgadzać się z konfiguracją | `test_algorithm_downgrade_is_denied` |
+| Zły klucz (HMAC i Ed25519) → odmowa | `test_wrong_key_does_not_verify`, `test_ed25519_other_key_does_not_verify` |
+| `verify_signature=true` bez `key_ref` / bez dostawcy sekretów → **błąd startu** | `test_verifier_enabled_without_key_ref_fails_closed_at_startup`, `test_verifier_enabled_without_secrets_provider_fails_closed` |
+| Nierozwiązywalny klucz w runtime → `RoeSignatureError` (nigdy „przepuść") | `test_verifier_unresolvable_key_raises_never_passes` |
+| Klucz rozwiązywany LENIWIE przy każdej weryfikacji (rotacja bez restartu) | `test_verifier_resolves_key_lazily_on_each_call` |
+| Bramka honoruje weryfikator: podrobiony podpis → `roe.deny` w audycie | `test_gate_denies_when_signature_invalid` |
+| Profil `prod`/`airgap` z aktywnym zleceniem wymaga weryfikacji + `key_ref` | `test_prod_with_consented_roe_requires_signature_verification` |
+| Sam szablon (`consent: false`) NIE wymusza klucza (brak zbędnej friction) | `test_prod_without_consented_roe_does_not_require_key` |
+| Narzędzie operatora domyka pętlę: `roe sign` → wklejenie → `roe verify` = 0 | `test_cli_roe_sign_then_verify_round_trip` |
+
+**Kod wrażliwy (kryptografia) — czy da się go usunąć?** Nie. Bez weryfikacji podpisu
+autoryzacją jest dowolny tekst, a bramka ROE — jedyne zabezpieczenie przed użyciem Husarza
+przeciwko celom bez zgody — opiera się na dokumencie, którego integralności nikt nie sprawdza.
+Alternatywy słabsze (hash pliku nie jest podpisem i nie wykrywa nadpisań runtime; detached
+signature to drugi artefakt do rozjechania) — analiza w ADR-0021. Porównanie HMAC jest
+stałoczasowe, klucz prywatny Ed25519 **nigdy nie trafia do runtime'u** (podpisuje operator).
+
+**Ograniczenia (świadome):** `RoeGate` nie jest jeszcze wpięty w runtime — ta warstwa zacznie
+chronić realny przepływ dopiero wtedy. Klucze prywatne chronione hasłem oraz rotacja/
+wersjonowanie kluczy pozostają do zrobienia (dziś jeden `key_ref`; rotacja unieważnia
+wszystkie podpisy, co jest właściwością podpisów, nie usterką).

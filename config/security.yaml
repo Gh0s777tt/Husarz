@@ -69,5 +69,25 @@ encryption:
   at_rest: true
   algorithm: AES-256-GCM
 
+# --- Podpis ROE (autoryzacja aktywnych działań Puszkarza) ---------------------
+# ROE to JEDYNY artefakt uprawniający Puszkarza do działań wobec konkretnych celów, więc
+# jego integralność jest bramką bezpieczeństwa. Bez weryfikacji „autoryzacją" byłby dowolny
+# tekst w polu `signature` — każdy, kto edytuje plik, mógłby poszerzyć zakres ataku.
+#
+# Podpis obejmuje KANONICZNĄ TREŚĆ zlecenia (zakres, okno, techniki, consent), a nie bajty
+# pliku — więc poszerzenie zakresu przez `POST /api/config/runtime` też unieważnia podpis.
+#
+# Profile `prod`/`airgap` z aktywnym zleceniem (consent: true) WYMAGAJĄ verify_signature
+# oraz key_ref (patrz walidacja krzyżowa). Podpis wygenerujesz poleceniem:
+#   husarz roe sign --engagement <id> [--private-key-file klucz.pem]
+roe:
+  verify_signature: true
+  algorithm: ed25519         # ed25519 (zalecane: klucz prywatny zostaje u zatwierdzającego)
+                             # albo hmac-sha256 (symetryczny, wyłącznie stdlib)
+  # REFERENCJA do klucza WERYFIKUJĄCEGO (nigdy materiał klucza):
+  #   ed25519      -> klucz PUBLICZNY (PEM albo base64 32 bajtów) — nie jest tajny,
+  #   hmac-sha256  -> sekret współdzielony.
+  key_ref: env:HUSARZ_ROE_KEY
+
 # Filtry I/O i izolacja treści niezaufanych (anty-prompt-injection).
 prompt_injection_filters: true

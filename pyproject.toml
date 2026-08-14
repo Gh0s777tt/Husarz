@@ -40,6 +40,9 @@ package = ["pyinstaller>=6.0"]
 # Trwała pamięć (RAG) z szyfrowaniem at-rest — SqliteVectorStore używa stdlib sqlite3,
 # a AesGcmCipher wymaga 'cryptography'. Bramka jakości instaluje [dev,memory].
 memory = ["cryptography>=42.0"]
+# Kryptograficzny podpis ROE algorytmem ed25519 (weryfikacja kluczem publicznym).
+# Wariant hmac-sha256 działa na samej stdlib i NIE wymaga tego extra.
+roe = ["cryptography>=42.0"]
 # Portal dokumentacji (MkDocs Material) + eksport do interaktywnego PDF. Narzędzia
 # BUDOWANIA dokumentacji (offline, lokalnie) — nie są częścią produktu ani runtime.
 # Strona: 'mkdocs build'; PDF: strona 'print' (print-site) -> druk do PDF w przeglądarce.

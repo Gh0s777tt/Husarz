@@ -12,6 +12,7 @@ import argparse
 import os
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from husarz import __version__
@@ -265,6 +266,98 @@ def _cmd_up(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_secret_ref(ref: str | None, label: str) -> str:
+    """Rozwiązuje referencję sekretu do wartości (env:/file:). Fail-closed przy braku.
+
+    Raises:
+        ConfigError: brak referencji, nieobsługiwany schemat albo nierozwiązywalny sekret.
+    """
+    if not ref:
+        raise ConfigError(f"Brak {label} w konfiguracji (referencja do klucza jest wymagana).")
+    if ref.startswith(("vault:", "sops:")):
+        raise ConfigError(
+            f"{label}='{ref}': dostawcy vault/sops wymagają jawnej konstrukcji — "
+            "użyj 'env:NAZWA' lub 'file:nazwa' dla CLI."
+        )
+    from husarz.config.secrets import (  # noqa: PLC0415
+        EnvSecretsProvider,
+        FileSecretsProvider,
+    )
+
+    provider = FileSecretsProvider("./secrets") if ref.startswith("file:") else EnvSecretsProvider()
+    value = provider.resolve(ref)
+    if not value or not value.strip():
+        raise ConfigError(f"Nie udało się rozwiązać sekretu ({label}='{ref}').")
+    return value.strip()
+
+
+def _load_roe(args: argparse.Namespace) -> Any:
+    """Wczytuje konfigurację i zwraca wskazane zlecenie ROE (albo podnosi ``ConfigError``)."""
+    config = load_config(args.config)
+    roe = config.roe.get(args.engagement)
+    if roe is None:
+        known = ", ".join(sorted(config.roe)) or "(brak zleceń w config/roe/)"
+        raise ConfigError(f"Nieznane zlecenie ROE: '{args.engagement}'. Dostępne: {known}.")
+    return config, roe
+
+
+def _cmd_roe_sign(args: argparse.Namespace) -> int:
+    """Podpisuje ROE i wypisuje wartość do wklejenia w pole ``signature``.
+
+    Klucz PRYWATNY (ed25519) podaje operator plikiem — Husarz nigdy go nie przechowuje.
+    Dla ``hmac-sha256`` używamy sekretu wskazanego przez ``security.roe.key_ref``.
+    """
+    from husarz.security import ALGORITHM_ED25519, RoeSignatureError  # noqa: PLC0415
+    from husarz.security.roe_signature import sign_ed25519, sign_hmac  # noqa: PLC0415
+
+    try:
+        config, roe = _load_roe(args)
+        algorithm = args.algorithm or config.security.roe.algorithm
+        if algorithm == ALGORITHM_ED25519:
+            if not args.private_key_file:
+                raise ConfigError(
+                    "Podpis ed25519 wymaga --private-key-file (klucz prywatny PEM). "
+                    "Husarz weryfikuje kluczem publicznym i nigdy nie przechowuje prywatnego."
+                )
+            pem = Path(args.private_key_file).read_text(encoding="utf-8")
+            signature = sign_ed25519(roe, pem)
+        else:
+            key = _resolve_secret_ref(config.security.roe.key_ref, "security.roe.key_ref")
+            signature = sign_hmac(roe, key)
+    except (ConfigError, RoeSignatureError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Nie udało się odczytać klucza prywatnego: {exc}", file=sys.stderr)
+        return 1
+    print(f"# Wklej do config/roe/{args.engagement}.yaml (pole 'signature'):")
+    print(f"signature: {signature}")
+    return 0
+
+
+def _cmd_roe_verify(args: argparse.Namespace) -> int:
+    """Weryfikuje podpis wskazanego ROE i raportuje wynik (kod 0 = ważny)."""
+    from husarz.security import RoeSignatureError  # noqa: PLC0415
+    from husarz.security.roe_signature import verify  # noqa: PLC0415
+
+    try:
+        config, roe = _load_roe(args)
+        key = _resolve_secret_ref(config.security.roe.key_ref, "security.roe.key_ref")
+        ok = verify(roe, algorithm=config.security.roe.algorithm, key=key)
+    except (ConfigError, RoeSignatureError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if ok:
+        print(f"Podpis ROE '{args.engagement}' jest WAŻNY ({config.security.roe.algorithm}).")
+        return 0
+    print(
+        f"Podpis ROE '{args.engagement}' NIE przeszedł weryfikacji — zlecenie pozostanie "
+        f"nieaktywne. Sprawdź, czy treść nie zmieniła się po podpisaniu.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def _cmd_useradd(args: argparse.Namespace) -> int:
     """Tworzy konto użytkownika (admin) — dla modelu „dostęp dla wybranych".
 
@@ -342,6 +435,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Otwórz konsolę w przeglądarce po starcie (UX launchera; tylko loopback).",
     )
     p_up.set_defaults(func=_cmd_up)
+
+    p_roe = sub.add_parser("roe", help="Operacje na zleceniach ROE (podpis, weryfikacja).")
+    roe_sub = p_roe.add_subparsers(dest="roe_command", required=True)
+
+    p_roe_sign = roe_sub.add_parser("sign", help="Podpisz ROE i wypisz wartość 'signature'.")
+    p_roe_sign.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_roe_sign.add_argument("--engagement", required=True, help="engagement_id zlecenia.")
+    p_roe_sign.add_argument(
+        "--algorithm",
+        default=None,
+        choices=["hmac-sha256", "ed25519"],
+        help="Algorytm podpisu (domyślnie z security.roe.algorithm).",
+    )
+    p_roe_sign.add_argument(
+        "--private-key-file",
+        default=None,
+        help="Plik z kluczem PRYWATNYM Ed25519 (PEM) — wymagany dla ed25519.",
+    )
+    p_roe_sign.set_defaults(func=_cmd_roe_sign)
+
+    p_roe_verify = roe_sub.add_parser("verify", help="Zweryfikuj podpis ROE (kod 0 = ważny).")
+    p_roe_verify.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_roe_verify.add_argument("--engagement", required=True, help="engagement_id zlecenia.")
+    p_roe_verify.set_defaults(func=_cmd_roe_verify)
 
     p_useradd = sub.add_parser("useradd", help="Utwórz konto użytkownika (admin; hasło z ENV).")
     p_useradd.add_argument("--config", default=None, help="Katalog konfiguracji.")

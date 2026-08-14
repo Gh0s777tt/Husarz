@@ -75,6 +75,8 @@ python -m venv .venv
 # .venv/bin/python -m pip install -e ".[dev]"
 # Trwała, szyfrowana pamięć długoterminowej (sqlite + AES-256-GCM at-rest) wymaga extry:
 #   .venv\Scripts\python.exe -m pip install -e ".[dev,memory]"
+# Podpis ROE algorytmem ed25519 wymaga extry [roe] (hmac-sha256 działa na samej stdlib):
+#   .venv\Scripts\python.exe -m pip install -e ".[dev,roe]"
 
 # 2) Walidacja przykładowej konfiguracji (działa out-of-the-box)
 .venv\Scripts\python.exe -m husarz.launcher.cli validate --config ./config
@@ -141,14 +143,18 @@ Nadpisania przez ENV: prefiks `HUSARZ_`, zagnieżdżenie przez `__`, np.
 Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md)):
 
 - **Deny-all egress** domyślnie; profil `airgap` = brak WAN.
-- **Anty-SSRF z pinowaniem IP** na ścieżkach wychodzących (`web`, wtyczki MCP): nazwa
-  rozwiązywana raz, adres przypinany, `Host`/SNI po nazwie — okno DNS-rebindingu zamknięte
-  ([ADR-0020](docs/adr/0020-pinowanie-ip-anty-ssrf.md)).
+- **Anty-SSRF z pinowaniem IP** na WSZYSTKICH pięciu ścieżkach wychodzących (`web`, wtyczki
+  MCP, Git, embedder RAG, router modeli): nazwa rozwiązywana raz, adres przypinany, `Host`/SNI
+  po nazwie — okno DNS-rebindingu zamknięte ([ADR-0020](docs/adr/0020-pinowanie-ip-anty-ssrf.md)).
 - **Sekrety** wyłącznie w Vault/SOPS — nigdy w repo, obrazach ani logach (hook gitleaks).
 - **Sandbox** narzędzi bez sieci, limity CPU/RAM/czasu, allowlisty komend i ścieżek.
 - **Szyfrowanie at-rest** i mTLS; **OIDC + RBAC**; **niemodyfikowalny audit log**.
 - **Zero telemetrii**; filtry anty-prompt-injection; izolacja treści niezaufanych.
 - **Puszkarz**: tylko autoryzowany pentest (ROE-gate, dry-run); nie tworzy exploitów.
+- **Podpis ROE**: zlecenie jest ważne dopiero z poprawnym podpisem kryptograficznym
+  (`ed25519`/`hmac-sha256`) obejmującym kanoniczną treść — poszerzenie zakresu, wydłużenie
+  okna czy podniesienie zgody unieważnia podpis. Podpis wygenerujesz przez
+  `husarz roe sign --engagement <id>` ([ADR-0021](docs/adr/0021-podpis-roe.md)).
 
 ## Dokumentacja
 
