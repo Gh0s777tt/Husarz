@@ -114,8 +114,18 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Limity: `max_iterations` + `security.tool_loop` (`max_result_bytes`, `max_total_calls`,
   `max_plan_steps`); ogrodzenie wyniku (`husarz/fencing.py`). Wpięcie w orkiestrator/API.
 - ✅ Testy: +35 (offline). Docs: ADR-0016.
-- ⬜ Wywoływanie wtyczek (`tools/call`) + `McpClient.call_tool` (Etap 13b/ADR-0017);
-  natywny adapter `tool_calls`; korelacja principal↔wywołanie; pinowanie IP dla `web`.
+- ⬜ Natywny adapter `tool_calls` (function-calling API); korelacja principal↔wywołanie;
+  pinowanie IP dla `web`/`plugin` (domknięcie TOCTOU rebindingu).
+
+## ✅ Etap 13b — Wywołanie narzędzi wtyczki MCP (`tools/call`)
+- ✅ `kind: plugin` (narzędzie agenta) wiąże JEDEN konektor przez `config.plugin`; akcje
+  `list` (odkrywanie) i `call` (wywołanie). `McpClient.call_tool` + `RemoteCallResult`;
+  `PluginService.call` z bramami. Nazwa zdalna jako argument (bez `getattr`).
+- ✅ Deny-by-default: `allow_call` (master-switch) + `call_allowlist` (fail-closed) +
+  `max_call_bytes`; odkrywanie ≠ wywołanie; bramy PRZED egress. Airgap na starcie: loopback.
+- ✅ Wynik NIEZAUFANY (bez SSRF-by-proxy, ogrodzony); token tylko w nagłówku; `arguments`
+  VERBATIM; audyt `{bytes, sha256}`. Utwardzenia z krytyki (M1/M2/S4/S5). Przewleczenie
+  `plugin_service` do pętli. Testy: +30 (offline). Docs: ADR-0019, WTYCZKI.md.
 
 ## ✅ Etap 12 — System wtyczek (rejestr narzędzi + konektor MCP)
 - ✅ 12a: `ToolProviderRegistry` (open/closed) zastępuje `if/elif` w `build_tools`;
@@ -125,8 +135,8 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   **odkrywanie** narzędzi (`tools/list`); anty-SSRF (loopback OK, metadane/IPv4-mapped
   blok), token jako referencja, audyt, RBAC `plugin:read`, `config/plugins/*.yaml`.
   API `/api/plugins*` + zakładka Wtyczki. Testy: +37. Docs: WTYCZKI.md, ADR-0015.
-- ⬜ Wywoływanie narzędzi (`tools/call`) + wpięcie w pętlę function-calling agenta
-  (z autoryzacją per-wywołanie); transport stdio; pełny handshake MCP.
+- ✅ 13b: wywoływanie narzędzi (`tools/call`) w pętli — patrz Etap 13b (ADR-0019).
+- ⬜ Transport stdio; pełny handshake MCP (`initialize`, streaming/SSE, `resources`).
 
 ## ✅ Etap 11 — Zdjęcia w czacie (modele wizyjne)
 - ✅ `POST /api/chat` z `images` (base64) dla modeli `vision: true`; obraz jako część

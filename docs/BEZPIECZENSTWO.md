@@ -493,3 +493,30 @@ CLI rozwiązuje `env:`/`file:` — `vault:`/`sops:` wymagają wspierającego `Se
 (zachowanie i tak fail-closed: brak klucza → błąd, nie plaintext). Połączenie `SqliteVectorStore`
 żyje przez cykl życia stacku; przy `POST /api/config/runtime` nowe łączenie powstaje bez zamknięcia
 starego (follow-up: `close()` w protokole). Szczegóły i alternatywy — ADR-0018.
+
+### Etap 13b — wywołanie wtyczki MCP (`tools/call`) (data: 2026-08-14)
+
+**Zakres:** realne wywołanie zdalnego narzędzia MCP w pętli (`kind: plugin`, akcje `list`/`call`).
+Powierzchnia: egress+zdolności zdalne, `arguments` jako kanał eksfiltracji, wynik NIEZAUFANY.
+Projekt z panelu (3 architektury → synteza) + adwersaryjna krytyka; wdrożone MUST-FIX (M1 audyt,
+M2 airgap-loopback) i SHOULD-FIX (cap params, cap bajtowy wyniku, TOCTOU udokumentowane) — ADR-0019.
+
+| Niezmiennik | Test |
+|---|---|
+| Deny-by-default: `allow_call=false` → odmowa PRZED egress (transport nietknięty) | `test_call_allow_call_false_denied_before_egress`, `test_call_allow_call_false_never_touches_network` |
+| Allowlista: nazwa spoza `call_allowlist` → odmowa przed egress | `test_call_tool_outside_allowlist_denied_before_egress` |
+| Config fail-closed: `allow_call=true` + pusta `call_allowlist` → błąd startu | `test_allow_call_true_empty_allowlist_rejected_at_config` |
+| SSRF re-walidowany PER wywołanie (link-local/prywatne/IPv4-mapped) → `EgressError` | `test_call_ssrf_blocked_per_invocation` |
+| Airgap na starcie: włączona wtyczka nielokalna → błąd (LOOPBACK, spójne z runtime) | `test_airgap_rejects_nonloopback_plugin_at_startup` |
+| Sekret token WYŁĄCZNIE w nagłówku (nie w URL); `arguments` VERBATIM (env: NIE rozwiązywane) | `test_arguments_env_ref_passed_verbatim_not_resolved` |
+| Cap żądania (name+arguments) PRZED egress; nieserializowalne → `PluginArgsError` | `test_call_args_too_large_raises_before_egress` |
+| Wynik NIEZAUFANY: brak dereferencji `resource`/binariów; cap bajtowy tekstu | `test_parse_call_result_shapes`, `test_parse_call_result_caps_text_by_bytes` |
+| Wynik ogrodzony jako DANE; `[[HUSARZ_ACTION]]` w wyniku NIE wykonane | `test_plugin_call_result_fenced_and_action_not_executed` |
+| Degradacja nie crash: `PluginError`/`EgressError`/transport → `ToolResult(ok=False)` | `test_transport_error_degrades_to_ok_false`, `test_plugin_tool_denied_degrades_to_ok_false` |
+| Audyt: `arguments` logowane jako `{bytes, sha256}` (nie `<dict>` — eksfiltracja wykrywalna) | (M1: `_arg_summary` w `tool_loop.py`) |
+
+**Ograniczenia (świadome, udokumentowane w ADR-0019):** `call` to kanał egress+zdolności POZA
+bramką ROE — `call_allowlist` nie ogranicza treści `arguments` ani semantyki zdalnej (opt-in
+operatora, analogicznie do `web`/`shell`). TOCTOU DNS-rebinding: IP nie jest pinowane (jak w `web`);
+ochroną jest blokada prywatnych IP po rozwiązaniu nazwy + deny-all egress. Puszkarz (ROE) wykluczony
+z pętli i brak endpointu HTTP `call` — `call` niedosięgalne dla ROE-agenta.

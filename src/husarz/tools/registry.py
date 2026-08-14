@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from husarz.config.schema import SecurityConfig, ToolConfig
 from husarz.config.secrets import SecretsProvider
@@ -27,6 +28,9 @@ from husarz.tools.errors import ToolError
 from husarz.tools.rag import RagBackend
 from husarz.tools.sandbox import SandboxExecutor
 from husarz.tools.web import Fetcher
+
+if TYPE_CHECKING:
+    from husarz.plugins.service import PluginService
 
 
 @dataclass(slots=True, frozen=True)
@@ -51,6 +55,10 @@ class BuildContext:
     rag_backend: RagBackend | None
     secrets: SecretsProvider
     data_dir: Path  # katalog trwałych danych (np. magazyn pamięci sqlite)
+    # Usługa wtyczek MCP (dla kind=plugin). None → narzędzie plugin degraduje do ok=False.
+    # TYPE_CHECKING-only import: plugins NIE importuje tools (brak cyklu). Ostatnie pole
+    # z domyślną (back-compat wywołań build_tools/BuildContext bez plugin_service).
+    plugin_service: PluginService | None = None
 
 
 # Builder: z kontekstu buduje gotowe narzędzie.

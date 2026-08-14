@@ -19,9 +19,10 @@ narzędzia. Pętla NIE eskaluje uprawnień. Ogrodzenie NL to obrona miękka (jak
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from husarz.agents.base import AgentResult, BaseAgent, SupportsComplete
@@ -38,6 +39,9 @@ from husarz.tools.rag import RagBackend
 from husarz.tools.registry import ToolProviderRegistry
 from husarz.tools.sandbox import SandboxExecutor
 from husarz.tools.web import Fetcher
+
+if TYPE_CHECKING:
+    from husarz.plugins.service import PluginService
 
 
 @dataclass(slots=True)
@@ -81,6 +85,11 @@ def _arg_summary(args: dict[str, Any]) -> dict[str, Any]:
             out["url"] = _summarize_url(value)
         elif key in ("content", "text") and isinstance(value, str):
             out[key] = {"bytes": len(value.encode("utf-8")), "sha256": _sha12(value)}
+        elif key == "arguments" and isinstance(value, dict):
+            # plugin.call: 'arguments' to KANAŁ EGRESS (do max_call_bytes treści na serwer MCP).
+            # Logujemy rozmiar+skrót (jak content/text) — eksfiltracja wykrywalna, treść ukryta.
+            blob = json.dumps(value, sort_keys=True, ensure_ascii=False)
+            out[key] = {"bytes": len(blob.encode("utf-8")), "sha256": _sha12(blob)}
         elif key in ("command", "args", "extra_args") and isinstance(value, list):
             out[key] = " ".join(str(item) for item in value)[:200]
         elif isinstance(value, (str, int, float, bool)):
@@ -229,12 +238,14 @@ def build_tool_loop(
     rag_backend: RagBackend | None = None,
     secrets: SecretsProvider | None = None,
     data_dir: str | Path | None = None,
+    plugin_service: PluginService | None = None,
     registry: ToolProviderRegistry | None = None,
 ) -> ToolLoop:
     """Buduje ``ToolLoop`` z konfiguracji (mirror ``build_tools``/``build_plugin_service``).
 
     ``secrets``/``data_dir`` przewleczone do budowy trwałej pamięci RAG (sqlite + at-rest);
-    domyślnie ``data_dir`` z ``config.platform``.
+    domyślnie ``data_dir`` z ``config.platform``. ``plugin_service`` (ten sam co ``/api/plugins``)
+    zasila narzędzia ``kind=plugin`` (``list``/``call``); ``None`` → degradacja do ``ok=False``.
     """
     tools = build_tools(
         config,
@@ -244,6 +255,7 @@ def build_tool_loop(
         rag_backend=rag_backend,
         secrets=secrets,
         data_dir=data_dir if data_dir is not None else config.platform.data_dir,
+        plugin_service=plugin_service,
         registry=registry,
     )
     kind_of = {name: tool_config.kind for name, tool_config in config.tools.items()}

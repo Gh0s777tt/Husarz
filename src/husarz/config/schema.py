@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from husarz.config.net import is_local_endpoint
+from husarz.config.net import is_local_endpoint, is_loopback_endpoint
 
 # ---------------------------------------------------------------------------
 # Typy wyliczeniowe (enumy)
@@ -540,6 +540,10 @@ class PluginConfig(_StrictModel):
     token_ref: str | None = None  # referencja env:/file:/vault:/sops: (nie sam token)
     timeout_seconds: int = Field(default=30, ge=1)
     max_output_bytes: int = Field(default=1_000_000, ge=1)  # twardy limit odpowiedzi (DoS)
+    # --- Wywołanie zdalnych narzędzi (tools/call) — deny-by-default (ADR-0019) ------------
+    allow_call: bool = False  # master-switch: bez tego 'call' jest odmawiane (list działa)
+    call_allowlist: list[str] = Field(default_factory=list)  # dozwolone nazwy zdalnych narzędzi
+    max_call_bytes: int = Field(default=64_000, ge=1)  # cap zserializowanych params PRZED egress
 
     @model_validator(mode="after")
     def _validate(self) -> PluginConfig:
@@ -547,6 +551,19 @@ class PluginConfig(_StrictModel):
             raise ValueError(
                 f"Wtyczka '{self.name}': token_ref musi być referencją do sekretu "
                 f"(env:/file:/vault:/sops:), a nie samą wartością tokenu."
+            )
+        # Fail-closed: nie da się wystartować z 'otwartym' wywoływaniem. allow_call wymaga
+        # jawnej enumeracji dozwolonych narzędzi (pusta lista + allow_call=false = kill-switch OK).
+        if self.allow_call and not self.call_allowlist:
+            raise ValueError(
+                f"Wtyczka '{self.name}': allow_call=true wymaga niepustej call_allowlist "
+                f"(jawna enumeracja dozwolonych zdalnych narzędzi — deny-by-default)."
+            )
+        if len(set(self.call_allowlist)) != len(self.call_allowlist) or any(
+            not entry.strip() for entry in self.call_allowlist
+        ):
+            raise ValueError(
+                f"Wtyczka '{self.name}': call_allowlist bez duplikatów i pustych wpisów."
             )
         parsed = urlparse(self.endpoint)
         if parsed.scheme not in ("http", "https"):
@@ -787,6 +804,16 @@ class HusarzConfig(_StrictModel):
                         f"Profil airgap: model '{model_id}' ma nielokalny endpoint "
                         f"'{spec.endpoint}'. Dozwolone są tylko adresy lokalne/prywatne."
                     )
+            # 8) Wtyczki MCP: w airgap włączona wtyczka MUSI być LOOPBACK (nie tylko „lokalna").
+            #    Ściślej niż modele — runtime konektora i tak przepuszcza tylko loopback dla
+            #    hostów spoza allowlisty (w airgap pusta), więc start i runtime są spójne, a
+            #    dane wtyczki gwarantowanie nie opuszczają hosta (M2 z audytu ADR-0019).
+            for plugin_name, plugin_cfg in self.plugins.items():
+                if plugin_cfg.enabled and not is_loopback_endpoint(plugin_cfg.endpoint):
+                    errors.append(
+                        f"Profil airgap: wtyczka '{plugin_name}' ma nielokalny endpoint "
+                        f"'{plugin_cfg.endpoint}'. W airgap wtyczka MCP musi być loopback."
+                    )
 
         # 6) Pętla narzędziowa pisze do workspace (file_edit) — workspace NIE może pokrywać
         #    się z katalogami danych/artefaktów (izolacja promienia rażenia; patrz ADR-0016).
@@ -831,6 +858,25 @@ class HusarzConfig(_StrictModel):
                 errors.append(
                     f"Profil airgap: embedder narzędzia rag '{name}' ma nielokalny endpoint "
                     f"'{endpoint}'. Embeddingi (odwracalne do PII) muszą pozostać lokalne."
+                )
+
+        # 9) Narzędzie kind=plugin MUSI wskazywać ISTNIEJĄCY konektor przez config.plugin.
+        #    Łapiemy tylko literówkę referencji na starcie (fail-closed na realny błąd config).
+        #    enabled/allow_call konektora to runtime kill-switche (łagodna degradacja do ok=False),
+        #    więc NIE wymagamy ich tutaj (parytet z git.allow_push — patrz ADR-0019).
+        for tool_name, tool_cfg in self.tools.items():
+            if tool_cfg.kind != "plugin" or not tool_cfg.enabled:
+                continue
+            ref = str(tool_cfg.config.get("plugin") or "").strip()
+            if not ref:
+                errors.append(
+                    f"Narzędzie '{tool_name}' (kind plugin) wymaga config.plugin "
+                    f"(nazwa konektora z config/plugins/)."
+                )
+            elif ref not in self.plugins:
+                errors.append(
+                    f"Narzędzie '{tool_name}' odwołuje się do nieznanej wtyczki '{ref}' "
+                    f"(brak w config/plugins/)."
                 )
 
         if errors:

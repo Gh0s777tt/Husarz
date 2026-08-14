@@ -26,3 +26,13 @@ token_ref: env:HUSARZ_MCP_TOKEN
 
 timeout_seconds: 30
 max_output_bytes: 1000000     # twardy limit odpowiedzi (ochrona przed OOM)
+
+# --- Wywołanie zdalnych narzędzi (tools/call) — deny-by-default, ADR-0019 ----
+# Odkrywanie (tools/list) działa bez poniższych; WYWOŁANIE wymaga jawnego opt-in:
+allow_call: false             # master-switch: bez tego 'call' jest zawsze odmawiane
+call_allowlist: []            # jawna enumeracja dozwolonych zdalnych narzędzi (pusta = nic)
+max_call_bytes: 64000         # cap zserializowanych params (name+arguments) PRZED egress
+# Aby wołać narzędzia: ustaw allow_call: true i wypełnij call_allowlist, np.:
+#   allow_call: true
+#   call_allowlist: [search, fetch_doc]
+# oraz dodaj narzędzie kind=plugin wiążące ten konektor (config/tools/example-plugin.yaml).

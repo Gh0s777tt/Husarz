@@ -1,0 +1,23 @@
+# ============================================================================
+# config/tools/example-plugin.yaml — narzędzie agenta wiążące konektor MCP.
+# ----------------------------------------------------------------------------
+# Rodzaj 'plugin' udostępnia agentowi (w pętli narzędziowej) JEDEN konektor MCP
+# z config/plugins/ przez pole config.plugin (parytet 1:1 z narzędziem 'web':
+# allowlista L1 per-narzędzie). Dwie akcje:
+#   - list  — odkrywanie narzędzi serwera (tools/list); tylko enabled,
+#   - call  — wywołanie zdalnego narzędzia (tools/call); wymaga na konektorze
+#             allow_call: true ORAZ nazwy w call_allowlist (deny-by-default).
+# Domyślnie WYŁĄCZONE (enabled: false). Aby użyć: włącz i dodaj nazwę tego
+# narzędzia do listy 'tools' wybranego agenta (config/agents/<agent>.yaml).
+# Patrz docs/WTYCZKI.md, docs/NARZEDZIA.md, ADR-0019.
+# ============================================================================
+
+name: plugin_example
+kind: plugin
+description: Przykładowy serwer MCP (lokalny).   # ZAUFANY opis → trafia do manuala modelu
+enabled: false
+requires_sandbox: false      # usługa sieciowa (konektor), nie polecenie w sandboxie
+requires_egress: false       # egress egzekwuje konektor (build_connector), nie to pole
+config:
+  plugin: example-mcp        # nazwa konektora z config/plugins/ (MUSI istnieć)
+  # max_output_bytes: 100000 # opcjonalny cap tekstu wyniku narzędzia (domyślnie 100000)

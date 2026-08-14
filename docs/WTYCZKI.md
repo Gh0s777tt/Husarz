@@ -61,16 +61,47 @@ nierozwiązywalny `token_ref` (lokalna konfiguracja) → `500`; odmowa/awaria se
 
 Konsola (`/`) ma zakładkę **Wtyczki**: lista konektorów + przycisk „sprawdź narzędzia".
 
-## Zakres MVP i granice
+## Wywołanie narzędzi (`tools/call`) — Etap 13b (ADR-0019)
 
-**W zakresie:** rejestr providerów (open/closed), konektor MCP nad wstrzykiwalnym
-transportem, **odkrywanie** narzędzi (`tools/list`), bramki egress/RBAC/audyt, token
-jako referencja, limit odpowiedzi.
+Agent może realnie użyć zdalnego narzędzia MCP w pętli narzędziowej. Konfiguracja to **dwa
+pliki** (deny-by-default):
 
-**Poza zakresem (świadomie):** **wywoływanie** narzędzi (`tools/call`) — wchodzi razem
-z pętlą function-calling agenta (wtedy z autoryzacją per-wywołanie); transport `stdio`
-(spawnowanie procesów, wymaga sandboxa); ładowanie wtyczek jako kodu Pythona
-(`entry_points`); pełny handshake MCP (`initialize`, streaming/SSE, `resources`).
-Pełne **pinowanie IP** (domknięcie okna TOCTOU rebindingu) — rozwiązanie nazwy już
-blokuje trywialny rebinding, ale pinowanie połączenia do zwalidowanego adresu pozostaje
-odłożone (ten sam brak co w narzędziu `web`).
+1. **Konektor** (`config/plugins/<serwer>.yaml`) — dodaj pola wywołania:
+   ```yaml
+   allow_call: true            # master-switch (domyślnie false — bez tego 'call' odmawiane)
+   call_allowlist: [search]    # jawna enumeracja dozwolonych zdalnych narzędzi (pusta = nic)
+   max_call_bytes: 64000       # cap zserializowanych params (name+arguments) PRZED egress
+   ```
+2. **Narzędzie agenta** (`config/tools/<nazwa>.yaml`, `kind: plugin`) — wiąże JEDEN konektor:
+   ```yaml
+   name: plugin_example
+   kind: plugin
+   enabled: true
+   config: { plugin: example-mcp }   # nazwa konektora (MUSI istnieć)
+   ```
+   Następnie dodaj `plugin_example` do listy `tools` wybranego agenta.
+
+Dwie akcje: **`list`** (odkrywanie — tylko `enabled`) i **`call`** (wywołanie — wymaga
+`allow_call` + `call_allowlist`). Nazwa zdalnego narzędzia jest ARGUMENTEM (`name`), nie akcją.
+Warstwy odmowy: L1 allowlista agenta → `enabled` konektora → `allow_call` → `call_allowlist` →
+cap `max_call_bytes` → egress/SSRF (`build_connector`) — wszystko PRZED wyjściem na sieć. Wynik
+jest NIEZAUFANY (ogrodzony jako dane; bloki binarne/`resource` pomijane — bez SSRF-by-proxy).
+
+> **Uwaga bezpieczeństwa (ADR-0019):** `call` to pełnoprawny kanał EGRESS i ZDOLNOŚCI, POZA bramką
+> ROE. `call_allowlist` bramkuje KTÓRE narzędzie, egress KĄD — ale nie ogranicza CO model wsadzi
+> w `arguments`. Dla serwera loopback dane nie opuszczają hosta; dla hosta publicznego to egress
+> ZA ZGODĄ operatora (https + `security.egress.allowlist`). Audyt loguje `{bytes, sha256}` ładunku
+> (eksfiltracja wykrywalna, treść ukryta).
+
+## Zakres i granice
+
+**W zakresie:** rejestr providerów (open/closed), konektor MCP nad wstrzykiwalnym transportem,
+**odkrywanie** (`tools/list`) i **wywołanie** (`tools/call`, deny-by-default), bramki
+egress/RBAC/audyt, token jako referencja, limity żądania i odpowiedzi.
+
+**Poza zakresem (świadomie):** transport `stdio` (spawnowanie procesów, wymaga sandboxa);
+ładowanie wtyczek jako kodu Pythona (`entry_points`); pełny handshake MCP (`initialize`,
+streaming/SSE, `resources`). Pełne **pinowanie IP** (domknięcie okna TOCTOU rebindingu) —
+rozwiązanie nazwy już blokuje trywialny rebinding, ale pinowanie połączenia do zwalidowanego
+adresu pozostaje odłożone (ten sam brak co w narzędziu `web`; dla `call` większy promień rażenia
+— patrz ADR-0019).

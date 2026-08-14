@@ -25,7 +25,7 @@ from husarz.tools import (
 pytestmark = pytest.mark.unit
 
 
-def test_default_registry_has_six_builtin_kinds() -> None:
+def test_default_registry_has_builtin_kinds() -> None:
     registry = default_registry()
     assert registry.known_kinds() == {
         "file_edit",
@@ -34,6 +34,7 @@ def test_default_registry_has_six_builtin_kinds() -> None:
         "run_tests",
         "web",
         "rag",
+        "plugin",
     }
 
 

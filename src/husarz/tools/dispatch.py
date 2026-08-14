@@ -18,11 +18,13 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from husarz.memory.errors import MemoryError_
+from husarz.plugins.errors import PluginError
 from husarz.router.egress import EgressError
 from husarz.tools.base import Tool, ToolResult
 from husarz.tools.errors import ToolError
 from husarz.tools.file_edit import FileEditTool
 from husarz.tools.git import GitTool
+from husarz.tools.plugin import PluginTool
 from husarz.tools.rag import RagTool
 from husarz.tools.run_tests import RunTestsTool
 from husarz.tools.shell import ShellTool
@@ -160,6 +162,23 @@ def _inv_rag_search(tool: Tool, args: dict[str, Any]) -> ToolResult:
     return cast(RagTool, tool).search(query)
 
 
+def _inv_plugin_list(tool: Tool, args: dict[str, Any]) -> ToolResult:
+    # 'list' nie przyjmuje argumentów (odkrywanie) — ewentualne args są ignorowane.
+    return cast(PluginTool, tool).list()
+
+
+def _inv_plugin_call(tool: Tool, args: dict[str, Any]) -> ToolResult:
+    name = _get_str(args, "name")
+    if name is None:
+        return _err(tool.name, "plugin.call wymaga 'name' (tekst — nazwa zdalnego narzędzia).")
+    arguments = args.get("arguments")
+    if arguments is None:
+        arguments = {}
+    elif not isinstance(arguments, dict):
+        return _err(tool.name, "plugin.call: 'arguments' musi być obiektem (mapą) lub pominięte.")
+    return cast(PluginTool, tool).call(name, arguments)
+
+
 def default_action_registry(
     *, max_rag_add_bytes: int = _DEFAULT_MAX_RAG_ADD_BYTES
 ) -> ActionRegistry:
@@ -220,6 +239,27 @@ def default_action_registry(
             "search", _inv_rag_search, "Wyszukuje w pamięci RAG.", {"query": "zapytanie (str)"}
         ),
     )
+    registry.register(
+        "plugin",
+        ActionSpec(
+            "list",
+            _inv_plugin_list,
+            "Odkrywa narzędzia serwera MCP wtyczki (tools/list).",
+            {},
+        ),
+    )
+    registry.register(
+        "plugin",
+        ActionSpec(
+            "call",
+            _inv_plugin_call,
+            "Wywołuje zdalne narzędzie MCP wtyczki (tools/call; wymaga allow_call+call_allowlist).",
+            {
+                "name": "nazwa zdalnego narzędzia (str)",
+                "arguments": "argumenty zdalnego narzędzia (mapa, opcjonalne)",
+            },
+        ),
+    )
     return registry
 
 
@@ -259,9 +299,10 @@ class ToolDispatcher:
             # Kontrakt „nigdy nie rzuca": niespójny kind_of (instancja innego rodzaju niż
             # deklarowany kind) → cast trafia w brakującą metodę. Zwracamy błąd, nie wyjątek.
             return _err(tool, f"Narzędzie '{tool}' nie pasuje do rodzaju '{kind}'.")
-        except (MemoryError_, EgressError) as exc:
-            # Awaria backendu (np. niedostępny embedder RAG, egress) degraduje się do wyniku,
+        except (MemoryError_, EgressError, PluginError) as exc:
+            # Awaria backendu (embedder RAG, egress, wtyczka MCP) degraduje się do wyniku,
             # a NIE wywala pętli/orkiestracji — model dostaje ok=False i może się odbić.
+            # (redundantnie wobec PluginTool, które już łapie PluginError/EgressError — DiD).
             return _err(tool, str(exc))
 
     def manual(self, allowed_names: list[str]) -> str:

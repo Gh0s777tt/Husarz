@@ -1,6 +1,6 @@
 # ADR-0015: Konektor wtyczek MCP (data-driven, discover-only w MVP)
 
-- Status: przyjęty
+- Status: przyjęty (rozszerzony przez [ADR-0019](0019-wywolanie-mcp-tools-call.md) — `tools/call`)
 - Data: 2026-08-13
 - Etap: 12b
 

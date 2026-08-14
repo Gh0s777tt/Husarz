@@ -201,7 +201,7 @@
     <section class="tab" id="tab-plugins">
       <div class="card">
         <h3>Wtyczki (konektory MCP)</h3>
-        <p class="muted">Wtyczka = zewnętrzny serwer narzędzi MCP. Konfiguracja w <code>config/plugins/*.yaml</code> (źródło prawdy). Token podaj jako <b>referencję</b> (np. <code>env:HUSARZ_MCP_TOKEN</code>). Endpoint lokalny (loopback) jest dozwolony; host publiczny wymaga <code>https</code> i wpisu w <code>security.egress.allowlist</code>. MVP: odkrywanie narzędzi (bez wywoływania).</p>
+        <p class="muted">Wtyczka = zewnętrzny serwer narzędzi MCP. Konfiguracja w <code>config/plugins/*.yaml</code> (źródło prawdy). Token podaj jako <b>referencję</b> (np. <code>env:HUSARZ_MCP_TOKEN</code>). Endpoint lokalny (loopback) jest dozwolony; host publiczny wymaga <code>https</code> i wpisu w <code>security.egress.allowlist</code>. Odkrywanie (<code>tools/list</code>) oraz wywołanie (<code>tools/call</code>) — to drugie deny-by-default (<code>allow_call</code> + <code>call_allowlist</code>).</p>
         <div id="plugins-list">…</div>
       </div>
       <div class="card">

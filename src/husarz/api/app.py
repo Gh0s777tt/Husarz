@@ -259,6 +259,7 @@ def create_app(
             audit=audit_log,
             secrets=secrets,
             data_dir=cfg.platform.data_dir,
+            plugin_service=plugin_service,  # ten sam serwis co /api/plugins (jedno źródło prawdy)
         )
         orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir, tool_loop=loop)
         return active, orch

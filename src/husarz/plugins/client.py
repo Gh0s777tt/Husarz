@@ -8,8 +8,10 @@ unspecified) są TWARDO blokowane (anty-SSRF), a hosty publiczne wymagają https
 allowlisty egress (deny-all). Token (opcjonalny) to referencja do sekretu rozwiązywana
 leniwie i wysyłana wyłącznie w nagłówku ``Authorization`` (nigdy w URL, nigdy logowana).
 
-MVP: tylko ``tools/list`` (odkrywanie). ``tools/call`` (wywołanie) wchodzi razem z
-pętlą function-calling agenta — patrz ADR-0015.
+``tools/list`` (odkrywanie) oraz ``tools/call`` (wywołanie zdalnego narzędzia) — to drugie
+bramkowane deny-by-default przez ``PluginService`` (``allow_call``/``call_allowlist``) i pętlę
+agenta (patrz ADR-0015 i ADR-0019). Wynik ``tools/call`` jest NIEZAUFANY: sklejamy tylko bloki
+tekstowe, bloki binarne/``resource`` POMIJAMY (zero dereferencji — anti-SSRF-by-proxy).
 """
 
 from __future__ import annotations
@@ -17,13 +19,14 @@ from __future__ import annotations
 import ipaddress
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 from husarz.config.schema import EgressConfig, EgressPolicy, PluginConfig
+from husarz.fencing import truncate_utf8
 from husarz.plugins.errors import PluginAuthError, PluginError, PluginTransportError
-from husarz.plugins.models import RemoteTool
+from husarz.plugins.models import RemoteCallResult, RemoteTool
 from husarz.router.egress import EgressError
 
 _DEFAULT_TIMEOUT = 30
@@ -226,8 +229,33 @@ def _raise_for_status(status: int, action: str) -> None:
         raise PluginError(f"{action}: serwer wtyczki zwrócił HTTP {status}.")
 
 
+def _parse_call_result(result: Any, *, max_bytes: int) -> RemoteCallResult:
+    """Parsuje NIEZAUFANY wynik ``tools/call``. Bez ``getattr``, bez dereferencji URI/resource.
+
+    Skleja wyłącznie bloki ``type=text``; bloki binarne/``resource``/nieznane zastępuje
+    krótkim placeholderem (NIGDY nie pobiera bajtów — transport wołany dokładnie raz).
+    Tekst przycinany do ``max_bytes`` UTF-8 (config-driven cap, defense-in-depth).
+    """
+    if not isinstance(result, dict):
+        return RemoteCallResult(text="", is_error=True)  # fail-safe: nieznany kształt
+    is_error = bool(result.get("isError"))
+    raw = result.get("content")
+    parts: list[str] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("type") or "")
+            if item_type == "text":
+                parts.append(str(item.get("text") or ""))
+            else:
+                parts.append(f"[pominięto blok typu '{item_type or 'nieznany'}']")
+    text, _ = truncate_utf8("\n".join(parts), max_bytes)
+    return RemoteCallResult(text=text, is_error=is_error)
+
+
 class McpClient:
-    """Klient serwera MCP nad ``PluginTransport`` (JSON-RPC 2.0). MVP: ``tools/list``."""
+    """Klient MCP nad ``PluginTransport`` (JSON-RPC 2.0): ``tools/list`` i ``tools/call``."""
 
     def __init__(
         self,
@@ -277,6 +305,16 @@ class McpClient:
                 continue
             tools.append(RemoteTool(name=name, description=str(item.get("description") or "")))
         return tools
+
+    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> RemoteCallResult:
+        """Wywołuje zdalne narzędzie (``tools/call``). Wynik NIEZAUFANY (``_parse_call_result``).
+
+        ``arguments`` przekazywane VERBATIM jako dane (żadne referencje ``env:/file:/...`` NIE
+        są rozwiązywane — sekret modelu nie jest eksfiltrowany). Błąd protokołu JSON-RPC →
+        ``PluginError``; aplikacyjne ``isError`` → ``RemoteCallResult.is_error`` (nie wyjątek).
+        """
+        result = self._rpc("tools/call", {"name": name, "arguments": dict(arguments)})
+        return _parse_call_result(result, max_bytes=self._max_bytes)
 
 
 def build_connector(

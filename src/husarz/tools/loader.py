@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from husarz.config.schema import HusarzConfig
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
@@ -27,6 +27,12 @@ from husarz.tools.sandbox import DockerSandboxExecutor, SandboxExecutor
 from husarz.tools.shell import ShellTool
 from husarz.tools.web import DEFAULT_MAX_BYTES as WEB_MAX_BYTES
 from husarz.tools.web import DEFAULT_TIMEOUT, Fetcher, HttpxFetcher, WebTool
+
+if TYPE_CHECKING:
+    from husarz.plugins.service import PluginService
+
+# Domyślny cap tekstu wyniku narzędzia plugin (nadpisywalny per-narzędzie: config.max_output_bytes).
+_DEFAULT_PLUGIN_OUTPUT_BYTES = 100_000
 
 
 def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
@@ -110,8 +116,28 @@ def _build_rag(ctx: BuildContext) -> Tool:
     return RagTool(backend, top_k=rag_config.top_k)
 
 
+def _build_plugin(ctx: BuildContext) -> Tool:
+    # Import leniwy (spójnie z _build_rag) — brak cyklu, plugins nie importuje tools.
+    from husarz.tools.plugin import PluginTool  # noqa: PLC0415
+
+    ref = str(ctx.tool_config.config.get("plugin") or "").strip()
+    if not ref:
+        # Tylko błąd KSZTAŁTU (jak nieznany kind) — istnienie konektora sprawdza _cross_validate.
+        raise ToolError(
+            f"Narzędzie '{ctx.name}' (kind plugin) wymaga config.plugin (nazwa konektora)."
+        )
+    return PluginTool(
+        ctx.name,
+        ref,
+        ctx.plugin_service,
+        max_output_bytes=_int_setting(
+            ctx.tool_config.config, "max_output_bytes", _DEFAULT_PLUGIN_OUTPUT_BYTES
+        ),
+    )
+
+
 def default_registry() -> ToolProviderRegistry:
-    """Buduje rejestr z 6 wbudowanymi rodzajami narzędzi (świeża instancja)."""
+    """Buduje rejestr z 7 wbudowanymi rodzajami narzędzi (świeża instancja)."""
     registry = ToolProviderRegistry()
     registry.register("file_edit", _build_file_edit)
     registry.register("shell", _build_shell)
@@ -119,6 +145,7 @@ def default_registry() -> ToolProviderRegistry:
     registry.register("run_tests", _build_run_tests)
     registry.register("web", _build_web)
     registry.register("rag", _build_rag)
+    registry.register("plugin", _build_plugin)
     return registry
 
 
@@ -131,6 +158,7 @@ def build_tools(
     rag_backend: RagBackend | None = None,
     secrets: SecretsProvider | None = None,
     data_dir: str | Path = "./data",
+    plugin_service: PluginService | None = None,
     registry: ToolProviderRegistry | None = None,
 ) -> dict[str, Tool]:
     """Buduje mapę ``nazwa -> narzędzie`` z konfiguracji.
@@ -167,6 +195,7 @@ def build_tools(
                 rag_backend=rag_backend,
                 secrets=active_secrets,
                 data_dir=Path(data_dir),
+                plugin_service=plugin_service,
             )
         )
     return tools

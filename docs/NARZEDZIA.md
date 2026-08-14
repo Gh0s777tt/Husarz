@@ -106,6 +106,14 @@ wektor) jest szyfrowany at-rest (AES-256-GCM) kluczem z `config.encryption_key_r
 (nadpisanie ścieżki pliku) dopełniają konfigurację. Fail-closed: sqlite bez rozwiązywalnego
 klucza → błąd startu (nigdy cichy plaintext). Patrz [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md).
 
+### Narzędzie wtyczki MCP (`kind: plugin`, Etap 13b, ADR-0019)
+
+Rodzaj `plugin` udostępnia agentowi JEDEN konektor MCP z `config/plugins/` (przez
+`config.plugin`). Dwie akcje: `list` (odkrywanie `tools/list`, tylko `enabled`) i `call`
+(wywołanie `tools/call`, deny-by-default: `allow_call` + `call_allowlist` na konektorze).
+Nazwa zdalnego narzędzia to argument `name` (nie akcja — brak `getattr`). Wynik jest
+NIEZAUFANY (ogrodzony jako dane). Konfiguracja i warstwy odmowy: [WTYCZKI.md](WTYCZKI.md).
+
 ### Wykonanie w pętli narzędziowej (Etap 13, ADR-0016)
 
 Narzędzia wykonuje **pętla function-calling** (`husarz.agents.tool_loop`) dla agentów z

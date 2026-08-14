@@ -29,3 +29,20 @@ class PluginSecretError(PluginError):
 
 class PluginTransportError(PluginError):
     """Błąd warstwy transportu HTTP (sieć/limit rozmiaru) — komunikat generyczny."""
+
+
+class PluginCallDeniedError(PluginError):
+    """Wywołanie ``tools/call`` odmówione lokalnie PRZED wyjściem na sieć.
+
+    Powód: ``allow_call=false`` (master-switch) albo nazwa zdalnego narzędzia spoza
+    ``call_allowlist`` wtyczki. Deny-by-default — odkrywanie (``list``) jest osobne i
+    bramkowane tylko przez ``enabled``. Fail-closed: transport NIE jest dotykany.
+    """
+
+
+class PluginArgsError(PluginError):
+    """Argumenty ``tools/call`` odrzucone lokalnie: zły typ lub przekroczony ``max_call_bytes``.
+
+    Cap żądania (rozmiar zserializowanych ``params``) jest egzekwowany PRZED egress —
+    ogranicza powierzchnię eksfiltracji przez model i chroni serwer/przewód (DoS).
+    """

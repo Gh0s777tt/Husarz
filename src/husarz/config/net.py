@@ -36,3 +36,26 @@ def is_local_endpoint(endpoint: str | None) -> bool:
     except ValueError:
         return False
     return ip.is_loopback or ip.is_private
+
+
+def is_loopback_endpoint(endpoint: str | None) -> bool:
+    """Zwraca ``True`` TYLKO dla loopbacku (``localhost``/``*.localhost``/127.0.0.0/8/``::1``).
+
+    Ściślejsze niż :func:`is_local_endpoint` (które dopuszcza LAN prywatny i ``.internal``).
+    Używane przez startową bramkę airgap dla wtyczek MCP, by zgadzać się z runtime egress
+    konektora (``_validate_mcp_endpoint`` przepuszcza dla hostów spoza allowlisty WYŁĄCZNIE
+    loopback) — w profilu airgap dane wtyczki nie mogą opuścić TEGO hosta.
+    """
+    if endpoint is None:
+        return True
+    host = endpoint_host(endpoint)
+    if not host:
+        return False
+    normalized = host.strip("[]").lower()
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(normalized)
+    except ValueError:
+        return False
+    return ip.is_loopback

@@ -5,6 +5,23 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 13b — wywołanie narzędzi wtyczki MCP / tools/call)
+- Nowy `kind: plugin` (narzędzie agenta) wiążący JEDEN konektor MCP przez `config.plugin`.
+  Dwie akcje: `list` (odkrywanie `tools/list`, tylko `enabled`) i `call` (wywołanie `tools/call`,
+  deny-by-default). `McpClient.call_tool` + `RemoteCallResult`; `PluginService.call` z bramami.
+- Deny-by-default: `PluginConfig.allow_call` (master-switch, domyślnie false) + `call_allowlist`
+  (jawna enumeracja; `allow_call=true` wymaga niepustej listy — fail-closed) + `max_call_bytes`
+  (cap zserializowanych params PRZED egress). Odkrywanie ≠ wywołanie.
+- Bezpieczeństwo: egress/SSRF re-walidowany PER wywołanie; airgap na starcie wymaga **loopbacku**
+  (spójne z runtime); wynik NIEZAUFANY (bloki binarne/`resource` pomijane — bez SSRF-by-proxy,
+  ogrodzony jako dane w pętli); token tylko w nagłówku; `arguments` VERBATIM (env: NIE rozwiązywane);
+  audyt loguje `{bytes, sha256}` ładunku `arguments` (eksfiltracja wykrywalna). Docs: ADR-0019.
+- Utwardzenia z adwersaryjnej krytyki projektu: **M1** audyt `arguments` (nie `<dict>`), **M2**
+  airgap-loopback, **S4/S5** cap bajtowy wyniku (config-driven) i cap całych `params`.
+- Przewleczenie `plugin_service` do pętli (`create_app → build_tool_loop → build_tools →
+  BuildContext`) — ten sam serwis co `/api/plugins`. Config: `example-mcp.yaml` (+pola call),
+  `example-plugin.yaml` (NOWY, `kind: plugin`). Testy: +30 (unit/security/integracja, offline).
+
 ### Dodane (portal dokumentacji + PDF)
 - Portal dokumentacji **MkDocs Material** (`mkdocs.yml`, extra `husarz[docs]`) generowany z
   `docs/` — jedno źródło prawdy dla strony HTML i **interaktywnego PDF** (plugin `print-site`,
