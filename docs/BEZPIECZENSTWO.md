@@ -490,9 +490,10 @@ KMS/rotacja odłożone. Scoring deszyfruje O(N) rekordów (brak indeksu ANN) —
 SQLCipher / szyfrowany wolumen odłożone na rzecz przenośnej koperty app-level. Schematy
 `vault:`/`sops:` są przyjmowane przez walidator `encryption_key_ref`, ale dostarczony resolver
 CLI rozwiązuje `env:`/`file:` — `vault:`/`sops:` wymagają wspierającego `SecretsProvider`
-(zachowanie i tak fail-closed: brak klucza → błąd, nie plaintext). Połączenie `SqliteVectorStore`
-żyje przez cykl życia stacku; przy `POST /api/config/runtime` nowe łączenie powstaje bez zamknięcia
-starego (follow-up: `close()` w protokole). Szczegóły i alternatywy — ADR-0018.
+(zachowanie i tak fail-closed: brak klucza → błąd, nie plaintext). Cykl życia połączenia
+`SqliteVectorStore` jest DOMKNIĘTY (follow-up): protokoły mają `close()`, a `POST /api/config/runtime`
+zamyka starą pętlę po atomowej podmianie (brak wycieku uchwytu pliku przy rekonfiguracji).
+Szczegóły i alternatywy — ADR-0018.
 
 ### Etap 13b — wywołanie wtyczki MCP (`tools/call`) (data: 2026-08-14)
 

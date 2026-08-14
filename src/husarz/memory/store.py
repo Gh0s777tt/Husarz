@@ -38,6 +38,8 @@ class VectorStore(Protocol):
 
     def count(self, namespace: str) -> int: ...
 
+    def close(self) -> None: ...
+
 
 def cosine(a: list[float], b: list[float]) -> float:
     """Podobieństwo cosinusowe dwóch wektorów (0.0, gdy któryś zerowy lub różnej długości)."""
@@ -85,3 +87,6 @@ class InMemoryVectorStore:
 
     def count(self, namespace: str) -> int:
         return len(self._data.get(namespace, ()))
+
+    def close(self) -> None:
+        """Brak zasobów systemowych (tylko RAM) — no-op dla parytetu protokołu ``VectorStore``."""

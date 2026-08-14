@@ -5,6 +5,14 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (follow-up 14b — zwalnianie zasobów przy rekonfiguracji)
+- Domknięte udokumentowane ograniczenie z Etapu 14b: `SqliteVectorStore` trzymał połączenie do
+  pliku przez cykl życia stacku i przy `POST /api/config/runtime` powstawało nowe bez zamknięcia
+  starego (wyciek uchwytu). Dodano `close()` do protokołów `VectorStore`/`RagBackend` (oraz
+  `RagTool`/`ToolDispatcher`/`ToolLoop`); `app._build_stack` zwraca pętlę, a `config_apply`
+  zamyka STARĄ pętlę po atomowej podmianie (best-effort, tłumi błędy, idempotentne; RAM = no-op).
+  Testy: +5 (łańcuch close, idempotencja, tłumienie błędów, regresja config_apply). Docs: ADR-0018.
+
 ### Dodane (Etap 13b — wywołanie narzędzi wtyczki MCP / tools/call)
 - Nowy `kind: plugin` (narzędzie agenta) wiążący JEDEN konektor MCP przez `config.plugin`.
   Dwie akcje: `list` (odkrywanie `tools/list`, tylko `enabled`) i `call` (wywołanie `tools/call`,

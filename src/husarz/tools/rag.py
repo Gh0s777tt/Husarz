@@ -20,11 +20,13 @@ DEFAULT_TOP_K = 8
 
 @runtime_checkable
 class RagBackend(Protocol):
-    """Backend pamięci: zapis i wyszukiwanie."""
+    """Backend pamięci: zapis, wyszukiwanie i zwolnienie zasobów."""
 
     def add(self, text: str, metadata: dict[str, Any] | None = None) -> None: ...
 
     def search(self, query: str, top_k: int) -> list[dict[str, Any]]: ...
+
+    def close(self) -> None: ...
 
 
 class InMemoryRagBackend:
@@ -47,6 +49,9 @@ class InMemoryRagBackend:
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [document for _, document in scored[:top_k]]
 
+    def close(self) -> None:
+        """Brak zasobów systemowych (tylko RAM) — no-op dla parytetu protokołu ``RagBackend``."""
+
 
 class RagTool:
     """Zapis i wyszukiwanie w pamięci (backend wstrzykiwalny: słowny lub wektorowy)."""
@@ -65,3 +70,7 @@ class RagTool:
         results = self._backend.search(query, self._top_k)
         output = "\n".join(str(result["text"]) for result in results)
         return ToolResult(self.name, ok=True, output=output, metadata={"count": len(results)})
+
+    def close(self) -> None:
+        """Zwalnia zasoby backendu (np. połączenie sqlite trwałej pamięci)."""
+        self._backend.close()

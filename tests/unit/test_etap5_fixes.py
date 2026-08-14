@@ -219,6 +219,44 @@ def test_config_runtime_rebuilds_orchestrator(repo_config_dir: Path) -> None:
     )
 
 
+def test_config_runtime_closes_old_tool_loop(
+    repo_config_dir: Path, monkeypatch
+) -> None:  # noqa: ANN001
+    # Regresja (follow-up 14b): po przebudowie stacku STARA pętla jest zamykana (zwalnia zasoby,
+    # np. połączenie sqlite RAG) — inaczej każde nadpisanie runtime wyciekałoby uchwyt pliku.
+    from husarz.agents.tool_loop import ToolLoop
+
+    closed: list[int] = []
+    original = ToolLoop.close
+
+    def spy(self: ToolLoop) -> None:
+        closed.append(id(self))
+        original(self)
+
+    monkeypatch.setattr(ToolLoop, "close", spy)
+
+    def factory(cfg):  # noqa: ANN001, ANN202
+        return ScriptedRouter()
+
+    config = load_config(repo_config_dir)
+    prompts = repo_config_dir.parent / "prompts"
+    client = TestClient(
+        create_app(
+            config,
+            config_dir=repo_config_dir,
+            audit=AuditLog(),
+            router_factory=factory,
+            prompts_dir=prompts,
+        )
+    )
+    assert closed == []  # przy starcie nic nie zamykamy
+    applied = client.post(
+        "/api/config/runtime", json={"overrides": {"platform": {"log_level": "DEBUG"}}}
+    )
+    assert applied.json()["ok"] is True
+    assert len(closed) == 1  # STARA pętla zamknięta po atomowej podmianie
+
+
 # --- Walidacja parametru limit audytu (minor) -------------------------------
 
 

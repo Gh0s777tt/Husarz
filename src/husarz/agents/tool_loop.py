@@ -133,6 +133,10 @@ class ToolLoop:
         """Tworzy świeży budżet wywołań dla jednej orkiestracji."""
         return ToolCallBudget(self._config.max_total_calls)
 
+    def close(self) -> None:
+        """Zwalnia zasoby narzędzi (deleguje do dispatchu). Woła się przy podmianie stacku."""
+        self._dispatcher.close()
+
     def run(
         self,
         agent: BaseAgent,

@@ -13,6 +13,7 @@ miejscu (``default_action_registry``), bez zmian w rdzeniu dispatchu (open/close
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -326,3 +327,17 @@ class ToolDispatcher:
                 params = ", ".join(f"{k}: {v}" for k, v in spec.params.items()) or "(brak)"
                 lines.append(f'    · akcja "{spec.action}" — {spec.summary} | args: {params}')
         return "\n".join(lines)
+
+    def close(self) -> None:
+        """Zwalnia zasoby narzędzi trzymających uchwyty (np. połączenie sqlite RAG).
+
+        Best-effort: wywoływane przy PODMIANIE stacku (``/api/config/runtime``), by stary
+        magazyn nie wyciekał uchwytu pliku. Błąd zamknięcia NIE może wywalić podmiany —
+        łapiemy szeroko (ścieżka sprzątania), narzędzia bez ``close`` są pomijane.
+        """
+        for tool in self._tools.values():
+            close = getattr(tool, "close", None)
+            if callable(close):
+                # Sprzątanie NIE może przerwać podmiany stacku — tłumimy błędy zamknięcia.
+                with contextlib.suppress(Exception):
+                    close()

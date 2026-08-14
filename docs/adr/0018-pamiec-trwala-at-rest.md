@@ -74,10 +74,11 @@ lokalizację pliku (zero-hardcode).
   (spójnie z resztą projektu), ale dostarczony resolver CLI (`_SchemeSecrets`) obsługuje realnie
   `env:`/`file:`; `vault:`/`sops:` wymagają `SecretsProvider`, który je implementuje (przyszłe).
   Zachowanie jest fail-closed (brak klucza → błąd, nigdy cichy plaintext), nie ma wycieku.
-- (−) **Cykl życia połączenia:** `SqliteVectorStore` otwiera uchwyt pliku przy budowie stacku;
-  ponowne `POST /api/config/runtime` przebudowuje stack, otwierając nowe połączenie bez zamknięcia
-  starego (zwolnienie zależy od GC). Uciążliwe głównie na Windows przy rotacji `data_dir` —
-  follow-up: `close()` w protokole `RagBackend`/`VectorStore` wołane przy atomowej podmianie.
+- (+) **Cykl życia połączenia — DOMKNIĘTE (follow-up po 14b):** protokoły `VectorStore`/`RagBackend`
+  (oraz `RagTool`/`ToolDispatcher`/`ToolLoop`) mają `close()`; przy `POST /api/config/runtime`
+  STARA pętla jest zamykana po atomowej podmianie (`app._build_stack` zwraca pętlę, `config_apply`
+  woła `old_loop.close()` — best-effort, tłumi błędy). Dzięki temu uchwyt pliku sqlite nie wycieka
+  przy rekonfiguracji runtime. `SqliteVectorStore.close()` jest idempotentne; magazyny w RAM = no-op.
 
 ## Alternatywy odrzucone
 

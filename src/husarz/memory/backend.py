@@ -51,3 +51,7 @@ class EmbeddingRagBackend:
             }
             for hit in hits
         ]
+
+    def close(self) -> None:
+        """Zamyka magazyn (np. połączenie sqlite trwałego backendu). Idempotentne."""
+        self._store.close()

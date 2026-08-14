@@ -35,7 +35,7 @@ from husarz.accounts.errors import (
     RegistrationDisabledError,
 )
 from husarz.agents.base import SupportsComplete
-from husarz.agents.tool_loop import build_tool_loop
+from husarz.agents.tool_loop import ToolLoop, build_tool_loop
 from husarz.api.schemas import (
     AgentInfo,
     AuditEntryView,
@@ -255,11 +255,11 @@ def create_app(
 
     def _build_stack(
         cfg: HusarzConfig,
-    ) -> tuple[SupportsComplete | None, Orchestrator | None, PluginService | None]:
+    ) -> tuple[SupportsComplete | None, Orchestrator | None, PluginService | None, ToolLoop | None]:
         plugins = _active_plugins(cfg)
         active = router_factory(cfg) if router_factory is not None else router
         if active is None:
-            return None, None, plugins
+            return None, None, plugins, None
         # Pętla narzędziowa: pierwszy egzekutor narzędzi. Zależności są leniwe
         # (executor/fetcher/rag budowane domyślnie), więc konstrukcja jest bezpieczna
         # bez Dockera — realne wykonanie potrzebują tylko agenci z opt-in (tool_loop_enabled).
@@ -272,18 +272,19 @@ def create_app(
             plugin_service=plugins,  # ten sam (świeży) serwis co /api/plugins — jedno źródło prawdy
         )
         orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir, tool_loop=loop)
-        return active, orch, plugins
+        return active, orch, plugins, loop
 
     def _resolve_chat_model(cfg: HusarzConfig) -> str:
         return chat_model or cfg.models.chat or cfg.models.default
 
-    initial_router, initial_orch, initial_plugins = _build_stack(config)
+    initial_router, initial_orch, initial_plugins, initial_loop = _build_stack(config)
     state: dict[str, Any] = {
         "config": config,
         "config_dir": config_dir,
         "router": initial_router,
         "orchestrator": initial_orch,
         "plugin_service": initial_plugins,
+        "tool_loop": initial_loop,
         "runtime_overrides": {},
         "orchestrations": 0,
         "chats": 0,
@@ -605,13 +606,22 @@ def create_app(
         # Przebuduj router+orkiestrator, by /api/orchestrate i /api/chat używały
         # NOWEJ konfiguracji (a nie starej sprzed nadpisania). Budowa poza zamkiem,
         # atomowa podmiana pod zamkiem — spójna para (config, router) dla /api/chat.
-        new_router, new_orch, new_plugins = _build_stack(merged)
+        new_router, new_orch, new_plugins, new_loop = _build_stack(merged)
         with counter_lock:
             state["config"] = merged
             state["runtime_overrides"] = request.overrides
             state["router"] = new_router
             state["orchestrator"] = new_orch
             state["plugin_service"] = new_plugins
+            old_loop = state["tool_loop"]
+            state["tool_loop"] = new_loop
+        # Zamknij STARĄ pętlę (zwalnia np. połączenie sqlite RAG) PO atomowej podmianie —
+        # inaczej każde nadpisanie runtime wyciekałoby uchwyt pliku (limitacja z Etapu 14b).
+        # Bezpieczne wobec żądań w locie: magazyn sqlite serializuje operacje własnym zamkiem,
+        # więc close() czeka na bieżącą operację; ewentualne późniejsze użycie starej pętli
+        # degraduje do ToolResult(ok=False), nie wywala żądania.
+        if old_loop is not None:
+            old_loop.close()
         audit_log.record("api", "config.runtime_override", {"keys": sorted(request.overrides)})
         return ValidateResponse(ok=True, summary=_summary(merged))
 
