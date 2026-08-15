@@ -18,6 +18,7 @@ from typing import Any
 from husarz import __version__
 from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
+from husarz.config.loader import resolve_config_dir
 from husarz.config.schema import Profile
 
 
@@ -204,7 +205,12 @@ def _cmd_up(args: argparse.Namespace) -> int:
         # 'dev' po cichu degradowało konfigurację z `profile: prod` w pliku — a profil
         # kotwiczy całą bazową linię bezpieczeństwa (sandbox, audyt, szyfrowanie, podpis ROE).
         overrides = {"platform": {"profile": args.profile}} if args.profile else None
-        config = load_config(args.config, runtime_overrides=overrides)
+        # ROZWIĄZUJEMY katalog configu i przekazujemy go dalej. Bez tego `husarz up` bez
+        # jawnego --config startował z `config_dir=None`, więc `POST /api/config/runtime`
+        # odpowiadał „Nadpisania wymagają katalogu konfiguracji" — panel konfiguracji
+        # w konsoli był martwy, mimo że konfiguracja wczytała się z tego samego katalogu.
+        config_dir = resolve_config_dir(args.config, os.environ)
+        config = load_config(config_dir, runtime_overrides=overrides)
         api_token = _resolve_api_token(config)
         accounts = _build_accounts(config)
         git_service = _build_git(config)
@@ -253,7 +259,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
 
     app = create_app(
         config,
-        config_dir=args.config,
+        config_dir=config_dir,
         api_token=api_token,
         accounts=accounts,
         git_service=git_service,

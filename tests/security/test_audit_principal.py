@@ -179,3 +179,21 @@ def test_orchestration_audit_entries_carry_caller(repo_config_dir: Path) -> None
     entries = [entry for entry in audit.entries if entry.action == "orchestrate"]
     assert entries and entries[0].principal == f"user:{account.user_id}"
     assert audit.verify() is True
+
+
+def test_api_audit_view_exposes_principal(repo_config_dir: Path) -> None:
+    """REGRESJA z uruchomienia realnej aplikacji: wpisy niosły principal, ale widok API go
+    NIE zwracał — więc operator czytający audyt przez API/konsolę nadal nie widział,
+    kto zlecił akcję. Cała rozliczalność była niewidoczna."""
+    audit = AuditLog()
+    audit.record("kopijnik", "tool.call", {"tool": "shell"}, principal="user:abc")
+    client = TestClient(
+        create_app(
+            load_config(repo_config_dir),
+            audit=audit,
+            prompts_dir=repo_config_dir.parent / "prompts",
+        )
+    )
+    body = client.get("/api/audit?limit=5").json()
+    assert body["verified"] is True
+    assert body["entries"][-1]["principal"] == "user:abc"

@@ -66,9 +66,12 @@ class AuditEntryView(BaseModel):
     """Widok pojedynczego wpisu audytu (bez pełnych szczegółów)."""
 
     timestamp: str
-    actor: str
+    actor: str  # kto WYKONAŁ (agent albo 'api')
     action: str
     roe_ref: str | None
+    # Kto ZLECIŁ (`user:<id>` / `token:<rola>`); puste = brak uwierzytelnienia. Bez tego pola
+    # audyt widziany przez API/konsolę nie odpowiadał na pytanie o rozliczalność (Etap 13c).
+    principal: str = ""
 
 
 class AuditView(BaseModel):

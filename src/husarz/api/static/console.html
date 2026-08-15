@@ -454,8 +454,10 @@
         const a = await api("audit");
         if (!a.entries) { $("audit-out").innerHTML = `<p class='err'>${esc(a.detail || "Brak dostępu.")}</p>`; return; }
         $("audit-status").innerHTML = a.verified ? `<span class="ok">łańcuch zweryfikowany</span> (${esc(a.count)})` : `<span class="err">łańcuch USZKODZONY</span>`;
-        $("audit-out").innerHTML = a.entries.length ? "<table><tr><th>Czas</th><th>Aktor</th><th>Akcja</th><th>ROE</th></tr>" +
-          a.entries.map((e) => `<tr><td>${esc(e.timestamp)}</td><td>${esc(e.actor)}</td><td>${esc(e.action)}</td><td>${esc(e.roe_ref) || "—"}</td></tr>`).join("") + "</table>" : "<p class='muted'>Brak wpisów.</p>";
+        // Kolumna „Zlecił" (principal) obok „Aktor" (kto wykonał) — bez niej operator widzi,
+        // że agent uruchomił narzędzie, ale nie na czyje żądanie (rozliczalność, Etap 13c).
+        $("audit-out").innerHTML = a.entries.length ? "<table><tr><th>Czas</th><th>Aktor</th><th>Zlecił</th><th>Akcja</th><th>ROE</th></tr>" +
+          a.entries.map((e) => `<tr><td>${esc(e.timestamp)}</td><td>${esc(e.actor)}</td><td>${esc(e.principal) || "—"}</td><td>${esc(e.action)}</td><td>${esc(e.roe_ref) || "—"}</td></tr>`).join("") + "</table>" : "<p class='muted'>Brak wpisów.</p>";
       }
     }
 

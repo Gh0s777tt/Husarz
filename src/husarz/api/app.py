@@ -472,7 +472,11 @@ def create_app(
             count=len(entries),
             entries=[
                 AuditEntryView(
-                    timestamp=e.timestamp, actor=e.actor, action=e.action, roe_ref=e.roe_ref
+                    timestamp=e.timestamp,
+                    actor=e.actor,
+                    action=e.action,
+                    roe_ref=e.roe_ref,
+                    principal=e.principal,
                 )
                 for e in recent
             ],

@@ -46,6 +46,21 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
   (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
 
+### Poprawione (weryfikacja na URUCHOMIONEJ aplikacji — dwie luki niewidoczne w testach)
+- **`principal` nie był w ogóle zwracany przez API.** Wpisy audytu niosły „kto zlecił", ale
+  `AuditEntryView` nie miało tego pola, więc operator czytający audyt przez `/api/audit`
+  albo konsolę WWW nadal nie widział rozliczalności — cała funkcja z Etapu 13c była
+  niewidoczna od zewnątrz. Pole dodane do widoku, konsola ma kolumnę „Zlecił".
+- **`husarz up` bez `--config` startował z `config_dir=None`**, więc
+  `POST /api/config/runtime` odpowiadał „Nadpisania wymagają katalogu konfiguracji" —
+  panel konfiguracji w konsoli był martwy, mimo że konfiguracja wczytała się z domyślnego
+  `./config`. Launcher rozwiązuje teraz katalog (`resolve_config_dir`) i przekazuje go dalej.
+  Uboczny skutek: kotwica profilu z Etapu 4b w ogóle nie dochodziła do skutku w realnym
+  uruchomieniu (endpoint kończył się wcześniej) — teraz działa i jest to zweryfikowane na żywo.
+- Testy: +2 regresyjne. Obie luki przechodziły przez zestaw testów, bo testy API wstrzykują
+  `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
+  serwera i odpytanie endpointów.
+
 ### Dodane (Etap 13c — korelacja principal↔wywołanie w audycie)
 - Dziennik odpowiadał na pytanie „kto WYKONAŁ" (`actor`: `kopijnik`, `puszkarz`, `api`), ale
   nie „na czyje ŻĄDANIE". Przy jednym operatorze bez znaczenia; przy wielu kontach audyt

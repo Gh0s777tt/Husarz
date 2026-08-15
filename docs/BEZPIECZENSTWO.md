@@ -774,6 +774,14 @@ wkładamy do niego danych, których nie da się usunąć, a które mogą być PI
 e-mailem). Identyfikator konta jest losowy i wystarcza do powiązania z użytkownikiem przez
 magazyn kont — spójnie z resztą audytu, gdzie zapisujemy skróty i rozmiary, nie treść.
 
+**Weryfikacja na uruchomionej aplikacji.** Zestaw testów przepuścił dwie luki, które wyszły
+dopiero po realnym starcie serwera: widok `/api/audit` nie zwracał `principal` (testy API
+sprawdzały wpisy w obiekcie `AuditLog`, nie odpowiedź HTTP), a `husarz up` bez `--config`
+nie przekazywał katalogu konfiguracji, przez co `POST /api/config/runtime` kończył się
+wcześniej i kotwica profilu nigdy nie była testowana w realnym uruchomieniu. Obie domknięte
+i pokryte regresją (`test_api_audit_view_exposes_principal`,
+`test_up_passes_resolved_config_dir_to_app`).
+
 **Ograniczenia:** korelacja obejmuje ścieżki przechodzące przez API (czat, orkiestracja,
 config, Git, wtyczki). Wywołania biblioteczne (np. `Orchestrator.run` wprost z kodu) mają
 `principal=""` — to poprawne, bo nie ma wtedy uwierzytelnionego wywołującego.
