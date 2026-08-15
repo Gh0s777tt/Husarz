@@ -74,6 +74,15 @@ Limit jest z natury **miękki**: rozliczenie następuje PO odpowiedzi, więc poj
 może przekroczyć próg — blokowane są dopiero kolejne. Backend, który nie raportuje `usage`,
 nie powoduje naliczania zmyślonych wartości (brak danych ≠ zero).
 
+## Rozliczalność w audycie
+
+Każdy wpis dziennika niesie DWIE informacje: `actor` — kto wykonał (agent albo `api`) —
+oraz `principal` — na czyje żądanie (`user:<id_konta>` albo `token:<rola>`). Bez tej drugiej
+przy wielu kontach nie dałoby się odpowiedzieć, kto zlecił konkretne wywołanie narzędzia.
+Pole jest objęte łańcuchem skrótów, a do logu trafia **identyfikator konta, nie nazwa
+użytkownika** (niemodyfikowalny dziennik nie powinien zawierać PII). Szczegóły:
+[BEZPIECZENSTWO.md](BEZPIECZENSTWO.md) (sekcja „Etap 13c").
+
 ## Bezpieczeństwo
 
 - Hasła: `scrypt` (memory-hard, n=2¹⁶), losowa sól per hasło, porównanie w stałym

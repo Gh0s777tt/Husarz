@@ -180,6 +180,21 @@ _PERM_GIT_PR = "git:pr"
 _PERM_PLUGIN_READ = "plugin:read"
 
 
+def _principal_ref(principal: Principal | None) -> str:
+    """Stabilna referencja wywołującego do audytu — ID konta, NIE nazwa użytkownika.
+
+    Dziennik audytu jest niemodyfikowalny, więc nie wkładamy do niego danych, które mogą
+    być PII (nazwa bywa e-mailem). Identyfikator konta jest losowy i wystarcza do
+    powiązania wpisu z użytkownikiem przez magazyn kont. Token maszynowy nie ma konta —
+    zapisujemy wtedy samą rolę, żeby odróżnić go od wywołania użytkownika.
+    """
+    if principal is None:
+        return ""
+    if principal.user_id:
+        return f"user:{principal.user_id}"
+    return f"token:{principal.role}"
+
+
 def _summary(config: HusarzConfig) -> ConfigSummary:
     return ConfigSummary(
         profile=config.platform.profile.value,
@@ -489,11 +504,12 @@ def create_app(
             raise HTTPException(status_code=503, detail="Orkiestrator niedostępny (brak routera).")
         _enforce_quota(accounts, principal)
         # Audyt + licznik prób PRZED uruchomieniem — spójne również przy porażce.
-        audit_log.record("api", "orchestrate", {"task": request.task[:200]})
+        caller = _principal_ref(principal)
+        audit_log.record("api", "orchestrate", {"task": request.task[:200]}, principal=caller)
         with counter_lock:
             state["orchestrations"] += 1
         try:
-            result = orch.run(request.task)
+            result = orch.run(request.task, principal=caller)
         except RateLimitExceededError as exc:
             _record_failure(state, counter_lock, audit_log, "rate_limit")
             raise HTTPException(
@@ -584,6 +600,7 @@ def create_app(
                 "attachments": len(request.attachments),
                 "images": len(request.images),
             },
+            principal=_principal_ref(principal),
         )
         with counter_lock:
             state["chats"] += 1
@@ -623,9 +640,10 @@ def create_app(
     @app.post(
         "/api/config/runtime",
         response_model=ValidateResponse,
-        dependencies=[dep_config_write],
     )
-    def config_apply(request: ValidateRequest) -> ValidateResponse:
+    def config_apply(
+        request: ValidateRequest, principal: Principal | None = dep_config_write
+    ) -> ValidateResponse:
         cdir = state["config_dir"]
         if cdir is None:
             return ValidateResponse(ok=False, error="Nadpisania wymagają katalogu konfiguracji.")
@@ -672,7 +690,12 @@ def create_app(
         # degraduje do ToolResult(ok=False), nie wywala żądania.
         if old_loop is not None:
             old_loop.close()
-        audit_log.record("api", "config.runtime_override", {"keys": sorted(request.overrides)})
+        audit_log.record(
+            "api",
+            "config.runtime_override",
+            {"keys": sorted(request.overrides)},
+            principal=_principal_ref(principal),
+        )
         return ValidateResponse(ok=True, summary=_summary(merged))
 
     # --- Konta: rejestracja / logowanie / wylogowanie / bieżący użytkownik -----
@@ -816,10 +839,17 @@ def create_app(
             token_ref=conn.token_ref,
         )
 
-    @app.delete("/api/git/connections/{name}", dependencies=[dep_git_write])
-    def git_remove_connection(name: str) -> dict[str, bool]:
+    @app.delete("/api/git/connections/{name}")
+    def git_remove_connection(
+        name: str, principal: Principal | None = dep_git_write
+    ) -> dict[str, bool]:
         _require_git().remove(name)
-        audit_log.record("api", "git.connection.remove", {"name": name[:64]})
+        audit_log.record(
+            "api",
+            "git.connection.remove",
+            {"name": name[:64]},
+            principal=_principal_ref(principal),
+        )
         return {"ok": True}
 
     @app.get(
@@ -898,12 +928,18 @@ def create_app(
     @app.get(
         "/api/plugins/{name}/tools",
         response_model=list[RemoteToolView],
-        dependencies=[dep_plugin_read],
     )
-    def plugin_tools(name: str) -> list[RemoteToolView]:
+    def plugin_tools(
+        name: str, principal: Principal | None = dep_plugin_read
+    ) -> list[RemoteToolView]:
         svc = _require_plugins()
         # Audyt PRÓBY przed wyjściem na zewnątrz — także odrzucenia egress/nieznana wtyczka.
-        audit_log.record("api", "plugin.discover", {"plugin": name[:64]})
+        audit_log.record(
+            "api",
+            "plugin.discover",
+            {"plugin": name[:64]},
+            principal=_principal_ref(principal),
+        )
         try:
             tools = svc.discover(name)
         except (PluginError, EgressError) as exc:

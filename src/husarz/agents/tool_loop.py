@@ -146,11 +146,19 @@ class ToolLoop:
         router: SupportsComplete,
         context: str | None = None,
         budget: ToolCallBudget,
+        principal: str = "",
     ) -> AgentResult:
-        """Wykonuje zadanie z narzędziami. Zawsze kończy deterministycznie (limit/budżet)."""
+        """Wykonuje zadanie z narzędziami. Zawsze kończy deterministycznie (limit/budżet).
+
+        ``principal`` (kto ZLECIŁ) trafia do każdego wpisu audytu obok ``actor`` (kto
+        wykonał). Bez tego dziennik odpowiada „kopijnik wywołał shell", ale nie „na czyje
+        żądanie" — a przy wielu kontach to właśnie ta druga informacja jest rozliczalna.
+        """
         # L0 (fail-closed, redundantnie wobec supports): ROE-agent nie wchodzi w pętlę.
         if agent.config.roe_required:
-            self._audit.record(agent.name, "toolloop.refuse_roe", {"task_len": len(task)})
+            self._audit.record(
+                agent.name, "toolloop.refuse_roe", {"task_len": len(task)}, principal=principal
+            )
             return AgentResult(agent.name, "Agent wymaga ROE — pętla narzędziowa niedostępna.", "")
 
         manual = self._dispatcher.manual(agent.tools)
@@ -189,9 +197,11 @@ class ToolLoop:
                 continue
 
             action: ToolAction = parsed.tool_action  # type: ignore[assignment]
-            result = self._authorize_and_dispatch(agent, action, allowed, budget)
+            result = self._authorize_and_dispatch(agent, action, allowed, budget, principal)
             if result is None:  # budżet wyczerpany — deterministyczne zakończenie
-                self._audit.record(agent.name, "toolloop.budget", {"tool": action.tool[:64]})
+                self._audit.record(
+                    agent.name, "toolloop.budget", {"tool": action.tool[:64]}, principal=principal
+                )
                 return AgentResult(
                     agent.name,
                     "Przerwano: wyczerpano globalny budżet wywołań narzędzi.",
@@ -221,6 +231,7 @@ class ToolLoop:
         action: ToolAction,
         allowed: set[str],
         budget: ToolCallBudget,
+        principal: str = "",
     ) -> ToolResult | None:
         """L1 allowlista → budżet → L2 dispatch. ``None`` = budżet wyczerpany (przerwij)."""
         if action.tool not in allowed:
@@ -229,6 +240,7 @@ class ToolLoop:
                 agent.name,
                 "tool.deny",
                 {"tool": action.tool[:64], "action": action.action[:64], "reason": "allowlist"},
+                principal=principal,
             )
             return ToolResult(action.tool, ok=False, error="Narzędzie spoza allowlisty agenta.")
         if not budget.try_spend():
@@ -246,7 +258,7 @@ class ToolLoop:
             # Z JAKIM adresem faktycznie się połączyliśmy (narzędzie web, ADR-0020) — bez tego
             # audyt zna tylko nazwę hosta, a przy pinowaniu to nazwa jest mniej informatywna.
             entry["pinned_ip"] = pinned_ip[:64]
-        self._audit.record(agent.name, "tool.call", entry)
+        self._audit.record(agent.name, "tool.call", entry, principal=principal)
         return result
 
 

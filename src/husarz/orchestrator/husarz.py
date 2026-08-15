@@ -130,6 +130,7 @@ class Orchestrator:
         context: str | None = None,
         budget: ToolCallBudget | None = None,
         meter: UsageMeter | None = None,
+        principal: str = "",
     ) -> Observation:
         agent = self._agents.get(step.agent)
         if agent is None or step.agent == self._orchestrator_name:
@@ -142,7 +143,7 @@ class Orchestrator:
         if agent.config.roe_required:
             if self._roe is None:
                 return Observation(step.agent, step.task, SKIPPED_ROE, "")
-            decision = self._roe.authorize_delegation(step.task)
+            decision = self._roe.authorize_delegation(step.task, principal=principal)
             if not decision.allowed:
                 message = f"[odmowa ROE: {decision.reason}]"
                 if decision.alternative:
@@ -153,7 +154,12 @@ class Orchestrator:
         # Pętla narzędziowa tylko dla agentów z opt-in (supports); reszta — jednokrotni.
         if self._tool_loop is not None and budget is not None and self._tool_loop.supports(agent):
             result = self._tool_loop.run(
-                agent, step.task, router=self._router, context=step_context, budget=budget
+                agent,
+                step.task,
+                router=self._router,
+                context=step_context,
+                budget=budget,
+                principal=principal,
             )
         else:
             result = agent.run(step.task, router=self._router, context=step_context)
@@ -187,8 +193,14 @@ class Orchestrator:
 
     # -- pętla główna -------------------------------------------------------
 
-    def run(self, task: str) -> OrchestratorResult:
-        """Wykonuje pełną orkiestrację zadania i zwraca wynik."""
+    def run(self, task: str, *, principal: str = "") -> OrchestratorResult:
+        """Wykonuje pełną orkiestrację zadania i zwraca wynik.
+
+        Args:
+            task: zadanie użytkownika.
+            principal: referencja wywołującego (kto ZLECIŁ) przewlekana do audytu —
+                wpisy niosą wtedy i „kto wykonał" (agent), i „na czyje żądanie".
+        """
         # Sumator zużycia — ŚWIEŻY per run (jak budżet narzędzi), nigdy współdzielony
         # między żądaniami. Bez niego /api/orchestrate sprawdzał limit, ale go NIE naliczał.
         meter = UsageMeter()
@@ -199,7 +211,8 @@ class Orchestrator:
         # współdzielony między żądaniami/wątkami). None, gdy pętla nieaktywna.
         budget = self._tool_loop.new_budget() if self._tool_loop is not None else None
         observations: list[Observation] = [
-            self._delegate(step, budget=budget, meter=meter) for step in plan.steps
+            self._delegate(step, budget=budget, meter=meter, principal=principal)
+            for step in plan.steps
         ]
 
         rounds = 0
@@ -212,7 +225,9 @@ class Orchestrator:
             context = self._summary(observations)
             extra_steps = reflection.additional_steps[: self._max_plan_steps]
             observations.extend(
-                self._delegate(step, context=context, budget=budget, meter=meter)
+                self._delegate(
+                    step, context=context, budget=budget, meter=meter, principal=principal
+                )
                 for step in extra_steps
             )
             rounds += 1

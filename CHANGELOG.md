@@ -46,6 +46,26 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
   (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
 
+### Dodane (Etap 13c — korelacja principal↔wywołanie w audycie)
+- Dziennik odpowiadał na pytanie „kto WYKONAŁ" (`actor`: `kopijnik`, `puszkarz`, `api`), ale
+  nie „na czyje ŻĄDANIE". Przy jednym operatorze bez znaczenia; przy wielu kontach audyt
+  przestawał być śladem **rozliczalności** — nie dało się powiązać wywołania narzędzia
+  z użytkownikiem, który je zlecił.
+- `AuditEntry` niesie pole `principal`, przewleczone od API przez orkiestrator, pętlę
+  narzędziową, `RoeRuntime`, `RoeGate` i `Puszkarza` — więc wpisy Z GŁĘBI orkiestracji też
+  wiedzą, na czyje żądanie powstały.
+- **Objęte łańcuchem skrótów**: dopisanie albo usunięcie `principal` w istniejącym wpisie
+  unieważnia skrót. Nie da się „odpiąć" wywołania od użytkownika ani podpiąć pod kogo innego
+  bez wykrycia przez `verify`.
+- **Zgodność wstecz**: payload pomija `principal`, gdy jest pusty, więc dzienniki sprzed tej
+  zmiany hashują się dokładnie tak jak wcześniej i nadal przechodzą `verify`. Bez tego
+  aktualizacja Husarza sprawiłaby, że każdy istniejący dziennik wygląda na zmanipulowany.
+- **Bez PII w niemodyfikowalnym logu**: referencja to ID konta (`user:<id>`), nie nazwa
+  użytkownika (bywa e-mailem). Token maszynowy zapisujemy jako `token:<rola>`, żeby odróżnić
+  wywołanie automatu od wywołania człowieka.
+- Testy: +8 (m.in. wykrycie podmiany i usunięcia pola, weryfikacja starego formatu,
+  end-to-end przez `/api/chat` i `/api/orchestrate`).
+
 ### Poprawione (Etap 3b — typowane ustawienia narzędzi; MARTWE klucze w dostarczonym configu)
 - **`ToolConfig.config` było nietypowaną mapą**, walidowaną dopiero (i tylko częściowo) przy
   budowie narzędzia. Skutek okazał się gorszy niż literówki: **dostarczana konfiguracja

@@ -96,7 +96,7 @@ class RoeGate:
         # sekretów). Gdy None — bramka wymaga jedynie obecności podpisu (is_active).
         self._signature_verifier = signature_verifier
 
-    def _verified(self, roe: RoeConfig, target: str, technique: str) -> bool:
+    def _verified(self, roe: RoeConfig, target: str, technique: str, principal: str = "") -> bool:
         """Uruchamia weryfikator podpisu; KAŻDY jego błąd traktuje jak odmowę.
 
         Weryfikator podnosi ``RoeSignatureError`` przy problemie KONFIGURACJI (np. sekret
@@ -119,15 +119,16 @@ class RoeGate:
         try:
             return verifier(roe)
         except SecurityError as exc:
-            self._deny(target, technique, f"Weryfikacja podpisu ROE niemożliwa: {exc}")
+            self._deny(target, technique, f"Weryfikacja podpisu ROE niemożliwa: {exc}", principal)
             return False
 
-    def _deny(self, target: str, technique: str, reason: str) -> RoeDecision:
+    def _deny(self, target: str, technique: str, reason: str, principal: str = "") -> RoeDecision:
         self._audit.record(
             self._actor,
             "roe.deny",
             {"target": target, "technique": technique, "reason": reason},
             roe_ref=self._roe.engagement_id,
+            principal=principal,
         )
         return RoeDecision(allowed=False, reason=reason, dry_run=True)
 
@@ -137,6 +138,7 @@ class RoeGate:
         now: datetime | None = None,
         target: str = "(zlecenie)",
         technique: str = "delegacja",
+        principal: str = "",
     ) -> RoeDecision:
         """Ocena na poziomie ZLECENIA, bez konkretnego celu: zgoda + podpis + okno czasowe.
 
@@ -156,11 +158,15 @@ class RoeGate:
         moment = now if now is not None else datetime.now(UTC)
         roe = self._roe
         if not roe.is_active:
-            return self._deny(target, technique, "ROE nieaktywne (brak zgody lub podpisu).")
-        if self._signature_verifier is not None and not self._verified(roe, target, technique):
-            return self._deny(target, technique, "Podpis ROE nie przeszedł weryfikacji.")
+            return self._deny(
+                target, technique, "ROE nieaktywne (brak zgody lub podpisu).", principal
+            )
+        if self._signature_verifier is not None and not self._verified(
+            roe, target, technique, principal
+        ):
+            return self._deny(target, technique, "Podpis ROE nie przeszedł weryfikacji.", principal)
         if not roe.is_active_at(moment):
-            return self._deny(target, technique, "Poza oknem czasowym ROE.")
+            return self._deny(target, technique, "Poza oknem czasowym ROE.", principal)
         return RoeDecision(allowed=True, reason="Zlecenie aktywne.", dry_run=roe.dry_run_default)
 
     def evaluate(
@@ -170,18 +176,23 @@ class RoeGate:
         technique: str,
         authorized: bool = False,
         now: datetime | None = None,
+        principal: str = "",
     ) -> RoeDecision:
         """Ocenia dopuszczalność akcji i loguje decyzję. Domyślnie dry-run."""
         moment = now if now is not None else datetime.now(UTC)
         roe = self._roe
 
-        engagement = self.engagement_decision(now=moment, target=target, technique=technique)
+        engagement = self.engagement_decision(
+            now=moment, target=target, technique=technique, principal=principal
+        )
         if not engagement.allowed:
             return engagement
         if _matches_any(target, roe.scope.out_of_scope):
-            return self._deny(target, technique, f"Cel '{target}' wyłączony (out_of_scope).")
+            return self._deny(
+                target, technique, f"Cel '{target}' wyłączony (out_of_scope).", principal
+            )
         if not _in_scope(target, roe.scope):
-            return self._deny(target, technique, f"Cel '{target}' spoza zakresu ROE.")
+            return self._deny(target, technique, f"Cel '{target}' spoza zakresu ROE.", principal)
 
         # Techniki porównujemy po normalizacji (bez rozróżniania wielkości liter/spacji),
         # by wariant 'SQLI'/' sqli ' nie omijał listy zabronionych.
@@ -189,9 +200,13 @@ class RoeGate:
         forbidden = {t.strip().lower() for t in roe.forbidden_techniques}
         allowed = {t.strip().lower() for t in roe.allowed_techniques}
         if tech in forbidden:
-            return self._deny(target, technique, f"Technika '{technique}' zabroniona w ROE.")
+            return self._deny(
+                target, technique, f"Technika '{technique}' zabroniona w ROE.", principal
+            )
         if allowed and tech not in allowed:
-            return self._deny(target, technique, f"Technika '{technique}' niedozwolona w ROE.")
+            return self._deny(
+                target, technique, f"Technika '{technique}' niedozwolona w ROE.", principal
+            )
 
         # Domyślnie dry-run; akcja aktywna wymaga jawnej autoryzacji operatora.
         dry_run = roe.dry_run_default or not authorized
@@ -205,6 +220,7 @@ class RoeGate:
                 "authorized": authorized,
             },
             roe_ref=roe.engagement_id,
+            principal=principal,
         )
         reason = "Dozwolone (dry-run)." if dry_run else "Dozwolone (akcja aktywna)."
         return RoeDecision(allowed=True, reason=reason, dry_run=dry_run)

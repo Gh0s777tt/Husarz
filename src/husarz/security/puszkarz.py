@@ -125,15 +125,22 @@ class Puszkarz:
         self._audit = audit
         self._actor = actor
 
-    def review_request(self, text: str) -> PuszkarzReview:
-        """Ocenia żądanie. Odmawia wytwarzania narzędzi ofensywnych."""
+    def review_request(self, text: str, *, principal: str = "") -> PuszkarzReview:
+        """Ocenia żądanie. Odmawia wytwarzania narzędzi ofensywnych.
+
+        ``principal`` (kto zlecił) trafia do audytu obok sygnału odmowy — przy wielu
+        kontach sam ``actor='puszkarz'`` nie odpowiada na pytanie, czyje to było żądanie.
+        """
         signal = _classify(text.lower())
         if signal:
             # Do audytu trafia SKRÓT żądania i sygnał — nigdy surowa treść
             # (mogłaby zawierać sekrety/PII w niemodyfikowalnym logu).
             digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
             self._audit.record(
-                self._actor, "puszkarz.refuse", {"request_sha256": digest, "signal": signal}
+                self._actor,
+                "puszkarz.refuse",
+                {"request_sha256": digest, "signal": signal},
+                principal=principal,
             )
             return PuszkarzReview(
                 refused=True,
@@ -149,6 +156,7 @@ class Puszkarz:
         technique: str,
         authorized: bool = False,
         now: datetime | None = None,
+        principal: str = "",
     ) -> RoeDecision:
         """Autoryzuje akcję na celu przez ROE-gate (domyślnie dry-run).
 
@@ -159,10 +167,11 @@ class Puszkarz:
                 self._actor,
                 "roe.deny",
                 {"target": target[:128], "technique": technique[:64], "reason": "brak ROE"},
+                principal=principal,
             )
             return RoeDecision(
                 allowed=False, reason="Brak skonfigurowanego zlecenia ROE.", dry_run=True
             )
         return self._gate.evaluate(
-            target=target, technique=technique, authorized=authorized, now=now
+            target=target, technique=technique, authorized=authorized, now=now, principal=principal
         )

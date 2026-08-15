@@ -185,7 +185,10 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   `max_plan_steps`); ogrodzenie wyniku (`husarz/fencing.py`). Wpięcie w orkiestrator/API.
 - ✅ Testy: +35 (offline). Docs: ADR-0016.
 - ✅ Pinowanie IP dla `web`/`plugin` (domknięcie TOCTOU rebindingu) — Etap 15 (ADR-0020).
-- ⬜ Natywny adapter `tool_calls` (function-calling API); korelacja principal↔wywołanie.
+- ✅ Korelacja principal↔wywołanie w audycie (Etap 13c): wpisy niosą i „kto wykonał"
+  (agent), i „na czyje żądanie" (`user:<id>` / `token:<rola>`), objęte łańcuchem skrótów,
+  ze zgodnością wsteczną starych dzienników. Testy: +8.
+- ⬜ Natywny adapter `tool_calls` (function-calling API).
 
 ## ✅ Etap 13b — Wywołanie narzędzi wtyczki MCP (`tools/call`)
 - ✅ `kind: plugin` (narzędzie agenta) wiąże JEDEN konektor przez `config.plugin`; akcje

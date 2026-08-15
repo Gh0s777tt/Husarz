@@ -745,3 +745,35 @@ a taki wynik trafiłby do syntezy hetmana jako fakt.
 wdrożeń bez testów byłoby friction bez zysku. Autoryzacja NA CEL nie ma dziś konsumenta
 (Puszkarz nie wykonuje akcji); pojawi się wraz z nadaniem mu zdolności wykonawczych — i wtedy
 `RoeGate.evaluate` (zakres, techniki, `--authorized`) jest już gotowe i pokryte testami.
+
+### Etap 13c — korelacja principal↔wywołanie w audycie (data: 2026-08-15)
+
+**Zakres:** domknięcie otwartej pozycji z Etapu 13. Dziennik odpowiadał na pytanie „kto
+WYKONAŁ" (`actor`: `kopijnik`, `puszkarz`, `api`), ale nie „na czyje ŻĄDANIE". Przy jednym
+operatorze to bez znaczenia, ale przy wielu kontach audyt przestaje być śladem
+**rozliczalności**: widać, że agent uruchomił `shell`, lecz nie widać, kto go o to poprosił.
+
+| Niezmiennik | Test |
+|---|---|
+| `principal` jest objęty łańcuchem skrótów — podmiana wpisu unieważnia go | `test_principal_is_covered_by_hash_chain` |
+| Usunięcie `principal` (odpięcie wywołania od użytkownika) też jest wykrywane | `test_stripping_principal_is_detected` |
+| **Zgodność wstecz**: dzienniki sprzed zmiany nadal przechodzą `verify` | `test_legacy_entries_without_principal_still_verify` |
+| Wpisy z principalem i bez mieszają się w łańcuchu bez fałszywego alarmu | `test_chain_continues_across_mixed_entries` |
+| Referencja to ID konta, NIE nazwa użytkownika (brak PII w logu) | `test_principal_ref_uses_account_id_not_username` |
+| Token maszynowy odróżnialny od wywołania człowieka (`token:<rola>`) | `test_machine_token_is_distinguishable_from_user` |
+| Wpisy z GŁĘBI orkiestracji niosą wywołującego (nie tylko wpis wejściowy) | `test_orchestration_audit_entries_carry_caller` |
+
+**Dlaczego pole jest opcjonalne w payloadzie.** `principal` trafia do hashowanego payloadu
+wyłącznie, gdy jest niepusty. Ma to dwie konsekwencje i obie są zamierzone: stare dzienniki
+hashują się bez zmian (aktualizacja Husarza nie może sprawić, że cała historia wygląda na
+zmanipulowaną), a jednocześnie każda ingerencja w to pole — dopisanie albo usunięcie —
+zmienia payload i psuje skrót. Nie ma tu luki „usuń pole, żeby przeszło".
+
+**Dlaczego ID konta, a nie nazwa.** Dziennik jest z założenia niemodyfikowalny, więc nie
+wkładamy do niego danych, których nie da się usunąć, a które mogą być PII (nazwa bywa
+e-mailem). Identyfikator konta jest losowy i wystarcza do powiązania z użytkownikiem przez
+magazyn kont — spójnie z resztą audytu, gdzie zapisujemy skróty i rozmiary, nie treść.
+
+**Ograniczenia:** korelacja obejmuje ścieżki przechodzące przez API (czat, orkiestracja,
+config, Git, wtyczki). Wywołania biblioteczne (np. `Orchestrator.run` wprost z kodu) mają
+`principal=""` — to poprawne, bo nie ma wtedy uwierzytelnionego wywołującego.

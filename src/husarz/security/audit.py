@@ -40,6 +40,9 @@ class AuditEntry:
     roe_ref: str | None
     prev_hash: str
     entry_hash: str
+    # KTO zlecił akcję (referencja konta/tokenu, nie nazwa użytkownika — bez PII w logu,
+    # który jest niemodyfikowalny). Puste = brak uwierzytelnienia albo wpis sprzed Etapu 13b.
+    principal: str = ""
 
 
 def _payload(
@@ -49,20 +52,31 @@ def _payload(
     detail: dict[str, Any],
     roe_ref: str | None,
     prev_hash: str,
+    principal: str = "",
 ) -> str:
-    return json.dumps(
-        {
-            "timestamp": timestamp,
-            "actor": actor,
-            "action": action,
-            "detail": detail,
-            "roe_ref": roe_ref,
-            "prev_hash": prev_hash,
-        },
-        sort_keys=True,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
+    """Buduje kanoniczny payload wpisu do policzenia skrótu łańcucha.
+
+    ``principal`` trafia do payloadu WYŁĄCZNIE, gdy jest niepusty. To celowe i ma dwie
+    konsekwencje, obie pożądane:
+
+    1. **Zgodność wstecz** — dzienniki sprzed dodania tego pola hashują się dokładnie tak
+       jak wcześniej, więc ``verify`` na starym pliku nadal przechodzi (inaczej dodanie
+       kolumny wyglądałoby jak manipulacja całą historią).
+    2. **Tamper-evidence bez luki** — dopisanie albo usunięcie ``principal`` w istniejącym
+       wpisie zmienia payload, więc skrót przestaje pasować. Nie da się „odpiąć" wywołania
+       od użytkownika ani podpiąć go pod kogo innego bez wykrycia.
+    """
+    data: dict[str, Any] = {
+        "timestamp": timestamp,
+        "actor": actor,
+        "action": action,
+        "detail": detail,
+        "roe_ref": roe_ref,
+        "prev_hash": prev_hash,
+    }
+    if principal:
+        data["principal"] = principal
+    return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 @dataclass(slots=True)
@@ -108,8 +122,19 @@ class AuditLog:
         detail: dict[str, Any] | None = None,
         *,
         roe_ref: str | None = None,
+        principal: str = "",
     ) -> AuditEntry:
-        """Dopisuje wpis i zwraca go. Zapis do pliku PRZED mutacją pamięci."""
+        """Dopisuje wpis i zwraca go. Zapis do pliku PRZED mutacją pamięci.
+
+        Args:
+            actor: kto WYKONAŁ (agent albo ``api``).
+            action: nazwa zdarzenia.
+            detail: szczegóły (bez surowej treści/sekretów — skróty i rozmiary).
+            roe_ref: identyfikator zlecenia ROE, jeśli dotyczy.
+            principal: kto ZLECIŁ (referencja konta/tokenu). Rozdzielenie „kto wykonał"
+                od „kto zlecił" jest istotą rozliczalności przy wielu użytkownikach —
+                sam ``actor='kopijnik'`` nie odpowiada na pytanie, czyje to było żądanie.
+        """
         # Głęboka kopia — treść nie może zmienić się po zahashowaniu (niezmienność).
         safe_detail = copy.deepcopy(dict(detail or {}))
         # Cała sekwencja (odczyt prev_hash → hash → zapis pliku → mutacja pamięci)
@@ -117,7 +142,9 @@ class AuditLog:
         with self._lock:
             timestamp = self.clock().isoformat()
             try:
-                payload = _payload(timestamp, actor, action, safe_detail, roe_ref, self._last_hash)
+                payload = _payload(
+                    timestamp, actor, action, safe_detail, roe_ref, self._last_hash, principal
+                )
             except (TypeError, ValueError) as exc:
                 raise AuditError(f"Szczegóły audytu nie są serializowalne do JSON: {exc}") from exc
             entry = AuditEntry(
@@ -128,6 +155,7 @@ class AuditLog:
                 roe_ref=roe_ref,
                 prev_hash=self._last_hash,
                 entry_hash=self._compute_hash(payload),
+                principal=principal,
             )
             # Persist-first: jeśli zapis pliku zawiedzie, stan w pamięci NIE rozjeżdża się.
             self._append_to_file(entry)
@@ -142,7 +170,13 @@ class AuditLog:
             if entry.prev_hash != prev:
                 return False
             payload = _payload(
-                entry.timestamp, entry.actor, entry.action, entry.detail, entry.roe_ref, prev
+                entry.timestamp,
+                entry.actor,
+                entry.action,
+                entry.detail,
+                entry.roe_ref,
+                prev,
+                entry.principal,
             )
             if self._compute_hash(payload) != entry.entry_hash:
                 return False

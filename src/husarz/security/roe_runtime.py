@@ -69,32 +69,40 @@ class RoeRuntime:
         """Identyfikatory znanych zleceń (posortowane — determinizm)."""
         return sorted(self._gates)
 
-    def review(self, text: str) -> PuszkarzReview:
+    def review(self, text: str, *, principal: str = "") -> PuszkarzReview:
         """Bezwarunkowy przegląd żądania (odmowa wytwarzania ofensywy)."""
-        return self._puszkarz.review_request(text)
+        return self._puszkarz.review_request(text, principal=principal)
 
     def gate_for(self, engagement_id: str) -> RoeGate | None:
         """Zwraca bramkę zlecenia (do autoryzacji NA CEL), albo ``None``."""
         return self._gates.get(engagement_id)
 
-    def authorize_delegation(self, task: str, *, now: datetime | None = None) -> DelegationDecision:
+    def authorize_delegation(
+        self, task: str, *, now: datetime | None = None, principal: str = ""
+    ) -> DelegationDecision:
         """Ocenia, czy wolno delegować zadanie do agenta wymagającego ROE.
 
         Args:
             task: treść kroku planu (NIEZAUFANA — wyłącznie do przeglądu odmowy).
             now: chwila oceny (domyślnie teraz).
+            principal: kto ZLECIŁ (referencja konta/tokenu) — do audytu.
 
         Returns:
             Decyzja z identyfikatorem zlecenia, pod którym delegacja jest dozwolona.
             Odmowa jest już zapisana w audycie (przez ``Puszkarz``/``RoeGate``).
         """
-        review = self.review(task)
+        review = self.review(task, principal=principal)
         if review.refused:
             return DelegationDecision(
                 allowed=False, reason=review.reason, alternative=review.alternative
             )
         if not self._gates:
-            self._audit.record(self._actor, "roe.delegation_deny", {"reason": "brak zleceń"})
+            self._audit.record(
+                self._actor,
+                "roe.delegation_deny",
+                {"reason": "brak zleceń"},
+                principal=principal,
+            )
             return DelegationDecision(
                 allowed=False,
                 reason="Brak skonfigurowanego zlecenia ROE — agent bezpieczeństwa nieaktywny.",
@@ -102,13 +110,14 @@ class RoeRuntime:
         # Pierwsze zlecenie, które przechodzi WSZYSTKIE bramy (zgoda + podpis + okno).
         # Odmowy poszczególnych zleceń audytuje sama bramka, więc ślad jest kompletny.
         for engagement_id in self.engagements:
-            decision = self._gates[engagement_id].engagement_decision(now=now)
+            decision = self._gates[engagement_id].engagement_decision(now=now, principal=principal)
             if decision.allowed:
                 self._audit.record(
                     self._actor,
                     "roe.delegation_allow",
                     {"dry_run": decision.dry_run},
                     roe_ref=engagement_id,
+                    principal=principal,
                 )
                 return DelegationDecision(
                     allowed=True,
