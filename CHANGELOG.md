@@ -46,6 +46,26 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
   (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
 
+### Dodane (Etap 4c — wpięcie ROE-gate w runtime orkiestratora)
+- Domknięty ostatni krok Etapu 4. `RoeGate` był kompletny, ale **nieużywany**: orkiestrator
+  twardo pomijał agentów `roe_required`, więc ani bramka, ani weryfikacja podpisu z 4b nie
+  miały konsumenta. Teraz podpis jest **nośny** — decyduje o delegacji Puszkarza.
+- Nowy `husarz.security.roe_runtime` (`RoeRuntime`, `build_roe_runtime`): bramka per zlecenie
+  z weryfikatorem podpisu + bezwarunkowy przegląd odmowy ofensywy. Wpięty w `build_orchestrator`
+  i przebudowywany przy `POST /api/config/runtime` (jak router i wtyczki).
+- **Bez nowych zdolności ofensywnych**: Puszkarz nie ma narzędzi (pętla wyklucza `roe_required`
+  na L0), więc pod ważnym zleceniem wytwarza wyłącznie analizę tekstową w dry-run. Zmiana to
+  „nie działa nigdy" → „działa wyłącznie pod zweryfikowanym zleceniem, bez narzędzi, w dry-run".
+- Bramka na poziomie DELEGACJI odpowiada „czy istnieje ważne zlecenie", a nie „czy wolno
+  zaatakować cel X" — świadomie, bo zadanie kroku planu to wolny tekst od modelu, a wyłuskiwanie
+  z niego celu byłoby autoryzacją sterowaną przez model. Autoryzacja na cel zostaje
+  w `RoeGate.evaluate` (gotowa, pokryta testami, bez konsumenta do czasu nadania zdolności).
+- Agentowi wstrzykiwana jest notatka kontekstowa o trybie dry-run i braku narzędzi — inaczej
+  model mógłby raportować działania, których nie wykonał, a to trafiłoby do syntezy jako fakt.
+- `RoeGate.engagement_decision` wydzielone z `evaluate` (jedna implementacja trzech bram:
+  zgoda + podpis + okno). `Puszkarz` przyjmuje bramkę opcjonalną — odmowa ofensywy musi
+  działać także bez zleceń. Testy: +11 (łącznie 859). Docs: BEZPIECZENSTWO.md, ADR-0021.
+
 ### Dodane (Etap 4b — kryptograficzny podpis ROE)
 - Domknięta ostatnia otwarta pozycja rdzenia bezpieczeństwa (Etap 4). ROE to JEDYNY artefakt
   uprawniający Puszkarza do aktywnych działań wobec konkretnych celów, a jego ważność

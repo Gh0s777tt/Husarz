@@ -93,8 +93,9 @@ from husarz.router.errors import (
     RouterError,
 )
 from husarz.security.audit import AuditLog, build_audit_log
-from husarz.security.errors import AuditError
+from husarz.security.errors import AuditError, SecurityError
 from husarz.security.rbac import Rbac
+from husarz.security.roe_runtime import build_roe_runtime
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -289,7 +290,13 @@ def create_app(
             data_dir=cfg.platform.data_dir,
             plugin_service=plugins,  # ten sam (świeży) serwis co /api/plugins — jedno źródło prawdy
         )
-        orch = build_orchestrator(cfg, active, prompts_dir=prompts_dir, tool_loop=loop)
+        # Runtime ROE budowany z BIEŻĄCEGO configu (jak router i wtyczki) — zmiana polityki
+        # podpisu albo treści zlecenia obowiązuje bez restartu, a agent `roe_required` jest
+        # delegowany wyłącznie pod zleceniem z ważnym podpisem (ADR-0021).
+        roe_runtime = build_roe_runtime(cfg, audit_log, secrets=secrets)
+        orch = build_orchestrator(
+            cfg, active, prompts_dir=prompts_dir, tool_loop=loop, roe_runtime=roe_runtime
+        )
         return active, orch, plugins, loop, git
 
     def _resolve_chat_model(cfg: HusarzConfig) -> str:
@@ -639,7 +646,12 @@ def create_app(
         # Przebuduj router+orkiestrator, by /api/orchestrate i /api/chat używały
         # NOWEJ konfiguracji (a nie starej sprzed nadpisania). Budowa poza zamkiem,
         # atomowa podmiana pod zamkiem — spójna para (config, router) dla /api/chat.
-        new_router, new_orch, new_plugins, new_loop, new_git = _build_stack(merged)
+        try:
+            new_router, new_orch, new_plugins, new_loop, new_git = _build_stack(merged)
+        except SecurityError as exc:
+            # np. nadpisanie podnosi `consent`, a brak klucza weryfikującego podpis ROE.
+            # Fail-closed: NIE stosujemy configu, ale zwracamy czytelny błąd zamiast 500.
+            return ValidateResponse(ok=False, error=str(exc))
         with counter_lock:
             state["config"] = merged
             state["runtime_overrides"] = request.overrides

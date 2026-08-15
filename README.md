@@ -155,8 +155,10 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
   (`ed25519`/`hmac-sha256`) obejmującym kanoniczną treść — poszerzenie zakresu, wydłużenie
   okna czy podniesienie zgody unieważnia podpis. Podpis wygenerujesz przez
   `husarz roe sign --engagement <id>` ([ADR-0021](docs/adr/0021-podpis-roe.md)).
-  *Prymityw gotowy i pokryty testami; wpięcie `RoeGate` w przepływ runtime — Etap 4/5
-  (dziś orkiestrator twardo pomija agentów `roe_required`, więc Puszkarz nie jest delegowany).*
+  Bramka jest **wpięta w orkiestrator**: agent wymagający ROE jest delegowany wyłącznie pod
+  zleceniem ze zgodą, ważnym podpisem i w oknie czasowym — w trybie dry-run i **bez dostępu
+  do narzędzi**. Autoryzacja na konkretny cel (`RoeGate.evaluate`) czeka na nadanie Puszkarzowi
+  zdolności wykonawczych.
 
 ## Dokumentacja
 

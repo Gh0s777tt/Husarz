@@ -25,10 +25,19 @@ from husarz.orchestrator.prompts import (
     SYNTHESIS_INSTRUCTION,
 )
 from husarz.router.types import ChatMessage, ChatRequest
+from husarz.security.roe_runtime import RoeRuntime
 
 DEFAULT_ORCHESTRATOR = "husarz"
 SKIPPED_UNKNOWN_AGENT = "[pominięto: nieznany lub niedozwolony agent]"
-SKIPPED_ROE = "[pominięto: agent wymaga aktywnego ROE — pełny ROE-gate w Etapie 4]"
+SKIPPED_ROE = "[pominięto: agent wymaga aktywnego ROE]"
+# Notatka kontekstowa wstrzykiwana agentowi działającemu pod ROE. Model MUSI wiedzieć,
+# że jest w dry-run i nie ma narzędzi — inaczej mógłby raportować „wykonałem skan",
+# którego nie wykonał (pętla narzędziowa wyklucza agentów roe_required na poziomie L0).
+ROE_DRY_RUN_NOTE = (
+    "TRYB DRY-RUN w ramach zlecenia ROE '{engagement}'. NIE wykonujesz żadnych działań "
+    "aktywnych i nie masz dostępu do narzędzi — przygotowujesz wyłącznie plan, analizę "
+    "i rekomendacje. Nie twierdź, że cokolwiek uruchomiłeś."
+)
 
 
 class OrchestratorError(Exception):
@@ -69,6 +78,7 @@ class Orchestrator:
         isolate_untrusted: bool = True,
         tool_loop: ToolLoop | None = None,
         max_plan_steps: int = 20,
+        roe_runtime: RoeRuntime | None = None,
     ) -> None:
         if orchestrator_name not in agents:
             raise OrchestratorError(
@@ -83,6 +93,9 @@ class Orchestrator:
         # Pętla narzędziowa (opcjonalna). Bez niej — zachowanie sprzed Etapu 13.
         self._tool_loop = tool_loop
         self._max_plan_steps = max_plan_steps
+        # Runtime ROE (opcjonalny). Bez niego agenci `roe_required` są pomijani jak dotąd —
+        # fail-closed: brak wpiętej bramki NIE może oznaczać zgody na delegację.
+        self._roe = roe_runtime
 
     # -- fazy ---------------------------------------------------------------
 
@@ -111,17 +124,29 @@ class Orchestrator:
         agent = self._agents.get(step.agent)
         if agent is None or step.agent == self._orchestrator_name:
             return Observation(step.agent, step.task, SKIPPED_UNKNOWN_AGENT, "")
-        # Bramka ROE na poziomie orkiestracji: agent wymagający ROE (Puszkarz) nie
-        # jest delegowany bez aktywnego zlecenia. Pełny ROE-gate runtime: Etap 4.
+        # Bramka ROE na poziomie orkiestracji (ADR-0006/0021, Etap 4c): agent wymagający
+        # ROE jest delegowany WYŁĄCZNIE pod zleceniem, które ma zgodę, ważny KRYPTOGRAFICZNIE
+        # podpis i mieści się w oknie czasowym. Bez wpiętego runtime'u ROE — pomijamy
+        # (fail-closed: brak konfiguracji nie może oznaczać zgody).
+        step_context = context
         if agent.config.roe_required:
-            return Observation(step.agent, step.task, SKIPPED_ROE, "")
+            if self._roe is None:
+                return Observation(step.agent, step.task, SKIPPED_ROE, "")
+            decision = self._roe.authorize_delegation(step.task)
+            if not decision.allowed:
+                message = f"[odmowa ROE: {decision.reason}]"
+                if decision.alternative:
+                    message = f"{message} {decision.alternative}"
+                return Observation(step.agent, step.task, message, "")
+            note = ROE_DRY_RUN_NOTE.format(engagement=decision.engagement_id)
+            step_context = f"{context}\n\n{note}" if context else note
         # Pętla narzędziowa tylko dla agentów z opt-in (supports); reszta — jednokrotni.
         if self._tool_loop is not None and budget is not None and self._tool_loop.supports(agent):
             result = self._tool_loop.run(
-                agent, step.task, router=self._router, context=context, budget=budget
+                agent, step.task, router=self._router, context=step_context, budget=budget
             )
         else:
-            result = agent.run(step.task, router=self._router, context=context)
+            result = agent.run(step.task, router=self._router, context=step_context)
         return Observation(
             agent=result.agent, task=step.task, output=result.output, model=result.model
         )
@@ -190,12 +215,15 @@ def build_orchestrator(
     orchestrator_name: str = DEFAULT_ORCHESTRATOR,
     max_extra_rounds: int = 1,
     tool_loop: ToolLoop | None = None,
+    roe_runtime: RoeRuntime | None = None,
 ) -> Orchestrator:
     """Buduje Chorągiew (agentów) z konfiguracji i składa orkiestratora.
 
     Izolacja treści niezaufanej (ogradzanie obserwacji) jest sterowana flagą
     ``security.prompt_injection_filters`` z konfiguracji. ``tool_loop`` (opcjonalny)
     włącza pętlę narzędziową dla agentów z opt-in — bez niego zachowanie sprzed Etapu 13.
+    ``roe_runtime`` (opcjonalny) wpina bramkę ROE: agenci `roe_required` są delegowani
+    wyłącznie pod zleceniem z ważnym podpisem — bez niego są pomijani (ADR-0021).
     """
     agents = build_agents(config, prompts_dir=prompts_dir)
     return Orchestrator(
@@ -206,4 +234,5 @@ def build_orchestrator(
         isolate_untrusted=config.security.prompt_injection_filters,
         tool_loop=tool_loop,
         max_plan_steps=config.security.tool_loop.max_plan_steps,
+        roe_runtime=roe_runtime,
     )

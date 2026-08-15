@@ -56,8 +56,13 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   zakresu, **kotwica profilu** (`platform.profile` nie do nadpisania przez `/api/config/runtime`
   ani domyślnie przez `husarz up`), kolizja `HUSARZ_SECURITY__ROE__*` w loaderze, widoczność
   stanu weryfikacji w `validate`, audyt przy błędzie weryfikatora.
-- ⬜ Pozostaje: wpięcie `RoeGate` w runtime (dziś orkiestrator pomija `roe_required`),
-  klucze prywatne z hasłem, rotacja/wersjonowanie kluczy.
+- ✅ Wpięcie `RoeGate` w runtime (Etap 4c): `RoeRuntime` z configu (bramka per zlecenie +
+  weryfikator podpisu) wpięty w orkiestrator. Agent `roe_required` jest delegowany WYŁĄCZNIE
+  pod zleceniem ze zgodą, ważnym podpisem i w oknie czasowym — inaczej odmowa ze śladem
+  w audycie. Bez nowych zdolności ofensywnych: Puszkarz nadal nie ma narzędzi (L0), działa
+  w dry-run i dostaje notatkę kontekstową o tym trybie. Testy: +11.
+- ⬜ Pozostaje: autoryzacja NA CEL w przepływie (dziś `RoeGate.evaluate` gotowe, ale Puszkarz
+  nie wykonuje akcji); klucze prywatne z hasłem; rotacja/wersjonowanie kluczy.
 - 🚧 Uwierzytelnienie + przypisanie ról: **token Bearer + RBAC wpięte w API (Etap 5)**;
   pełny **OIDC** i **mTLS** — Etap 6.
 - ⬜ Runtime egress deny-all na warstwie sieci + izolacja sandboxa (Etap 6).

@@ -2,7 +2,7 @@
 
 - Status: przyjęty
 - Data: 2026-08-15
-- Etap: 4b
+- Etap: 4b (wpięcie w runtime: 4c)
 - Domyka ograniczenie z: [ADR-0006](0006-bezpieczenstwo-roe.md) (ROE-gate i Puszkarz)
 
 ## Kontekst
@@ -22,9 +22,15 @@ a wtedy Husarz skanowałby cele, na które nikt nie wyraził zgody. Konsekwencj�
 kompromitacja Husarza, tylko **atak na osobę trzecią z użyciem Husarza jako narzędzia**;
 prawnie to różnica między testem penetracyjnym a przestępstwem.
 
-Ryzyko było dotąd **utajone**, nie żywe: orkiestrator twardo pomija agentów z
-`roe_required` (`SKIPPED_ROE`), więc bramka nie jest jeszcze ścieżką runtime. To właśnie
-dlatego prymityw autoryzacji domykamy TERAZ — zanim bramka zostanie wpięta.
+Ryzyko było w chwili podejmowania tej decyzji **utajone**, nie żywe: orkiestrator twardo
+pomijał agentów z `roe_required` (`SKIPPED_ROE`), więc bramka nie była jeszcze ścieżką
+runtime. To właśnie dlatego prymityw autoryzacji domknęliśmy WTEDY — zanim bramka została
+wpięta.
+
+> **Aktualizacja (Etap 4c).** Bramka jest już wpięta: `husarz.security.roe_runtime.RoeRuntime`
+> decyduje o delegacji agentów `roe_required` w orkiestratorze, więc opisany tu podpis jest
+> teraz **nośny** — podrobiony blokuje delegację. Szczegóły w `docs/BEZPIECZENSTWO.md`
+> (sekcja „Etap 4c").
 
 ## Decyzja
 
@@ -131,7 +137,8 @@ kryptograficzne. Bramka pozostaje jedynym punktem decyzji.
 
 ## Do zrobienia (świadomie poza zakresem)
 
-- Wpięcie `RoeGate` w runtime (dziś orkiestrator pomija agentów `roe_required`) — dopiero
-  wtedy ta warstwa zacznie chronić realny przepływ.
+- ~~Wpięcie `RoeGate` w runtime~~ — **zrealizowane** (Etap 4c): `RoeRuntime` bramkuje
+  delegację agentów `roe_required` w orkiestratorze, więc podpis jest teraz nośny.
+  Autoryzacja NA CEL (`RoeGate.evaluate`) czeka na nadanie Puszkarzowi zdolności wykonawczych.
 - Klucze prywatne chronione hasłem (`load_pem_private_key(password=...)`).
 - Rotacja i wersjonowanie kluczy (dziś: jeden `key_ref`).

@@ -131,6 +131,38 @@ class RoeGate:
         )
         return RoeDecision(allowed=False, reason=reason, dry_run=True)
 
+    def engagement_decision(
+        self,
+        *,
+        now: datetime | None = None,
+        target: str = "(zlecenie)",
+        technique: str = "delegacja",
+    ) -> RoeDecision:
+        """Ocena na poziomie ZLECENIA, bez konkretnego celu: zgoda + podpis + okno czasowe.
+
+        Wydzielona z :meth:`evaluate`, bo orkiestrator musi odpowiedzieć na pytanie „czy
+        w ogóle istnieje ważne zlecenie", ZANIM pozna jakikolwiek cel — a nie chcemy dwóch
+        implementacji tych samych trzech bram (rozjechałyby się przy pierwszej poprawce).
+        ``evaluate`` woła tę metodę jako swój pierwszy etap.
+
+        Args:
+            now: chwila oceny (domyślnie teraz, UTC).
+            target: etykieta celu do audytu (dla wywołania bez celu — sentinel).
+            technique: etykieta techniki do audytu.
+
+        Returns:
+            ``RoeDecision``; przy odmowie wpis ``roe.deny`` jest już zapisany w audycie.
+        """
+        moment = now if now is not None else datetime.now(UTC)
+        roe = self._roe
+        if not roe.is_active:
+            return self._deny(target, technique, "ROE nieaktywne (brak zgody lub podpisu).")
+        if self._signature_verifier is not None and not self._verified(roe, target, technique):
+            return self._deny(target, technique, "Podpis ROE nie przeszedł weryfikacji.")
+        if not roe.is_active_at(moment):
+            return self._deny(target, technique, "Poza oknem czasowym ROE.")
+        return RoeDecision(allowed=True, reason="Zlecenie aktywne.", dry_run=roe.dry_run_default)
+
     def evaluate(
         self,
         *,
@@ -143,12 +175,9 @@ class RoeGate:
         moment = now if now is not None else datetime.now(UTC)
         roe = self._roe
 
-        if not roe.is_active:
-            return self._deny(target, technique, "ROE nieaktywne (brak zgody lub podpisu).")
-        if self._signature_verifier is not None and not self._verified(roe, target, technique):
-            return self._deny(target, technique, "Podpis ROE nie przeszedł weryfikacji.")
-        if not roe.is_active_at(moment):
-            return self._deny(target, technique, "Poza oknem czasowym ROE.")
+        engagement = self.engagement_decision(now=moment, target=target, technique=technique)
+        if not engagement.allowed:
+            return engagement
         if _matches_any(target, roe.scope.out_of_scope):
             return self._deny(target, technique, f"Cel '{target}' wyłączony (out_of_scope).")
         if not _in_scope(target, roe.scope):

@@ -117,7 +117,10 @@ class PuszkarzReview:
 class Puszkarz:
     """Runtime agenta bezpieczeństwa: odmowa ofensywy + akcje przez ROE-gate."""
 
-    def __init__(self, gate: RoeGate, audit: AuditLog, *, actor: str = "puszkarz") -> None:
+    def __init__(self, gate: RoeGate | None, audit: AuditLog, *, actor: str = "puszkarz") -> None:
+        # Bramka jest OPCJONALNA: odmowa wytwarzania ofensywy to reguła bezwarunkowa, która
+        # musi działać także wtedy, gdy nie istnieje żadne zlecenie (wtedy `authorize_action`
+        # odmawia z definicji — nie ma czego autoryzować).
         self._gate = gate
         self._audit = audit
         self._actor = actor
@@ -147,7 +150,19 @@ class Puszkarz:
         authorized: bool = False,
         now: datetime | None = None,
     ) -> RoeDecision:
-        """Autoryzuje akcję na celu przez ROE-gate (domyślnie dry-run)."""
+        """Autoryzuje akcję na celu przez ROE-gate (domyślnie dry-run).
+
+        Bez bramki (brak jakiegokolwiek zlecenia) zwraca ODMOWĘ — fail-closed.
+        """
+        if self._gate is None:
+            self._audit.record(
+                self._actor,
+                "roe.deny",
+                {"target": target[:128], "technique": technique[:64], "reason": "brak ROE"},
+            )
+            return RoeDecision(
+                allowed=False, reason="Brak skonfigurowanego zlecenia ROE.", dry_run=True
+            )
         return self._gate.evaluate(
             target=target, technique=technique, authorized=authorized, now=now
         )

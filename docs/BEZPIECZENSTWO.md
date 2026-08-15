@@ -704,3 +704,44 @@ stałoczasowe, klucz prywatny Ed25519 **nigdy nie trafia do runtime'u** (podpisu
 chronić realny przepływ dopiero wtedy. Klucze prywatne chronione hasłem oraz rotacja/
 wersjonowanie kluczy pozostają do zrobienia (dziś jeden `key_ref`; rotacja unieważnia
 wszystkie podpisy, co jest właściwością podpisów, nie usterką).
+
+### Etap 4c — wpięcie ROE-gate w runtime orkiestratora (data: 2026-08-15)
+
+**Zakres:** domknięcie ostatniego kroku Etapu 4. Do tej pory `RoeGate` był kompletny
+i przetestowany, ale **nieużywany**: orkiestrator twardo pomijał każdego agenta
+z `roe_required`, więc ani bramka, ani weryfikacja podpisu (Etap 4b) nie miały konsumenta.
+Teraz podpis jest **nośny** — decyduje o tym, czy Puszkarz w ogóle zostanie zadelegowany.
+
+**Co to NIE jest.** Wpięcie nie nadaje żadnej nowej zdolności ofensywnej. Puszkarz nie ma
+narzędzi: pętla narzędziowa wyklucza agentów `roe_required` na poziomie L0, więc nawet pod
+ważnym zleceniem agent wytwarza wyłącznie analizę tekstową, w trybie dry-run. Zmiana brzmi:
+„Puszkarz nie działa nigdy" → „Puszkarz działa wyłącznie pod kryptograficznie zweryfikowanym
+zleceniem, bez narzędzi, w dry-run".
+
+**Poziom orkiestracji ≠ poziom celu.** Bramka na delegacji odpowiada na pytanie „czy istnieje
+ważne zlecenie", a nie „czy wolno zaatakować cel X". Rozróżnienie jest celowe: zadanie kroku
+planu to wolny tekst od modelu, więc wyłuskiwanie z niego celu i techniki oznaczałoby
+autoryzację **sterowaną przez model** — dokładnie to, przed czym ROE ma chronić. Autoryzacja
+na cel pozostaje w `RoeGate.evaluate` i obowiązuje, gdy pojawi się konkretny cel.
+
+| Niezmiennik | Test |
+|---|---|
+| Brak wpiętego runtime'u ROE → agent pominięty (brak konfiguracji ≠ zgoda) | `test_orchestrator_skips_roe_agent_without_runtime` |
+| **Podrobiony podpis → odmowa delegacji** (podpis jest nośny) | `test_forged_signature_denies_delegation` |
+| Zgoda bez podpisu / poza oknem czasowym → odmowa | `test_unsigned_engagement_denies_delegation`, `test_outside_window_denies_delegation` |
+| Brak jakiegokolwiek zlecenia → odmowa ze śladem w audycie | `test_no_engagements_denies_delegation` |
+| Odmowa wytwarzania ofensywy jest BEZWARUNKOWA — ważne zlecenie jej nie znosi | `test_offensive_request_refused_even_with_valid_engagement` |
+| ...i działa też, gdy nie ma żadnego zlecenia (bramka `None`) | `test_offensive_request_refused_without_any_engagement` |
+| Pod ważnym zleceniem: delegacja + notatka dry-run w kontekście agenta | `test_orchestrator_delegates_under_valid_engagement_with_dry_run_note` |
+| Agenci bez `roe_required` nie są bramkowani (zero regresji) | `test_orchestrator_does_not_gate_normal_agents` |
+| Runtime przebudowywany przy `POST /api/config/runtime`; błąd (np. zgoda bez klucza) → `ok=false`, config NIE stosowany | (`_build_stack`, `config_apply`) |
+
+**Notatka dry-run w kontekście.** Agentowi wstrzykiwana jest instrukcja, że działa w dry-run
+i nie ma narzędzi. Bez tego model mógłby raportować „wykonałem skan", którego nie wykonał —
+a taki wynik trafiłby do syntezy hetmana jako fakt.
+
+**Ograniczenia (świadome):** weryfikator budowany jest tylko, gdy istnieje zlecenie ze zgodą
+(`consent: true`) — szablon bez zgody i tak nie przejdzie `is_active`, więc żądanie klucza od
+wdrożeń bez testów byłoby friction bez zysku. Autoryzacja NA CEL nie ma dziś konsumenta
+(Puszkarz nie wykonuje akcji); pojawi się wraz z nadaniem mu zdolności wykonawczych — i wtedy
+`RoeGate.evaluate` (zakres, techniki, `--authorized`) jest już gotowe i pokryte testami.
