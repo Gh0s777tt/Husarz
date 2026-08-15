@@ -46,6 +46,32 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
   (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
 
+### Poprawione (Etap 3b — typowane ustawienia narzędzi; MARTWE klucze w dostarczonym configu)
+- **`ToolConfig.config` było nietypowaną mapą**, walidowaną dopiero (i tylko częściowo) przy
+  budowie narzędzia. Skutek okazał się gorszy niż literówki: **dostarczana konfiguracja
+  zawierała 10 kluczy, których NIKT nie czyta** — w tym takie, które wyglądają jak kontrole
+  bezpieczeństwa. `config/tools/shell.yaml` miał `network: false`, `cpu_limit`, `memory_limit`
+  i `timeout_seconds`; operator mógł sądzić, że wyłączył narzędziu sieć albo ograniczył zasoby,
+  a **jedynym realnym sterowaniem jest `security.sandbox`**. Analogicznie ignorowane były
+  `file_edit.root`, `git.workdir`, `run_tests.workdir`/`timeout_seconds` i `web.method`.
+- Nowe modele ustawień per `kind` (`FileEditSettings`, `ShellSettings`, `GitToolSettings`,
+  `RunTestsSettings`, `WebToolSettings`, `PluginToolSettings`, `RagBackendConfig`) walidowane
+  przy STARCIE z `extra="forbid"`. Nieznany klucz = czytelny błąd z nazwą narzędzia i rodzaju,
+  zamiast cichego no-opu. Buildery czytają typowany obiekt (`settings_as`), nie surową mapę;
+  helper `_int_setting` zniknął.
+- `ShellSettings` jest świadomie **puste**: izolacja ma jedno źródło prawdy (`security.sandbox`).
+  Duplikat per narzędzie dawałby dwa miejsca do rozjechania — przy kontroli bezpieczeństwa
+  o jedno za dużo.
+- Dostarczone `config/tools/*.yaml` wyczyszczone z martwych kluczy, z komentarzem wskazującym,
+  gdzie leży realne sterowanie (żeby nikt nie skopiował ich z powrotem).
+- **Loader**: pliki `._<nazwa>.yaml` (sidecary AppleDouble tworzone przez macOS na woluminach
+  exFAT/NTFS) są pomijane, a plik nie-UTF-8 daje czytelny `ConfigError` zamiast surowego
+  `UnicodeDecodeError` — start wywracał się wtedy wbrew zasadzie „błąd configu = czytelny
+  komunikat, nigdy niekontrolowany crash".
+- Testy: +22. **BREAKING**: konfiguracja z nieznanym kluczem w `config` narzędzia nie wystartuje.
+  **Migracja:** usuń zgłoszony klucz — on i tak nic nie robił. Limity sandboxa ustaw
+  w `security.sandbox`, katalog roboczy w `platform.workspace_dir`.
+
 ### Poprawione (Etap 7b — rozliczanie tokenów orkiestracji, dziura w limitach)
 - **`/api/orchestrate` SPRAWDZAŁ limit tokenów, ale go NIE naliczał.** Rozliczenie
   (`_record_tokens`) istniało wyłącznie na ścieżce `/api/chat`, więc `tokens_used` konta

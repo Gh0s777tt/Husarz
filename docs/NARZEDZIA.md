@@ -21,6 +21,31 @@ Kod: `husarz.tools`.
 | `web`       | `WebTool`        | allowlista domen narzędzia **oraz** globalny egress **oraz** anty-SSRF z pinowaniem IP |
 | `rag`       | `RagTool`        | pamięć/wyszukiwanie; backend `memory` (słowny, domyślny) lub `embedding` (wektorowy, `husarz.memory`) — patrz niżej i ADR-0017 |
 
+## Ustawienia narzędzi — typowane i walidowane przy starcie
+
+Sekcja `config:` w `config/tools/*.yaml` NIE jest dowolną mapą: każdy `kind` ma własny model
+(Pydantic, `extra="forbid"`), sprawdzany przy **starcie**. Nieznany klucz to błąd z nazwą
+narzędzia i rodzaju — nie ciche zignorowanie.
+
+| `kind` | Klucze `config` | Skąd reszta |
+|---|---|---|
+| `file_edit` | `deny_globs`, `max_file_bytes` | katalog: `platform.workspace_dir` |
+| `shell` | **żadnych** | sieć/limity/timeout: `security.sandbox` |
+| `git` | `allow_push` | katalog: `platform.workspace_dir`; sandbox: `security.sandbox` |
+| `run_tests` | `command` | timeout i limity: `security.sandbox` |
+| `web` | `max_bytes`, `timeout_seconds` | allowlista domen: pole `allowlist` |
+| `rag` | `backend`, `store`, `collection`, `top_k`, `max_items`, `embedder`, … | patrz ADR-0017/0018 |
+| `plugin` | `plugin` (wymagany), `max_output_bytes` | polityka wywołań: `config/plugins/` |
+
+> **Dlaczego to jest kwestia bezpieczeństwa, nie kosmetyki.** Do Etapu 3b dostarczana
+> konfiguracja zawierała klucze, których nikt nie czytał — m.in. `shell.config.network: false`,
+> `cpu_limit` i `memory_limit`. Wyglądały jak wyłączenie sieci i limity zasobów, a nie robiły
+> **nic**: izolacją steruje wyłącznie `security.sandbox`. Fałszywe poczucie kontroli jest
+> gorsze niż jej brak, bo nie skłania do sprawdzenia. Teraz taki wpis nie pozwoli wystartować.
+
+`ShellSettings` jest celowo puste — jedno źródło prawdy dla izolacji. Nowy rodzaj narzędzia =
+builder w rejestrze + jedna pozycja w mapie `kind → model ustawień`.
+
 ## Sandbox
 
 `SandboxSpec` opisuje uruchomienie; `build_docker_argv` buduje `docker run`:

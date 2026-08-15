@@ -8,6 +8,6 @@ requires_egress: false
 allowlist:
   - pytest
 config:
-  workdir: /workspace
   command: pytest -q
-  timeout_seconds: 300
+  # `workdir` → `platform.workspace_dir`; limit czasu i zasobów → `security.sandbox`
+  # (dawne klucze `workdir`/`timeout_seconds` były w tym miejscu ignorowane).

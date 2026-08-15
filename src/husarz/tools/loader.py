@@ -12,34 +12,35 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from husarz.config.schema import HusarzConfig
+from husarz.config.schema import (
+    FileEditSettings,
+    GitToolSettings,
+    HusarzConfig,
+    PluginToolSettings,
+    RagBackendConfig,
+    RunTestsSettings,
+    WebToolSettings,
+)
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
 from husarz.ssrf import HostResolver
 from husarz.tools.base import Tool
 from husarz.tools.errors import ToolError
-from husarz.tools.file_edit import DEFAULT_MAX_BYTES, FileEditTool
+from husarz.tools.file_edit import FileEditTool
 from husarz.tools.git import GitTool
-from husarz.tools.rag import DEFAULT_TOP_K, RagBackend, RagTool
+from husarz.tools.rag import RagBackend, RagTool
 from husarz.tools.registry import BuildContext, ToolProviderRegistry
 from husarz.tools.run_tests import RunTestsTool
 from husarz.tools.sandbox import DockerSandboxExecutor, SandboxExecutor
 from husarz.tools.shell import ShellTool
-from husarz.tools.web import DEFAULT_MAX_BYTES as WEB_MAX_BYTES
-from husarz.tools.web import DEFAULT_TIMEOUT, Fetcher, HttpxFetcher, WebTool
+from husarz.tools.web import Fetcher, HttpxFetcher, WebTool
 
 if TYPE_CHECKING:
     from husarz.plugins.service import PluginService
 
 # Domyślny cap tekstu wyniku narzędzia plugin (nadpisywalny per-narzędzie: config.max_output_bytes).
 _DEFAULT_PLUGIN_OUTPUT_BYTES = 100_000
-
-
-def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
-    """Zwraca wartość int z ustawień; brak klucza LUB jawny ``null`` -> ``default``."""
-    value = settings.get(key)
-    return default if value is None else int(value)
 
 
 # ---------------------------------------------------------------------------
@@ -49,11 +50,11 @@ def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
 
 
 def _build_file_edit(ctx: BuildContext) -> Tool:
-    settings = ctx.tool_config.config
+    settings = ctx.tool_config.settings_as(FileEditSettings)
     return FileEditTool(
         ctx.workspace_path,
-        deny_globs=list(settings.get("deny_globs") or []),
-        max_bytes=_int_setting(settings, "max_file_bytes", DEFAULT_MAX_BYTES),
+        deny_globs=list(settings.deny_globs),
+        max_bytes=settings.max_file_bytes,
     )
 
 
@@ -67,34 +68,34 @@ def _build_shell(ctx: BuildContext) -> Tool:
 
 
 def _build_git(ctx: BuildContext) -> Tool:
-    settings = ctx.tool_config.config
+    settings = ctx.tool_config.settings_as(GitToolSettings)
     return GitTool(
         ctx.executor,
         subcommand_allowlist=ctx.tool_config.allowlist,
         sandbox=ctx.security.sandbox,
-        allow_push=bool(settings.get("allow_push", False)),
+        allow_push=settings.allow_push,
         workspace_host_path=ctx.workspace_host,
     )
 
 
 def _build_run_tests(ctx: BuildContext) -> Tool:
-    settings = ctx.tool_config.config
+    settings = ctx.tool_config.settings_as(RunTestsSettings)
     return RunTestsTool(
         ctx.executor,
-        command=shlex.split(str(settings.get("command") or "pytest -q")),
+        command=shlex.split(settings.command),
         sandbox=ctx.security.sandbox,
         workspace_host_path=ctx.workspace_host,
     )
 
 
 def _build_web(ctx: BuildContext) -> Tool:
-    settings = ctx.tool_config.config
+    settings = ctx.tool_config.settings_as(WebToolSettings)
     return WebTool(
         ctx.fetcher,
         domain_allowlist=ctx.tool_config.allowlist,
         egress=ctx.security.egress,
-        max_bytes=_int_setting(settings, "max_bytes", WEB_MAX_BYTES),
-        timeout=_int_setting(settings, "timeout_seconds", DEFAULT_TIMEOUT),
+        max_bytes=settings.max_bytes,
+        timeout=settings.timeout_seconds,
         resolve=ctx.resolve,
     )
 
@@ -102,16 +103,14 @@ def _build_web(ctx: BuildContext) -> Tool:
 def _build_rag(ctx: BuildContext) -> Tool:
     # Jawnie wstrzyknięty backend (testy/back-compat) ma pierwszeństwo.
     if ctx.rag_backend is not None:
-        top_k = _int_setting(ctx.tool_config.config, "top_k", DEFAULT_TOP_K)
-        return RagTool(ctx.rag_backend, top_k=top_k)
+        return RagTool(ctx.rag_backend, top_k=ctx.tool_config.settings_as(RagBackendConfig).top_k)
     # Inaczej buduj backend z konfiguracji narzędzia (memory/embedding) — import leniwy,
     # by rdzeń nie ciągnął zależności pamięci (embedder/store) bez potrzeby.
-    from husarz.config.schema import RagBackendConfig  # noqa: PLC0415
     from husarz.memory import build_rag_backend  # noqa: PLC0415
 
-    # Klucze o wartości null traktujemy jak brak (jak dawne _int_setting) → domyślne z schematu.
-    settings = {key: value for key, value in ctx.tool_config.config.items() if value is not None}
-    rag_config = RagBackendConfig(**settings)
+    # Konfiguracja jest już ZWALIDOWANA przy starcie (ToolConfig._validate_settings) —
+    # tu tylko sięgamy po typowany obiekt, bez ponownego parsowania.
+    rag_config = ctx.tool_config.settings_as(RagBackendConfig)
     backend = build_rag_backend(
         rag_config, ctx.security, data_dir=ctx.data_dir, secrets=ctx.secrets, resolve=ctx.resolve
     )
@@ -122,19 +121,12 @@ def _build_plugin(ctx: BuildContext) -> Tool:
     # Import leniwy (spójnie z _build_rag) — brak cyklu, plugins nie importuje tools.
     from husarz.tools.plugin import PluginTool  # noqa: PLC0415
 
-    ref = str(ctx.tool_config.config.get("plugin") or "").strip()
-    if not ref:
-        # Tylko błąd KSZTAŁTU (jak nieznany kind) — istnienie konektora sprawdza _cross_validate.
-        raise ToolError(
-            f"Narzędzie '{ctx.name}' (kind plugin) wymaga config.plugin (nazwa konektora)."
-        )
+    settings = ctx.tool_config.settings_as(PluginToolSettings)
     return PluginTool(
         ctx.name,
-        ref,
+        settings.plugin.strip(),
         ctx.plugin_service,
-        max_output_bytes=_int_setting(
-            ctx.tool_config.config, "max_output_bytes", _DEFAULT_PLUGIN_OUTPUT_BYTES
-        ),
+        max_output_bytes=settings.max_output_bytes,
     )
 
 

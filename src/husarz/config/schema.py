@@ -14,10 +14,18 @@ import ipaddress
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from husarz.config.net import is_local_endpoint, is_loopback_endpoint
 
@@ -461,6 +469,61 @@ class AgentConfig(_StrictModel):
 # ---------------------------------------------------------------------------
 
 
+_SettingsT = TypeVar("_SettingsT", bound=BaseModel)
+
+
+# --- Typowane ustawienia per rodzaj narzędzia --------------------------------
+# Dotąd `ToolConfig.config` było nietypowaną mapą, walidowaną dopiero przy budowie
+# narzędzia — a właściwie wcale. Skutek był gorszy niż literówki: dostarczana
+# konfiguracja zawierała klucze, których NIKT nie czyta, w tym takie, które wyglądają
+# jak kontrole bezpieczeństwa (`shell.network`, `cpu_limit`, `memory_limit`). Operator
+# ustawiający `network: false` mógł sądzić, że wyłączył sieć narzędziu — a jedynym
+# realnym sterowaniem jest `security.sandbox`. Modele poniżej (extra="forbid") zamieniają
+# taki cichy no-op w błąd przy starcie.
+
+
+class FileEditSettings(_StrictModel):
+    """Ustawienia narzędzia ``file_edit``. Katalog roboczy pochodzi z ``platform.workspace_dir``."""
+
+    deny_globs: list[str] = Field(default_factory=list)
+    max_file_bytes: int = Field(default=5_000_000, ge=1)
+
+
+class ShellSettings(_StrictModel):
+    """Ustawienia narzędzia ``shell`` — świadomie PUSTE.
+
+    Sieć, limity CPU/RAM/PID i timeout pochodzą WYŁĄCZNIE z ``security.sandbox`` (jedno
+    źródło prawdy dla izolacji). Duplikat per narzędzie dawałby dwa miejsca do rozjechania,
+    a przy kontroli bezpieczeństwa to jedno za dużo.
+    """
+
+
+class GitToolSettings(_StrictModel):
+    """Ustawienia narzędzia ``git``. ``push`` wymaga jawnej zgody (i egressu)."""
+
+    allow_push: bool = False
+
+
+class RunTestsSettings(_StrictModel):
+    """Ustawienia narzędzia ``run_tests``. Timeout i limity — z ``security.sandbox``."""
+
+    command: str = "pytest -q"
+
+
+class WebToolSettings(_StrictModel):
+    """Ustawienia narzędzia ``web``. Metoda jest stała (GET) — pobieranie, nie wysyłanie."""
+
+    max_bytes: int = Field(default=2_000_000, ge=1)
+    timeout_seconds: int = Field(default=20, ge=1)
+
+
+class PluginToolSettings(_StrictModel):
+    """Ustawienia narzędzia ``kind: plugin`` — wiąże JEDEN konektor z ``config/plugins/``."""
+
+    plugin: str = Field(min_length=1)
+    max_output_bytes: int = Field(default=100_000, ge=1)
+
+
 class ToolConfig(_StrictModel):
     """Definicja narzędzia dostępnego dla agentów."""
 
@@ -473,6 +536,53 @@ class ToolConfig(_StrictModel):
     # Allowlista: domeny (web), komendy (shell), ścieżki (file_edit) itd.
     allowlist: list[str] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
+    # Sparsowane, TYPOWANE ustawienia (wynik walidacji `config` wobec modelu rodzaju).
+    # Prywatne, bo nie jest polem wejściowym YAML-a — pochodzi wyłącznie z `config`.
+    _settings: BaseModel | None = PrivateAttr(default=None)
+
+    def settings_as(self, model: type[_SettingsT]) -> _SettingsT:
+        """Zwraca typowane ustawienia narzędzia; ``model`` musi pasować do ``kind``.
+
+        Args:
+            model: klasa ustawień oczekiwana przez buildera danego rodzaju.
+
+        Returns:
+            Zwalidowany obiekt ustawień (nigdy ``None`` — walidacja zaszła przy starcie).
+
+        Raises:
+            ValueError: rodzaj narzędzia nie pasuje do żądanego modelu (błąd programisty,
+                nie konfiguracji — rejestr builderów wiąże `kind` z modelem 1:1).
+        """
+        if not isinstance(self._settings, model):
+            raise ValueError(
+                f"Narzędzie '{self.name}': ustawienia rodzaju '{self.kind}' nie są "
+                f"typu {model.__name__}."
+            )
+        return self._settings
+
+    @model_validator(mode="after")
+    def _validate_settings(self) -> ToolConfig:
+        """Waliduje ``config`` wobec modelu właściwego dla ``kind`` (fail-fast przy starcie).
+
+        Klucz o wartości ``null`` traktujemy jak brak (→ wartość domyślna ze schematu),
+        spójnie z dotychczasowym zachowaniem builderów.
+        """
+        model = _TOOL_SETTINGS_MODELS.get(self.kind)
+        if model is None:
+            return self  # nieznany kind — błąd zgłosi build_tools (zachowanie bez zmian)
+        provided = {key: value for key, value in self.config.items() if value is not None}
+        try:
+            self._settings = model(**provided)
+        except ValidationError as exc:
+            details = "; ".join(
+                f"{'.'.join(str(part) for part in err['loc']) or '?'}: {err['msg']}"
+                for err in exc.errors()
+            )
+            raise ValueError(
+                f"Narzędzie '{self.name}' (kind: {self.kind}) — błędna sekcja 'config': "
+                f"{details}. Nieznany klucz oznacza ustawienie, którego NIKT nie czyta."
+            ) from exc
+        return self
 
     @model_validator(mode="after")
     def _validate_egress(self) -> ToolConfig:
@@ -559,6 +669,20 @@ class RagBackendConfig(_StrictModel):
         if self.store == "sqlite" and self.backend != "embedding":
             raise ValueError("store: sqlite wymaga backend: embedding (trwały magazyn wektorowy).")
         return self
+
+
+# Mapa `kind` -> model ustawień. Definiowana TUTAJ, bo `RagBackendConfig` powstaje po
+# `ToolConfig`; walidator sięga po nią w czasie wywołania, nie definicji klasy.
+# Nowy rodzaj narzędzia = builder w rejestrze + jedna pozycja poniżej (zasada open/closed).
+_TOOL_SETTINGS_MODELS: dict[str, type[BaseModel]] = {
+    "file_edit": FileEditSettings,
+    "shell": ShellSettings,
+    "git": GitToolSettings,
+    "run_tests": RunTestsSettings,
+    "web": WebToolSettings,
+    "rag": RagBackendConfig,
+    "plugin": PluginToolSettings,
+}
 
 
 class PluginConfig(_StrictModel):

@@ -15,5 +15,5 @@ allowlist:
   - branch
   - checkout
 config:
-  workdir: /workspace
+  # `workdir` nie występuje: katalog roboczy pochodzi z `platform.workspace_dir`.
   allow_push: false        # push wymaga osobnej zgody i egress

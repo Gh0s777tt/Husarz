@@ -59,12 +59,29 @@ _MULTI_DIRS: dict[str, tuple[str, str]] = {
 # ---------------------------------------------------------------------------
 
 
+def _is_sidecar(path: Path) -> bool:
+    """Czy plik to sidecar systemu plików, a nie konfiguracja użytkownika.
+
+    macOS na woluminach exFAT/NTFS tworzy obok każdego pliku towarzysza ``._<nazwa>``
+    z metadanymi (AppleDouble). Pasuje on do wzorca ``*.yaml``, więc bez tego filtra
+    loader próbowałby go sparsować i wywracał start na binarnej zawartości.
+    """
+    return path.name.startswith("._")
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     """Wczytuje plik YAML jako słownik. Pusty plik = pusty słownik."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:  # pragma: no cover - rzadka ścieżka I/O
         raise ConfigParseError(f"Nie można odczytać pliku: {path} ({exc}).") from exc
+    except UnicodeDecodeError as exc:
+        # Plik nie jest tekstem UTF-8 (np. zapis binarny albo uszkodzone kodowanie).
+        # Bez tej gałęzi `validate` wywracał się surowym UnicodeDecodeError zamiast
+        # czytelnym komunikatem — wbrew zasadzie „błąd configu = czytelny komunikat".
+        raise ConfigParseError(
+            f"Plik konfiguracji nie jest tekstem UTF-8: {path} ({exc.reason})."
+        ) from exc
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
@@ -120,6 +137,8 @@ def _load_raw_from_dir(config_dir: Path) -> dict[str, Any]:
             continue
         collected: dict[str, Any] = {}
         for path in sorted([*directory.glob("*.yaml"), *directory.glob("*.yml")]):
+            if _is_sidecar(path):
+                continue
             entry = _read_yaml(path)
             # Normalizacja do str przed sprawdzeniem duplikatu i zapisem — inaczej
             # klucz liczbowy (np. engagement_id: 42) ominąłby detekcję duplikatów.

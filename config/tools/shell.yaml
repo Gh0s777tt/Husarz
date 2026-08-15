@@ -13,9 +13,8 @@ allowlist:
   - ls
   - cat
   - grep
-config:
-  workdir: /workspace
-  network: false
-  cpu_limit: "1"
-  memory_limit: 512m
-  timeout_seconds: 60
+# UWAGA: to narzędzie NIE ma własnej sekcji `config`. Sieć, limity CPU/RAM/PID i timeout
+# pochodzą WYŁĄCZNIE z `security.sandbox` — jedno źródło prawdy dla izolacji. Wcześniej stały
+# tu klucze `network`, `cpu_limit`, `memory_limit`, `timeout_seconds`, których nikt nie czytał:
+# ustawienie `network: false` wyglądało jak wyłączenie sieci, a realnie nie robiło nic.
+config: {}

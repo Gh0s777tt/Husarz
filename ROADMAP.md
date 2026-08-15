@@ -36,8 +36,11 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ⬜ Realne wykonanie `DockerSandboxExecutor` + obraz `husarz-sandbox` (Etap 6).
 - ⬜ Backend RAG pgvector + embeddingi; sekcja `MemoryConfig`/`StorageConfig`
   (referencje `postgres_dsn_ref`, `redis_dsn_ref`, `embeddings_model_id`, `vector_dim`).
-- ⬜ Wypromować przełączniki narzędzi (`network`, `allow_push`) z opaque `config`
-  na typowane pola per-kind.
+- ✅ Typowane ustawienia per-kind (Etap 3b): `ToolConfig.config` walidowany przy STARCIE
+  wobec modelu rodzaju (`extra="forbid"`). Przy okazji wyszło, że dostarczany config miał
+  10 martwych kluczy — w tym `shell.network`/`cpu_limit`/`memory_limit`, wyglądające jak
+  kontrole bezpieczeństwa, a ignorowane (realne sterowanie: `security.sandbox`). Loader
+  pomija sidecary `._*` i daje czytelny błąd dla plików nie-UTF-8. Testy: +22.
 - ✅ Wpięcie pętli narzędziowej (function-calling) do agenta Towarzysz — Etap 13 (ADR-0016).
 
 ## 🚧 Etap 4 — Bezpieczeństwo (rdzeń decyzyjny ✅; warstwa sieciowa ⬜ Etap 5/6)
