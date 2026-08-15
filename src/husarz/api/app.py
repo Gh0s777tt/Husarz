@@ -507,6 +507,10 @@ def create_app(
         except RouterError as exc:
             _record_failure(state, counter_lock, audit_log, "backend")
             raise HTTPException(status_code=502, detail="Backend modelu zawiódł.") from exc
+        # Rozliczenie limitu: orkiestracja to WIELE wywołań modelu (plan + delegacje +
+        # refleksja + synteza). Bez tego najdroższy endpoint sprawdzał limit, ale go nie
+        # naliczał — konto z ustawioną kwotą mogło orkiestrować w nieskończoność.
+        _record_tokens(accounts, principal, result.usage)
         return OrchestrateResponse(
             task=result.task,
             answer=result.answer,

@@ -24,7 +24,7 @@ from husarz.orchestrator.prompts import (
     REFLECT_INSTRUCTION,
     SYNTHESIS_INSTRUCTION,
 )
-from husarz.router.types import ChatMessage, ChatRequest
+from husarz.router.types import ChatMessage, ChatRequest, Usage, UsageMeter
 from husarz.security.roe_runtime import RoeRuntime
 
 DEFAULT_ORCHESTRATOR = "husarz"
@@ -63,6 +63,9 @@ class OrchestratorResult:
     observations: list[Observation] = field(default_factory=list)
     answer: str = ""
     rounds: int = 0
+    # Sumaryczne zużycie tokenów CAŁEJ orkiestracji (plan + delegacje + refleksja + synteza).
+    # ``None``, gdy żaden backend nie raportuje zużycia. Konsument: rozliczenie limitu konta.
+    usage: Usage | None = None
 
 
 class Orchestrator:
@@ -102,7 +105,9 @@ class Orchestrator:
     def _delegatable(self) -> list[str]:
         return sorted(name for name in self._agents if name != self._orchestrator_name)
 
-    def _ask_orchestrator(self, phase_tag: str, body: str, instruction: str) -> str:
+    def _ask_orchestrator(
+        self, phase_tag: str, body: str, instruction: str, meter: UsageMeter
+    ) -> str:
         user = f"{phase_tag}\n{body}\n\n{instruction}"
         request = ChatRequest(
             messages=[
@@ -111,15 +116,20 @@ class Orchestrator:
             ]
         )
         response = self._router.complete(request, agent=self._orchestrator_name)
+        meter.add(response.usage)
         return response.content
 
-    def _plan(self, task: str) -> Plan:
+    def _plan(self, task: str, meter: UsageMeter) -> Plan:
         instruction = PLAN_INSTRUCTION.format(agents=", ".join(self._delegatable()))
-        content = self._ask_orchestrator(PHASE_PLAN, f"Zadanie: {task}", instruction)
+        content = self._ask_orchestrator(PHASE_PLAN, f"Zadanie: {task}", instruction, meter)
         return parse_plan(content)
 
     def _delegate(
-        self, step: PlanStep, context: str | None = None, budget: ToolCallBudget | None = None
+        self,
+        step: PlanStep,
+        context: str | None = None,
+        budget: ToolCallBudget | None = None,
+        meter: UsageMeter | None = None,
     ) -> Observation:
         agent = self._agents.get(step.agent)
         if agent is None or step.agent == self._orchestrator_name:
@@ -147,6 +157,8 @@ class Orchestrator:
             )
         else:
             result = agent.run(step.task, router=self._router, context=step_context)
+        if meter is not None:
+            meter.add(result.usage)
         return Observation(
             agent=result.agent, task=step.task, output=result.output, model=result.model
         )
@@ -164,32 +176,35 @@ class Orchestrator:
             )
         return f"Obserwacje:\n{summary}"
 
-    def _reflect(self, task: str, observations: list[Observation]) -> Reflection:
+    def _reflect(self, task: str, observations: list[Observation], meter: UsageMeter) -> Reflection:
         body = f"Zadanie: {task}\n{self._observations_block(observations)}"
-        content = self._ask_orchestrator(PHASE_REFLECT, body, REFLECT_INSTRUCTION)
+        content = self._ask_orchestrator(PHASE_REFLECT, body, REFLECT_INSTRUCTION, meter)
         return parse_reflection(content)
 
-    def _synthesize(self, task: str, observations: list[Observation]) -> str:
+    def _synthesize(self, task: str, observations: list[Observation], meter: UsageMeter) -> str:
         body = f"Zadanie: {task}\n{self._observations_block(observations)}"
-        return self._ask_orchestrator(PHASE_SYNTH, body, SYNTHESIS_INSTRUCTION)
+        return self._ask_orchestrator(PHASE_SYNTH, body, SYNTHESIS_INSTRUCTION, meter)
 
     # -- pętla główna -------------------------------------------------------
 
     def run(self, task: str) -> OrchestratorResult:
         """Wykonuje pełną orkiestrację zadania i zwraca wynik."""
-        plan = self._plan(task)
+        # Sumator zużycia — ŚWIEŻY per run (jak budżet narzędzi), nigdy współdzielony
+        # między żądaniami. Bez niego /api/orchestrate sprawdzał limit, ale go NIE naliczał.
+        meter = UsageMeter()
+        plan = self._plan(task, meter)
         # Plan z NIEZAUFANEGO wyjścia modelu — twardy cap liczby kroków (anty-amplifikacja).
         plan = Plan(steps=plan.steps[: self._max_plan_steps])
         # Globalny budżet wywołań narzędzi na CAŁĄ orkiestrację (świeży per run — nie
         # współdzielony między żądaniami/wątkami). None, gdy pętla nieaktywna.
         budget = self._tool_loop.new_budget() if self._tool_loop is not None else None
         observations: list[Observation] = [
-            self._delegate(step, budget=budget) for step in plan.steps
+            self._delegate(step, budget=budget, meter=meter) for step in plan.steps
         ]
 
         rounds = 0
         while rounds < self._max_extra_rounds:
-            reflection = self._reflect(task, observations)
+            reflection = self._reflect(task, observations, meter)
             if reflection.done or not reflection.additional_steps:
                 break
             # Kroki z refleksji budują na dotychczasowych wynikach — przekazujemy je
@@ -197,13 +212,19 @@ class Orchestrator:
             context = self._summary(observations)
             extra_steps = reflection.additional_steps[: self._max_plan_steps]
             observations.extend(
-                self._delegate(step, context=context, budget=budget) for step in extra_steps
+                self._delegate(step, context=context, budget=budget, meter=meter)
+                for step in extra_steps
             )
             rounds += 1
 
-        answer = self._synthesize(task, observations)
+        answer = self._synthesize(task, observations, meter)
         return OrchestratorResult(
-            task=task, plan=plan, observations=observations, answer=answer, rounds=rounds
+            task=task,
+            plan=plan,
+            observations=observations,
+            answer=answer,
+            rounds=rounds,
+            usage=meter.snapshot(),
         )
 
 

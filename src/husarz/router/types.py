@@ -59,6 +59,46 @@ class Usage:
 
 
 @dataclass(slots=True)
+class UsageMeter:
+    """Sumator zużycia tokenów dla JEDNEJ operacji (np. całej orkiestracji).
+
+    Orkiestracja to wiele wywołań modelu (plan → N delegacji → refleksja → synteza), a limit
+    tokenów konta rozliczany był wyłącznie z pojedynczej odpowiedzi czatu — czyli najdroższy
+    endpoint nie naliczał niczego. Ten sumator zbiera zużycie ze wszystkich wywołań.
+
+    Instancja jest ŚWIEŻA na każde żądanie (nigdy współdzielona między wątkami): orkiestrator
+    tworzy ją w ``run`` i przekazuje w dół, tak jak ``ToolCallBudget``.
+    """
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    # Czy KTÓRYKOLWIEK backend zgłosił zużycie. Bez tego nie odróżnilibyśmy „zero tokenów"
+    # od „backend nie raportuje" — a to różnica między naliczeniem 0 a brakiem danych.
+    reported: bool = False
+
+    def add(self, usage: Usage | None) -> None:
+        """Dolicza zużycie z jednej odpowiedzi modelu (``None`` i pola ``None`` pomijane)."""
+        if usage is None:
+            return
+        for field_name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = getattr(usage, field_name)
+            if value is not None:
+                setattr(self, field_name, getattr(self, field_name) + int(value))
+                self.reported = True
+
+    def snapshot(self) -> Usage | None:
+        """Zwraca sumę jako ``Usage`` albo ``None``, gdy żaden backend nic nie zgłosił."""
+        if not self.reported:
+            return None
+        return Usage(
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            total_tokens=self.total_tokens,
+        )
+
+
+@dataclass(slots=True)
 class ChatResponse:
     """Odpowiedź modelu wraz z metadanymi."""
 

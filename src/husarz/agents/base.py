@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from husarz.config.schema import AgentConfig
-from husarz.router.types import ChatMessage, ChatRequest, ChatResponse
+from husarz.router.types import ChatMessage, ChatRequest, ChatResponse, Usage
 
 
 @runtime_checkable
@@ -36,6 +36,9 @@ class AgentResult:
     agent: str
     output: str
     model: str  # id modelu, który udzielił odpowiedzi
+    # Zużycie tokenów zgłoszone przez backend — niesione w górę, by orkiestracja mogła je
+    # zsumować i rozliczyć wobec limitu konta (``None`` = backend nie raportuje).
+    usage: Usage | None = None
 
 
 class BaseAgent:
@@ -83,4 +86,9 @@ class BaseAgent:
         """
         request = ChatRequest(messages=self._build_messages(task, context))
         response = router.complete(request, agent=self.name)
-        return AgentResult(agent=self.name, output=response.content, model=response.model)
+        return AgentResult(
+            agent=self.name,
+            output=response.content,
+            model=response.model,
+            usage=response.usage,
+        )

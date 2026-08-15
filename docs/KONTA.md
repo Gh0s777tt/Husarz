@@ -58,7 +58,21 @@ nagłówka `Authorization: Bearer <token>` — **poza** publicznymi: `/api/healt
 
 Limit tokenów: gdy konto ma `token_quota` i je wyczerpie, `POST /api/chat` i
 `/api/orchestrate` zwracają **HTTP 402**. Zużycie doliczane jest z pola `usage`
-odpowiedzi modelu (dla czatu; orkiestracja — po zsumowaniu zużycia w kolejnym kroku).
+odpowiedzi modelu — na OBU ścieżkach:
+
+- **czat** — zużycie z pojedynczej odpowiedzi,
+- **orkiestracja** — SUMA ze wszystkich wywołań modelu w jednym żądaniu: plan, każda
+  delegacja (a przy pętli narzędziowej — każda jej iteracja), refleksja i synteza.
+  Sumowaniem zajmuje się `UsageMeter`, tworzony świeżo na każde żądanie.
+
+> **Uwaga (naprawione w Etapie 7b).** Wcześniej orkiestracja sprawdzała limit, ale go nie
+> naliczała, więc konto z kwotą mogło korzystać z niej bez ograniczeń — i to na najdroższym
+> endpoincie. Jeśli polegasz na limitach, ta poprawka realnie zmienia zachowanie: zużycie
+> orkiestracji zaczyna być liczone.
+
+Limit jest z natury **miękki**: rozliczenie następuje PO odpowiedzi, więc pojedyncze żądanie
+może przekroczyć próg — blokowane są dopiero kolejne. Backend, który nie raportuje `usage`,
+nie powoduje naliczania zmyślonych wartości (brak danych ≠ zero).
 
 ## Bezpieczeństwo
 

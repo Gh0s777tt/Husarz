@@ -252,7 +252,11 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   zużyte/limit tokenów), wylogowanie. Seed-admin z sekretu (fail-closed).
 - ✅ Testy: hasła, rejestracja/logowanie/sesje/limity, API kont (sesja jako Bearer,
   402, RBAC), seed-admin. Docs: KONTA.md, ADR-0009.
-- ⬜ Rozliczanie tokenów orkiestracji (sumowanie `usage`); sesje współdzielone
+- ✅ Rozliczanie tokenów orkiestracji (Etap 7b): `/api/orchestrate` sprawdzał limit, ale go
+  NIE naliczał — konto z kwotą mogło orkiestrować bez końca na najdroższym endpoincie.
+  `UsageMeter` sumuje zużycie ze wszystkich faz (plan, delegacje, iteracje pętli, refleksja,
+  synteza) i endpoint nalicza je na koncie. Testy: +8.
+- ⬜ Sesje współdzielone
   (Redis) do skalowania; płatności/subskrypcje; integracje Git/VS Code; załączniki.
 
 ## Pozostałe ustalenia

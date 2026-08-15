@@ -30,7 +30,7 @@ from husarz.agents.react import ParseKind, ToolAction, parse_action, protocol_in
 from husarz.config.schema import HusarzConfig, ToolLoopConfig
 from husarz.config.secrets import SecretsProvider
 from husarz.fencing import fence_untrusted
-from husarz.router.types import ChatMessage, ChatRequest
+from husarz.router.types import ChatMessage, ChatRequest, UsageMeter
 from husarz.security.audit import AuditLog
 from husarz.ssrf import HostResolver
 from husarz.tools.base import ToolResult
@@ -166,14 +166,18 @@ class ToolLoop:
 
         allowed = set(agent.tools)
         last_model = ""
+        # Pętla to WIELE wywołań modelu na jedno zadanie — sumujemy zużycie, inaczej
+        # rozliczenie limitu widziałoby tylko ostatnią iterację.
+        meter = UsageMeter()
         for _ in range(max(1, agent.config.max_iterations)):
             response = router.complete(ChatRequest(messages=list(messages)), agent=agent.name)
+            meter.add(response.usage)
             last_model = response.model
             messages.append(ChatMessage("assistant", response.content))
             parsed = parse_action(response.content)
 
             if parsed.kind is ParseKind.FINAL:
-                return AgentResult(agent.name, parsed.text, last_model)
+                return AgentResult(agent.name, parsed.text, last_model, meter.snapshot())
             if parsed.kind is ParseKind.MALFORMED:
                 messages.append(
                     ChatMessage(
@@ -192,6 +196,7 @@ class ToolLoop:
                     agent.name,
                     "Przerwano: wyczerpano globalny budżet wywołań narzędzi.",
                     last_model,
+                    meter.snapshot(),
                 )
             fenced, _ = fence_untrusted(
                 f"{action.tool}.{action.action}",
@@ -203,7 +208,12 @@ class ToolLoop:
         self._audit.record(
             agent.name, "toolloop.limit", {"max_iterations": agent.config.max_iterations}
         )
-        return AgentResult(agent.name, "Osiągnięto limit iteracji pętli narzędziowej.", last_model)
+        return AgentResult(
+            agent.name,
+            "Osiągnięto limit iteracji pętli narzędziowej.",
+            last_model,
+            meter.snapshot(),
+        )
 
     def _authorize_and_dispatch(
         self,

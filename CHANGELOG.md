@@ -46,6 +46,22 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   jako zaślepki. `README.md`: przykładowy wynik `validate` doprowadzony do stanu faktycznego
   (brakowało `husarz-local`, `husarz-vision`, `plugin_example`) — rozjazd docs↔kod.
 
+### Poprawione (Etap 7b — rozliczanie tokenów orkiestracji, dziura w limitach)
+- **`/api/orchestrate` SPRAWDZAŁ limit tokenów, ale go NIE naliczał.** Rozliczenie
+  (`_record_tokens`) istniało wyłącznie na ścieżce `/api/chat`, więc `tokens_used` konta
+  nie rosło przy orkiestracji — a `check_quota` porównuje właśnie tę wartość z kwotą.
+  Konto z ustawionym limitem mogło orkiestrować **bez końca**, i to na najdroższym
+  endpoincie: jedno żądanie to plan + N delegacji + refleksja + synteza, czyli wiele
+  wywołań modelu (a z pętlą narzędziową — wiele wywołań na KAŻDĄ delegację).
+- Nowy `husarz.router.types.UsageMeter` — sumator zużycia dla jednej operacji, świeży per
+  żądanie (jak `ToolCallBudget`, nigdy współdzielony między wątkami). Przewleczony przez
+  wszystkie fazy: `AgentResult.usage` ← `BaseAgent.run`, pętla narzędziowa sumuje po
+  iteracjach, orkiestrator dolicza plan/refleksję/syntezę i zwraca sumę w
+  `OrchestratorResult.usage`; endpoint nalicza ją na koncie.
+- Rozróżnienie „zero tokenów" od „backend nie raportuje": `snapshot()` zwraca `None`, gdy
+  ŻADNE wywołanie nie zgłosiło zużycia — nie naliczamy zmyślonych wartości.
+- Testy: +8, w tym regresja udowodniona empirycznie (po cofnięciu poprawki dwa testy padają).
+
 ### Dodane (Etap 4c — wpięcie ROE-gate w runtime orkiestratora)
 - Domknięty ostatni krok Etapu 4. `RoeGate` był kompletny, ale **nieużywany**: orkiestrator
   twardo pomijał agentów `roe_required`, więc ani bramka, ani weryfikacja podpisu z 4b nie
