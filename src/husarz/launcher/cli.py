@@ -20,6 +20,7 @@ from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
 from husarz.config.loader import resolve_config_dir
 from husarz.config.schema import Profile
+from husarz.launcher.diagnostics import format_port_conflicts, port_conflicts
 
 
 def _roe_signature_status(config: HusarzConfig) -> str:
@@ -286,7 +287,21 @@ def _cmd_up(args: argparse.Namespace) -> int:
     else:
         auth_note = "auth: brak (loopback)"
     url = f"http://{_url_host(args.host)}:{args.port}/"
-    print(f"Husarz API — profil {config.platform.profile.value} — {url} (konsola) — {auth_note}")
+    # `flush=True` jest tu istotne: przy przekierowaniu wyjścia do pliku (usługa systemowa,
+    # `nohup`, kontener) stdout jest buforowany blokowo, a uvicorn loguje na stderr — bez
+    # wymuszenia bufor nie schodzi do dysku i CAŁY komunikat startowy wraz z ostrzeżeniami
+    # znika z logów, mimo że w terminalu jest widoczny.
+    print(
+        f"Husarz API — profil {config.platform.profile.value} — {url} (konsola) — {auth_note}",
+        flush=True,
+    )
+    # Kontrola startowa: czy któryś model nie celuje w port, który właśnie zajmujemy.
+    # Oba domyślne porty to 8000 (launcher i vLLM w dostarczonym configu), więc bez
+    # ostrzeżenia żądanie do takiego modelu wraca do własnego API. Ostrzegamy, nie blokujemy.
+    for line in format_port_conflicts(
+        port_conflicts(config, host=args.host, port=args.port), port=args.port
+    ):
+        print(line, flush=True)
     # Launcher: otwórz konsolę w przeglądarce (tylko loopback — sensowne lokalnie).
     if getattr(args, "open", False) and _is_loopback(args.host):
         _open_browser_async(url)

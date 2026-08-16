@@ -24,8 +24,19 @@ Flagi: `--host`, `--port`, `--profile`, `--config`, `--prompts`, `--no-open`.
 ## Co zawiera binarka
 
 - Rdzeń `husarz` + konsola (`api/static/console.html`),
-- **domyślne** `config/` i `prompts/` (działa out-of-the-box; nadpisz `--config`/`--prompts`),
+- **domyślne** `config/` i `prompts/` — binarka startuje bez żadnej konfiguracji
+  (nadpisz `--config`/`--prompts`),
 - BEZ sekretów i wag modeli.
+
+> **Czym to NIE jest.** „Bez konfiguracji" znaczy: serwer i konsola wstają po dwukliku.
+> **Nie** znaczy: czat od razu odpowiada. Binarka nie zawiera ani silnika Ollamy, ani wag —
+> bez nich `POST /api/chat` kończy się `502 Backend modelu zawiódł`. Model trzeba raz
+> przygotować wg [`../ollama/README.md`](../ollama/README.md); wagi (≈1 GB dla `1.5b`,
+> ≈4,7 GB dla `7b`) zostają potem w `~/.ollama` i przeżywają aktualizacje launchera.
+>
+> **Uwaga na port.** Launcher i vLLM z dostarczonego `config/models.yaml` mają ten sam
+> port domyślny 8000. Przy kolizji launcher wypisuje ostrzeżenie przy starcie — zmień
+> wtedy `--port` albo endpoint modelu.
 
 ## CI (pobieralny artefakt)
 

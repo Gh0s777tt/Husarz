@@ -236,7 +236,19 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Pakowanie PyInstaller (`packaging/husarz.spec`), extra `[package]`.
 - ✅ CI `release.yml` — binarki Windows/Linux/macOS jako artefakty + GitHub Release (tag v*).
 - ✅ Testy: opener, --open, delegacja. Docs: LAUNCHER.md, ADR-0012.
+- ✅ Binarka zweryfikowana na ŻYWO (macOS arm64, 22 MB): start poza repo bez konfiguracji,
+  konsola, czat z lokalnym modelem, nadpisanie runtime — wszystko na domyślnych ustawieniach.
+- ✅ Kontrola kolizji portu przy starcie (`husarz.launcher.diagnostics`) — launcher i vLLM
+  z dostarczonego configu dzielą port domyślny 8000. Ostrzega, nie blokuje.
+- ✅ `flush=True` na komunikacie startowym — poza terminalem `stdout` jest buforowany
+  blokowo i cały komunikat (z ostrzeżeniami) znikał z logów.
 - ⬜ Podpis kodu/notaryzacja (operator); desktop Tauri (auto-update, tray).
+- ⬜ **Bootstrap modelu przy pierwszym uruchomieniu** — dziś po pobraniu binarki czat bez
+  Ollamy zwraca `502 Backend modelu zawiódł` bez żadnej podpowiedzi. Kierunek: `husarz doctor`
+  (jedno źródło dla CLI i konsoli) → pobranie silnika z archiwum standalone → `pull` bazy →
+  `create` modelu, z ekranem zgody podającym liczbę GB PRZED pobraniem, wąską allowlistą
+  `bootstrap.sources` (osobną od `security.egress.allowlist`, żeby nie otwierać domeny
+  narzędziu `web`) i degradacją do trybu offline w profilu `airgap`.
 
 ## ✅ Etap 9 — Integracje Git (GitHub/GitLab) + tworzenie PR
 - ✅ `husarz.git`: klienci GitHub/GitLab nad wstrzykiwalnym transportem (lista repo,

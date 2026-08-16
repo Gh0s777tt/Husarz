@@ -42,14 +42,21 @@ lokalnym modelem (`POST /api/chat`). Zmiana bazy lub parametrów = edycja Modelf
 
 Zmień tylko linię `FROM` w [`Husarz.Modelfile`](Husarz.Modelfile):
 
-| Cel | `FROM` |
-|-----|--------|
-| Domyślny (kod + PL) | `qwen2.5-coder:7b` |
-| Lepsza jakość (więcej VRAM) | `qwen2.5-coder:14b` |
-| Mocniejszy ogólny czat | `llama3.1:8b` |
-| Najlepszy polski | model Bielika dostępny w Ollamie |
+| Cel | `FROM` | Licencja bazy |
+|-----|--------|---------------|
+| Domyślny (kod + PL) | `qwen2.5-coder:7b` | Apache-2.0 |
+| Słabszy sprzęt / mało VRAM | `qwen2.5-coder:1.5b` | Apache-2.0 |
+| Lepsza jakość (więcej VRAM) | `qwen2.5-coder:14b` | Apache-2.0 |
+| Mocniejszy ogólny czat | `llama3.1:8b` | Llama 3.1 Community License |
+| Najlepszy polski | model Bielika dostępny w Ollamie | zależnie od wariantu — sprawdź |
 
 Następnie: `ollama create husarz -f ollama/Husarz.Modelfile`.
+
+> **Sprawdź licencję bazy przed wdrożeniem.** Wagi mają własne licencje, niezależne od
+> Apache-2.0 Husarza, i bywają NIEJEDNOLITE w obrębie jednej rodziny: w Qwen2.5-Coder
+> warianty 1.5B/7B/14B/32B są na Apache-2.0, ale **3B na `qwen-research`** (tylko badania
+> i ewaluacja). Licencja `llama3.1` nakłada osobne warunki (m.in. atrybucję i próg
+> aktywnych użytkowników). Zmiana `FROM` to decyzja licencyjna, nie tylko wydajnościowa.
 
 > **Uwaga o stop-tokenach.** `PARAMETER stop` w Modelfile jest dostrojony do formatu
 > ChatML (qwen). Zmieniając `FROM` na bazę nie-ChatML (llama3.1, Bielik), dostosuj lub
@@ -75,9 +82,14 @@ większy bufor wag zawodzi. To bug warstwy sterownik/CUDA, nie brak VRAM.
 
 Obejścia (od najlepszego):
 1. **Zaktualizuj/zmień sterownik NVIDIA** na stabilną wersję produkcyjną — właściwy fix dla 7B.
-2. **Mniejsza baza w Modelfile**: `FROM qwen2.5-coder:3b` (≈2.4 GB, mieści się pod limitem,
-   działa 100% na GPU, dobra jakość kodu). Po naprawie sterownika wróć na `7b`.
+2. **Mniejsza baza w Modelfile**: `FROM qwen2.5-coder:1.5b` (≈1 GB, daleko pod limitem,
+   działa 100% na GPU). Po naprawie sterownika wróć na `7b`.
 3. **CPU** (`PARAMETER num_gpu 0`) — działa dla każdego rozmiaru, ale wolniej.
+
+> ⛔ **Nie używaj `qwen2.5-coder:3b`.** Wariant 3B — w odróżnieniu od 1.5B, 7B, 14B i 32B —
+> jest wydany na licencji **`qwen-research`**, ograniczającej użycie do badań i ewaluacji.
+> Nie nadaje się do wdrożenia produkcyjnego ani komercyjnego. Rozmiarowo mieści się pod
+> limitem alokacji, więc kusi jako obejście — dlatego wykluczamy go tu wprost.
 
 Sprawdź, gdzie model się załadował: `ollama ps` (kolumna `PROCESSOR` = `100% GPU` / `CPU`).
 

@@ -24,9 +24,16 @@ pyinstaller packaging/husarz.spec --noconfirm
 # → dist/husarz-app(.exe) — dwuklik startuje serwer i otwiera konsolę
 ```
 
-Binarka zawiera rdzeń, konsolę oraz **domyślne** `config/`+`prompts/` (działa
-od razu; nadpisz `--config`/`--prompts`). BEZ sekretów i wag. Szczegóły:
+Binarka zawiera rdzeń, konsolę oraz **domyślne** `config/`+`prompts/` — startuje bez
+żadnej konfiguracji (nadpisz `--config`/`--prompts`). BEZ sekretów i wag. Szczegóły:
 [../packaging/README.md](https://github.com/Gh0s777tt/Husarz/blob/main/packaging/README.md).
+
+!!! warning "„Bez konfiguracji" ≠ „czat od razu odpowiada""
+    Binarka nie niesie ani silnika Ollamy, ani wag modelu. Serwer i konsola wstaną po
+    dwukliku, ale `POST /api/chat` bez lokalnego modelu kończy się `502 Backend modelu
+    zawiódł`. Model przygotowuje się **raz**, wg [`ollama/README.md`](https://github.com/Gh0s777tt/Husarz/blob/main/ollama/README.md);
+    wagi (≈1 GB dla `1.5b`, ≈4,7 GB dla `7b`) zostają w `~/.ollama` i przeżywają
+    aktualizacje launchera.
 
 ## CI — pobieralny artefakt
 
@@ -41,6 +48,12 @@ lub przez push tagu wersji.
 - Przeglądarka otwierana tylko dla loopbacku, po krótkiej zwłoce (serwer zdąży wstać);
   błąd otwarcia (headless/brak DISPLAY) nie wywraca serwera.
 - Uwierzytelnianie/konta/Git działają jak w `husarz up` (ta sama logika i bramki).
+- **Kontrola kolizji portu przy starcie.** Launcher i vLLM z dostarczonego
+  `config/models.yaml` mają ten sam port domyślny **8000**. Gdy port nasłuchu pokrywa się
+  z loopbackowym endpointem włączonego modelu, launcher wypisuje ostrzeżenie z nazwą modelu
+  i podpowiedzią naprawy — żądania do takiego modelu wracałyby do własnego API Husarza.
+  Kontrola **ostrzega, nie blokuje**: Husarz w kontenerze legalnie nasłuchuje na
+  `0.0.0.0:8000`, gdy vLLM działa na `:8000` hosta.
 
 ## Ograniczenia
 

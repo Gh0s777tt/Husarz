@@ -61,6 +61,35 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Poprawione (przegląd pobieranego launchera — licencja bazy, kolizja portu, znikające logi)
+- **`ollama/README.md` rekomendował model o licencji BADAWCZEJ.** Jako obejście buga
+  sterownika Blackwell dokument podawał `FROM qwen2.5-coder:3b`. Wariant 3B — w odróżnieniu
+  od 1.5B/7B/14B/32B — jest wydany na `qwen-research`, ograniczającej użycie do badań
+  i ewaluacji, więc nie nadaje się do wdrożenia produkcyjnego. Rekomendacja zmieniona na
+  `1.5b` (Apache-2.0, ≈1 GB, również mieści się pod limitem alokacji), 3B wykluczony wprost.
+  Tabela wymiany silnika ma teraz kolumnę **Licencja bazy** i ostrzeżenie, że licencje wag
+  bywają NIEJEDNOLITE w obrębie jednej rodziny modeli.
+- **Kolizja portu 8000 była niewidoczna.** Launcher domyślnie nasłuchuje na 8000, a
+  dostarczony `config/models.yaml` ma endpoint vLLM na `http://localhost:8000/v1` — kto
+  uruchomił jedno i drugie wg naszej własnej dokumentacji, tego żądanie do modelu wracało
+  do API Husarza i kończyło się mylącym błędem. Nowy moduł `husarz.launcher.diagnostics`
+  (czyste funkcje, bez sieci i I/O) wykrywa to przy starcie i wypisuje ostrzeżenie z nazwą
+  modelu oraz podpowiedzią naprawy. **Ostrzega, nie blokuje** — Husarz w kontenerze legalnie
+  nasłuchuje na `0.0.0.0:8000`, gdy vLLM działa na `:8000` hosta, i twarda bramka wywróciłaby
+  to poprawne wdrożenie. Moduł jest przygotowany pod przyszłe `husarz doctor` (jedno źródło
+  dla terminala i konsoli).
+- **Komunikat startowy znikał przy przekierowaniu wyjścia.** `stdout` jest buforowany
+  blokowo poza terminalem, a uvicorn loguje na `stderr` — więc pod `nohup`, w kontenerze
+  czy pod menedżerem usług cała linia z adresem konsoli i ostrzeżeniami nie trafiała do
+  logów. Dodane `flush=True`; zweryfikowane na przekierowanym wyjściu.
+- **Dokumentacja obiecywała za dużo.** `packaging/README.md` i `docs/LAUNCHER.md` mówiły
+  „działa out-of-the-box"; binarka faktycznie startuje bez konfiguracji, ale nie niesie ani
+  silnika Ollamy, ani wag, więc czat bez lokalnego modelu kończy się `502`. Rozdzielono
+  „startuje bez konfiguracji" od „czat od razu odpowiada", z podanym kosztem wag.
+- Testy: +10 (`tests/unit/test_launcher_diagnostics.py`) — obie strony kontraktu: kolizja
+  wykrywana ORAZ brak fałszywych alarmów (zdalny backend, model wyłączony, inny port,
+  nasłuch nie-loopback, chory URL nie może wywrócić startu).
+
 ### Dodane (weryfikacja end-to-end na realnym modelu + zrzuty ekranu)
 - **Skrypt `scripts/screenshots.py`** — odświeżanie zrzutów konsoli z REALNIE uruchomionej
   aplikacji (Playwright + systemowy Chrome; narzędzie operatora, nie zależność projektu ani
