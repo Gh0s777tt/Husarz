@@ -117,10 +117,32 @@ python -m husarz.launcher.cli up --profile dev      # http://127.0.0.1:8000/
 ```
 
 Zakładka **Czat** rozmawia bezpośrednio z modelem (`POST /api/chat`) — dymki, Markdown,
-bloki kodu z „kopiuj". Przełącznik **Orkiestracja** uruchamia hetmana wieloagentowego.
-Przycisk 📎 dołącza **pliki, foldery i zdjęcia**; obrazy wymagają modelu wizyjnego
-(`models: vision: true`, np. `husarz-vision`) — typ rozpoznawany z bajtów, bez egressu.
-Szczegóły: [ollama/README.md](ollama/README.md), [docs/API.md](docs/API.md).
+bloki kodu z „kopiuj". Przycisk 📎 dołącza **pliki, foldery i zdjęcia**; obrazy wymagają
+modelu wizyjnego (`models: vision: true`, np. `husarz-vision`) — typ rozpoznawany z bajtów,
+bez egressu. Szczegóły: [ollama/README.md](ollama/README.md), [docs/API.md](docs/API.md).
+
+> **Orkiestracja wymaga jeszcze jednego kroku.** Powyższy start uruchamia sam **czat**
+> (`models.chat` wskazuje `husarz-local`). Przełącznik **Orkiestracja** kieruje agentów przez
+> `config/routing.yaml`, a dostarczony szablon przypisuje im modele serwowane przez vLLM
+> (`glm-main`, `hermes`) — bez nich hetman zwróci `502 Backend modelu zawiódł`. Aby uruchomić
+> Chorągiew wyłącznie na Ollamie, przypisz agentów do modelu lokalnego — w pliku
+> `config/routing.yaml`:
+>
+> ```yaml
+> agent_models:
+>   husarz: husarz-local
+>   bielik: husarz-local
+>   kopijnik: husarz-local
+>   zwiadowca: husarz-local
+>   puszkarz: husarz-local
+>   kanclerz: husarz-local
+>   chorazy: husarz-local
+> ```
+>
+> …albo bez restartu, nadpisaniem runtime z panelu (**Konfiguracja → Walidacja nadpisań**)
+> lub przez `POST /api/config/runtime`. Aktualnie obowiązujące przypisanie widać zawsze
+> w zakładce **Agenci** (kolumna *Model*). Jeden model 7B obsługuje wtedy wszystkie role
+> po kolei, więc orkiestracja trwa wyraźnie dłużej niż czat.
 
 ## Konfiguracja
 

@@ -10,6 +10,32 @@ from __future__ import annotations
 from husarz.config.schema import HusarzConfig
 
 
+def resolve_agent_model(config: HusarzConfig, agent: str) -> str | None:
+    """Zwraca model, którym agent FAKTYCZNIE się posłuży (bez łańcucha fallback).
+
+    Pierwszeństwo ma centralna tabela ``routing.agent_models``; dopiero gdy brak w niej
+    wpisu (albo wpis to ``auto``), obowiązuje pole ``model`` z pliku agenta. Reguła żyje
+    w jednym miejscu, bo używa jej zarówno router (``select_candidates``), jak i panel
+    (``GET /api/agents``) — wcześniej panel czytał wyłącznie plik agenta i po zmianie
+    tabeli routingu pokazywał operatorowi nieaktualny model.
+
+    Args:
+        config: pełna konfiguracja Husarza.
+        agent: nazwa agenta (klucz w ``config.agents``).
+
+    Returns:
+        Identyfikator modelu, ``"auto"`` gdy wybór zostawiono routerowi (tagi/domyślny),
+        albo ``None`` gdy agent o takiej nazwie nie istnieje.
+    """
+    mapped = config.routing.agent_models.get(agent)
+    if mapped is not None and mapped != "auto":
+        return mapped
+    agent_cfg = config.agents.get(agent)
+    if agent_cfg is None:
+        return None
+    return agent_cfg.model
+
+
 def select_candidates(
     config: HusarzConfig,
     *,
@@ -41,13 +67,9 @@ def select_candidates(
         # (2) model przypisany agentowi: najpierw routing.agent_models (tabela centralna),
         #     a gdy brak wpisu (lub 'auto') — pole 'model' z pliku agenta (config/agents/*.yaml).
         if agent is not None:
-            mapped = routing.agent_models.get(agent)
-            if mapped is not None and mapped != "auto":
-                ordered.append(mapped)
-            else:
-                agent_cfg = config.agents.get(agent)
-                if agent_cfg is not None and agent_cfg.model != "auto":
-                    ordered.append(agent_cfg.model)
+            assigned = resolve_agent_model(config, agent)
+            if assigned is not None and assigned != "auto":
+                ordered.append(assigned)
 
         # (3) reguły routingu dopasowane po tagach.
         # Reguła z pustym match_tags jest pomijana (nie jest łapaczem wszystkiego —

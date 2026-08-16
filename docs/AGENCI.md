@@ -36,6 +36,12 @@ Model per agent (kolejność priorytetu): `config/routing.yaml -> agent_models`
 (tabela centralna) → pole `model` w pliku agenta (gdy nie `auto`) → reguły po
 tagach → `models.default`. Ustaw `model: auto`, by całość zostawić routerowi.
 
+Dwa pierwsze kroki tej reguły liczy `husarz.router.selection.resolve_agent_model` —
+korzysta z niej zarówno router, jak i `GET /api/agents`, więc kolumna *Model*
+w zakładce **Agenci** pokazuje model **efektywny** (ten, którego agent faktycznie
+użyje), a nie samą deklarację z pliku agenta. Tabela wyżej odzwierciedla
+dostarczony szablon, w którym oba źródła są zgodne.
+
 ## Role
 
 - **Husarz (hetman, orkiestrator).** Dekomponuje zadanie, dobiera agentów,

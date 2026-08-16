@@ -40,7 +40,7 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 |---------------------------|------|-------------|
 | `GET /api/health`         | status, wersja, profil | — (otwarte) |
 | `GET /api/config/summary` | podsumowanie konfiguracji | `config:read` |
-| `GET /api/agents`         | Chorągiew (klasa, model, narzędzia, ROE) | `config:read` |
+| `GET /api/agents`         | Chorągiew (klasa, model **efektywny** — z `routing.agent_models`, a gdy tam `auto`, z pliku agenta — narzędzia, ROE) | `config:read` |
 | `GET /api/models`         | rejestr modeli | `config:read` |
 | `GET /api/tools`          | narzędzia (kind, egress) | `config:read` |
 | `GET /api/audit?limit=N`  | wpisy audytu + `verified`; `limit` w zakresie `0..10000` (`0` → pusto) | `audit:read` |

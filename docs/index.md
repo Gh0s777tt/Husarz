@@ -18,8 +18,35 @@ podglądu agentów i narzędzi oraz obsługi runtime.
 ![Konsola WWW Husarza — ekran główny](assets/screenshots/console.png){ .shadow loading=lazy }
 
 /// caption
-Konsola WWW Husarza (`husarz up` → `http://127.0.0.1:8000/`). Zrzut z profilu `dev`.
+Zakładka **Czat** — rozmowa z lokalnym modelem `husarz-local` (Ollama). Odpowiedź renderowana
+jako Markdown, bloki kodu z podświetlaniem składni i przyciskiem „kopiuj". Zrzut z profilu `dev`.
 ///
+
+![Zakładka Agenci — Chorągiew](assets/screenshots/console-agenci.png){ .shadow loading=lazy }
+
+/// caption
+Zakładka **Agenci** — skład Chorągwi: klasa agenta, **model efektywny** (z `routing.agent_models`,
+a gdy tam `auto` — z pliku agenta), przyznane narzędzia i wymóg ROE (tu: tylko `puszkarz`).
+///
+
+![Zakładka Audyt — łańcuch skrótów](assets/screenshots/console-audyt.png){ .shadow loading=lazy }
+
+/// caption
+Zakładka **Audyt** — niemodyfikowalny dziennik z weryfikacją łańcucha skrótów (nagłówek
+„łańcuch zweryfikowany"). Kolumna *Zlecił* wiąże wywołanie z kontem, które je zleciło;
+`—` oznacza wywołanie bez uwierzytelniania (profil `dev` na loopbacku).
+///
+
+![Zakładka Monitor — zużycie tokenów](assets/screenshots/console-monitor.png){ .shadow loading=lazy }
+
+/// caption
+Zakładka **Monitor** — liczniki wywołań i obowiązujące limity (`max_tokens_per_request`,
+`max_requests_per_minute`).
+///
+
+!!! note "Aktualność zrzutów"
+    Zrzuty pochodzą z realnie uruchomionej aplikacji i są odświeżane skryptem
+    `scripts/screenshots.py` (patrz [CONTRIBUTING.md](https://github.com/Gh0s777tt/Husarz/blob/main/CONTRIBUTING.md)).
 
 ## Zasady nadrzędne
 

@@ -36,6 +36,26 @@ python -m venv .venv
 - Dokumentacja zaktualizowana i **zweryfikowana** (README/CHANGELOG/ROADMAP/docs);
   przykłady i polecenia z dokumentów faktycznie działają.
 - Istotne decyzje udokumentowane jako ADR (`docs/adr/NNNN-*.md`).
+- Gdy zmiana dotyka **konsoli WWW** — zrzuty w dokumentacji odświeżone (patrz niżej).
+
+## Odświeżanie zrzutów ekranu
+
+Dokumentacja i wiki mają pokazywać realnie działającą aplikację, więc zrzuty w
+`docs/assets/screenshots/` odświeżamy razem ze zmianą UI — nie „kiedyś potem".
+Robi to skrypt operatora `scripts/screenshots.py` (wymaga `pip install playwright`
+i zainstalowanego Google Chrome; nie jest zależnością projektu ani częścią CI):
+
+```bash
+python -m husarz.launcher.cli up --host 127.0.0.1 --port 8000   # terminal 1
+python scripts/screenshots.py --base-url http://127.0.0.1:8000  # terminal 2
+```
+
+Zakładka **Czat** wymaga działającego modelu — skrypt zadaje pytanie i czeka na pełną
+odpowiedź, więc uruchamiaj go przy podniesionej Ollamie (patrz README, „Lokalny czat").
+
+> **Zanim zacommitujesz — obejrzyj każdy plik.** Repozytorium jest publiczne, a UI potrafi
+> pokazać ścieżki, adresy, nazwy kont czy fragmenty tokenów. Zrzuty rób wyłącznie na
+> instancji z danymi demonstracyjnymi; skrypt tego za Ciebie nie oceni.
 
 ## Konwencje commitów
 

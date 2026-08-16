@@ -61,6 +61,36 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (weryfikacja end-to-end na realnym modelu + zrzuty ekranu)
+- **Skrypt `scripts/screenshots.py`** — odświeżanie zrzutów konsoli z REALNIE uruchomionej
+  aplikacji (Playwright + systemowy Chrome; narzędzie operatora, nie zależność projektu ani
+  część CI). Robi komplet: Czat (z odpowiedzią modelu), Agenci, Audyt, Monitor. Czeka na
+  DOKŁADNE sygnały gotowości (zniknięcie `.typing`, podmiana placeholdera `…` w panelu),
+  a nie na `networkidle` — inaczej zrzuty łapały „Husarz pisze…" i puste panele.
+- Dokumentacja: 3 nowe zrzuty w `docs/index.md` (Agenci, Audyt, Monitor) z opisami; procedura
+  odświeżania + ostrzeżenie o przeglądzie przed commitem w `CONTRIBUTING.md`.
+- Zweryfikowano na żywo (Ollama, `qwen2.5-coder:7b` → model `husarz`): czat, pełna orkiestracja
+  wieloagentowa, nadpisanie runtime, łańcuch skrótów audytu i liczniki `/api/usage`.
+  Potwierdzono, że backend Ollamy **raportuje `usage`** — rozliczanie tokenów z Etapu 7b
+  działa na realnym modelu, a nie tylko na atrapach z testów.
+
+### Poprawione (weryfikacja end-to-end — panel pokazywał nieaktualny model agenta)
+- **Zakładka Agenci ignorowała `routing.agent_models`.** `GET /api/agents` zwracał pole `model`
+  z pliku agenta, podczas gdy router liczy model z pierwszeństwem tabeli routingu
+  (udokumentowanym w `docs/AGENCI.md` i `docs/ROUTER.md`). Po zmianie tabeli — w pliku albo
+  nadpisaniem runtime — panel pokazywał operatorowi model, którego agent w ogóle nie użyje.
+  W dostarczonym szablonie obie wartości są zgodne, więc rozjazd był niewidoczny do chwili,
+  gdy ktoś użyje tabeli routingu zgodnie z jej przeznaczeniem. Reguła pierwszeństwa wyjęta do
+  `husarz.router.selection.resolve_agent_model` i używana przez router ORAZ panel — żeby nie
+  istniała w dwóch kopiach, które mogą się rozjechać (tak właśnie powstał ten błąd).
+- **README obiecywał orkiestrację „z pudełka" na Ollamie.** Sekcja „Lokalny czat i kodowanie"
+  opisywała przełącznik *Orkiestracja* tak, jakby działał po samym `ollama create` — a
+  dostarczony `config/routing.yaml` kieruje agentów na modele vLLM (`glm-main`, `hermes`),
+  więc hetman zwracał `502 Backend modelu zawiódł`. Dopisany brakujący krok (przypisanie
+  agentów do `husarz-local` w pliku lub nadpisaniem runtime), zweryfikowany end-to-end.
+- Testy: +6 (`tests/unit/test_agents_effective_model.py`), w tym niezmiennik „router i panel
+  liczą model tą samą regułą" oraz test widoczności nadpisania runtime w panelu.
+
 ### Dodane (Etap 13c — korelacja principal↔wywołanie w audycie)
 - Dziennik odpowiadał na pytanie „kto WYKONAŁ" (`actor`: `kopijnik`, `puszkarz`, `api`), ale
   nie „na czyje ŻĄDANIE". Przy jednym operatorze bez znaczenia; przy wielu kontach audyt

@@ -92,6 +92,7 @@ from husarz.router.errors import (
     RateLimitExceededError,
     RouterError,
 )
+from husarz.router.selection import resolve_agent_model
 from husarz.security.audit import AuditLog, build_audit_log
 from husarz.security.errors import AuditError, SecurityError
 from husarz.security.rbac import Rbac
@@ -415,7 +416,9 @@ def create_app(
                 name=name,
                 display_name=agent.display_name,
                 agent_class=agent.agent_class.value,
-                model=agent.model,
+                # Model EFEKTYWNY, a nie samo pole z pliku agenta: pierwszeństwo ma
+                # `routing.agent_models`, więc panel musi liczyć go tą samą regułą co router.
+                model=resolve_agent_model(current, name) or agent.model,
                 tools=list(agent.tools),
                 roe_required=agent.roe_required,
                 enabled=agent.enabled,

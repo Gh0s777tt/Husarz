@@ -102,6 +102,13 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 ## ✅ Czat lokalny (Ollama) + customowy model
 - ✅ `ollama/Husarz.Modelfile` (persona hetmana, czat+kod), `models.chat` + model
   `husarz-local`; `POST /api/chat` (tryb bezpośredni); konsola z Markdown/kodem bez CDN.
+- ✅ Weryfikacja end-to-end na REALNYM modelu (`qwen2.5-coder:7b` → `husarz`): czat, pełna
+  orkiestracja wieloagentowa, nadpisanie runtime, łańcuch audytu, liczniki `/api/usage`.
+  Potwierdzone, że Ollama raportuje `usage` (rozliczanie tokenów działa poza atrapami).
+- ✅ Odświeżanie zrzutów ekranu skryptem `scripts/screenshots.py` (Czat/Agenci/Audyt/Monitor)
+  + procedura i ostrzeżenie o przeglądzie przed commitem w `CONTRIBUTING.md`.
+- ✅ Domknięty brakujący krok w README: orkiestracja na samej Ollamie wymaga przypisania
+  agentów do `husarz-local` (dostarczony `routing.yaml` celuje w modele vLLM).
 
 ## ✅ Etap 14 — Pamięć długoterminowa (RAG)
 - ✅ `husarz.memory.EmbeddingRagBackend` (wektorowa) za NIEZMIENIONYM `RagBackend`;
