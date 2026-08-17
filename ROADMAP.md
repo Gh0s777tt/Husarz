@@ -105,6 +105,12 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Weryfikacja end-to-end na REALNYM modelu (`qwen2.5-coder:7b` → `husarz`): czat, pełna
   orkiestracja wieloagentowa, nadpisanie runtime, łańcuch audytu, liczniki `/api/usage`.
   Potwierdzone, że Ollama raportuje `usage` (rozliczanie tokenów działa poza atrapami).
+- ✅ **Pętla narzędziowa zweryfikowana na realnym modelu** — pierwszy `tool.call` w dzienniku
+  (`tool=rag`, `action=search`, `ok=true`). `tool_loop_enabled: false` pozostaje domyślne
+  (deny-by-default, ADR-0016); weryfikacja na configu roboczym.
+- ✅ **Rozliczalność wywołań narzędzi widoczna z zewnątrz** — `GET /api/audit` wystawia
+  `detail` przez allowlistę deny-by-default (`husarz.api.audit_view`), konsola ma kolumnę
+  *Szczegóły*. `args`/`bytes`/`pinned_ip` zostają wyłącznie w dzienniku na dysku.
 - ✅ Odświeżanie zrzutów ekranu skryptem `scripts/screenshots.py` (Czat/Agenci/Audyt/Monitor)
   + procedura i ostrzeżenie o przeglądzie przed commitem w `CONTRIBUTING.md`.
 - ✅ Domknięty brakujący krok w README: orkiestracja na samej Ollamie wymaga przypisania

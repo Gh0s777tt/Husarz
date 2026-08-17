@@ -33,8 +33,11 @@ a gdy tam `auto` — z pliku agenta), przyznane narzędzia i wymóg ROE (tu: tyl
 
 /// caption
 Zakładka **Audyt** — niemodyfikowalny dziennik z weryfikacją łańcucha skrótów (nagłówek
-„łańcuch zweryfikowany"). Kolumna *Zlecił* wiąże wywołanie z kontem, które je zleciło;
-`—` oznacza wywołanie bez uwierzytelniania (profil `dev` na loopbacku).
+„łańcuch zweryfikowany"). Kolumna *Zlecił* wiąże wywołanie z kontem, które je zleciło
+(`—` = brak uwierzytelniania, profil `dev` na loopbacku), a *Szczegóły* pokazuje, **które**
+narzędzie zadziałało i z jakim wynikiem (`tool=rag action=search ok=true`). Wystawiany jest
+wyłącznie podzbiór z allowlisty — argumenty wywołania zostają w dzienniku na dysku
+(zob. [BEZPIECZENSTWO](BEZPIECZENSTWO.md)).
 ///
 
 ![Zakładka Monitor — zużycie tokenów](assets/screenshots/console-monitor.png){ .shadow loading=lazy }

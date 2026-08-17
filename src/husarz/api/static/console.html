@@ -456,9 +456,19 @@
         $("audit-status").innerHTML = a.verified ? `<span class="ok">łańcuch zweryfikowany</span> (${esc(a.count)})` : `<span class="err">łańcuch USZKODZONY</span>`;
         // Kolumna „Zlecił" (principal) obok „Aktor" (kto wykonał) — bez niej operator widzi,
         // że agent uruchomił narzędzie, ale nie na czyje żądanie (rozliczalność, Etap 13c).
-        $("audit-out").innerHTML = a.entries.length ? "<table><tr><th>Czas</th><th>Aktor</th><th>Zlecił</th><th>Akcja</th><th>ROE</th></tr>" +
-          a.entries.map((e) => `<tr><td>${esc(e.timestamp)}</td><td>${esc(e.actor)}</td><td>${esc(e.principal) || "—"}</td><td>${esc(e.action)}</td><td>${esc(e.roe_ref) || "—"}</td></tr>`).join("") + "</table>" : "<p class='muted'>Brak wpisów.</p>";
+        // Kolumna „Szczegóły": wąski podzbiór z allowlisty API (dla tool.call — narzędzie,
+        // akcja, wynik). Bez niej wiersz „tool.call" nie mówił, KTÓRE narzędzie zadziałało.
+        $("audit-out").innerHTML = a.entries.length ? "<table><tr><th>Czas</th><th>Aktor</th><th>Zlecił</th><th>Akcja</th><th>Szczegóły</th><th>ROE</th></tr>" +
+          a.entries.map((e) => `<tr><td>${esc(e.timestamp)}</td><td>${esc(e.actor)}</td><td>${esc(e.principal) || "—"}</td><td>${esc(e.action)}</td><td>${auditDetail(e.detail)}</td><td>${esc(e.roe_ref) || "—"}</td></tr>`).join("") + "</table>" : "<p class='muted'>Brak wpisów.</p>";
       }
+    }
+
+    // Szczegóły wpisu audytu jako „klucz=wartość". Wartości pochodzą z allowlisty po stronie
+    // API (husarz.api.audit_view), ale i tak ESCAPUJEMY — konsola nie ufa żadnemu wejściu.
+    function auditDetail(detail) {
+      if (!detail) return "—";
+      const parts = Object.keys(detail).sort().map((k) => `${esc(k)}=${esc(String(detail[k]))}`);
+      return parts.length ? `<code>${parts.join(" ")}</code>` : "—";
     }
 
     // --- Minimalny renderer Markdown (bez zależności; NAJPIERW escapowanie HTML) ---

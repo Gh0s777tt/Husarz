@@ -36,6 +36,7 @@ from husarz.accounts.errors import (
 )
 from husarz.agents.base import SupportsComplete
 from husarz.agents.tool_loop import ToolLoop, build_tool_loop
+from husarz.api.audit_view import public_detail
 from husarz.api.schemas import (
     AgentInfo,
     AuditEntryView,
@@ -480,6 +481,8 @@ def create_app(
                     action=e.action,
                     roe_ref=e.roe_ref,
                     principal=e.principal,
+                    # Allowlista, deny-by-default — pełny `detail` zostaje w dzienniku na dysku.
+                    detail=public_detail(e.action, e.detail),
                 )
                 for e in recent
             ],

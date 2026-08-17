@@ -57,6 +57,61 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Ekspozycja szczegółów audytu przez API (data: 2026-08-17)
+
+**Problem.** Dziennik audytu zapisuje na dysku pełny kontekst zdarzenia (`AuditEntry.detail`) —
+dla wywołania narzędzia są to `tool`, `action`, `ok`, **`args`**, `bytes` i `pinned_ip`.
+`GET /api/audit` nie zwracał `detail` w ogóle, więc konsola pokazywała wiersz `tool.call` bez
+nazwy narzędzia: dziennik odpowiadał „coś wywołano", ale nie „**co**". Dla platformy, której
+agenci wykonują narzędzia, to luka w rozliczalności dokładnie tej klasy, co brakujący
+`principal` w widoku API (Etap 13c) — funkcja istniała, ale była niewidoczna z zewnątrz.
+
+**Rozwiązanie.** `husarz.api.audit_view.public_detail` — **allowlista, deny-by-default**:
+
+| Akcja | Wystawiane przez API | Zostaje WYŁĄCZNIE na dysku |
+|---|---|---|
+| `tool.call` | `tool`, `action`, `ok` | `args`, `bytes`, `pinned_ip` |
+| `tool.deny` | `tool`, `action`, `reason` | — |
+| `toolloop.limit` | `max_iterations` | — |
+| każda inna | *(nic)* | całość |
+
+Cztery bariery, świadomie ustawione w tej kolejności:
+
+1. **Deny-by-default** — akcja spoza mapy nie ujawnia nic. Nowy typ wpisu NIE zacznie wyciekać
+   payloadu przez przeoczenie; trzeba go dopisać razem z testem.
+2. **Allowlista kluczy, nie blocklista** — blocklista („wszystko oprócz `args`") pękłaby przy
+   pierwszym nowym polu z danymi wrażliwymi.
+3. **Tylko skalary** — wartość niebędąca `str`/`int`/`bool` jest odrzucana nawet pod dozwolonym
+   kluczem; zagnieżdżona struktura mogłaby przemycić treść pod niewinną nazwą.
+4. **Limit długości** (64 znaki) — dozwolone pole nie może być kanałem wycieku przez rozmiar.
+
+**Dlaczego akurat te pola zostają na dysku.** `args` niesie treść pochodzącą od modelu lub
+użytkownika (ścieżki, zapytania, potencjalnie materiał sekretny); `pinned_ip` ujawnia topologię
+sieci operatora; `bytes` jest kanałem bocznym o rozmiarze odpowiedzi. Rola `audit:read`
+odpowiada na pytanie o rozliczalność, nie daje wglądu w treść.
+
+**Co sprawdzono (`tests/security/test_audit_view_exposure.py`, marker `security`):**
+
+| Niezmiennik | Test | Wynik |
+|---|---|---|
+| `args` nigdy nie opuszczają dysku | `test_args_are_never_exposed` | ✅ |
+| `pinned_ip`/`bytes` nie są wystawiane | `test_network_and_size_details_are_not_exposed` | ✅ |
+| Zagnieżdżona wartość odrzucana pod dozwolonym kluczem | `test_nested_values_are_dropped_even_under_allowed_key` | ✅ |
+| Długie wartości przycinane | `test_long_values_are_truncated` | ✅ |
+| Akcja spoza allowlisty nie ujawnia nic | `test_unknown_action_exposes_nothing` | ✅ |
+| `bool` nie degraduje się do `int` | `test_bool_keeps_its_type_not_collapsed_to_int` | ✅ |
+| API pokazuje narzędzie, ale nie argumenty | `test_api_exposes_tool_name_but_not_args` | ✅ |
+| Dziennik na dysku zachowuje pełny kontekst | `test_disk_log_still_carries_everything` | ✅ |
+
+**Weryfikacja nośności testów:** allowlista tymczasowo wyłączona (`return dict(detail)`) —
+8 z 13 testów czerwone, w tym wszystkie trzy o wycieku `args`. Testy nie są puste.
+
+**Weryfikacja na żywo** (Ollama, model `husarz`, pętla narzędziowa włączona dla `bielik`):
+`GET /api/audit` zwraca `{"action":"search","ok":true,"tool":"rag"}`, a ciągi `args`, `query`,
+`pinned_ip` i `bytes` **nie występują w odpowiedzi API**; ten sam wpis na dysku niesie
+`{"tool":"rag","action":"search","ok":true,"args":{"query":"…"},"bytes":0}`. Łańcuch skrótów
+zweryfikowany. Zrzut: `docs/assets/screenshots/console-audyt.png`.
+
 ### Etap 0 — konfiguracja i niezmienniki (data: 2026-08-13)
 
 **Zakres:** walidacja domyślnej konfiguracji i schematu; brak komponentów runtime.

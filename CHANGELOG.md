@@ -61,6 +61,28 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (rozliczalność pętli narzędziowej — `detail` w widoku audytu, allowlista)
+- **`GET /api/audit` zwraca teraz `detail`** — wąski, jawnie dozwolony podzbiór szczegółów
+  wpisu. Dla `tool.call` są to `tool`, `action`, `ok`, czyli odpowiedź na podstawowe pytanie
+  rozliczalności: **które** narzędzie zadziałało i czy się powiodło. Dotąd widok API nie
+  wystawiał szczegółów wcale, więc konsola pokazywała wiersz `tool.call` bez nazwy narzędzia —
+  ta sama klasa luki co brakujący `principal` przed Etapem 13c: funkcja istniała, ale była
+  niewidoczna z zewnątrz. Konsola ma kolumnę **Szczegóły**.
+- **Reguła ekspozycji: allowlista, deny-by-default** (`husarz.api.audit_view.public_detail`).
+  Akcja spoza mapy nie ujawnia niczego, więc nowy typ wpisu audytu nie zacznie wyciekać
+  payloadu przez przeoczenie. Dodatkowo: wyłącznie wartości skalarne (zagnieżdżona struktura
+  mogłaby przemycić treść pod dozwoloną nazwą) i twardy limit długości.
+- Na dysku **nic się nie zmienia** — `args`, `bytes` i `pinned_ip` nadal trafiają do
+  niemodyfikowalnego dziennika. Rola `audit:read` odpowiada na pytanie o rozliczalność,
+  nie daje wglądu w treść wywołania.
+- **Pętla narzędziowa zweryfikowana end-to-end na realnym modelu** — pierwsze w historii
+  projektu wywołanie `tool.call` w dzienniku (`tool=rag`, `action=search`, `ok=true`),
+  łańcuch skrótów zweryfikowany. `tool_loop_enabled: false` pozostaje domyślne w dostarczonym
+  configu (deny-by-default z ADR-0016) — weryfikacja szła na configu roboczym.
+- Testy: +13 (`tests/security/test_audit_view_exposure.py`, marker `security`). Nośność
+  potwierdzona: po tymczasowym wyłączeniu allowlisty 8 z 13 czerwienieje, w tym wszystkie
+  o wycieku `args`. Docs: notatka weryfikacyjna w `BEZPIECZENSTWO.md`, `API.md`, zrzut ekranu.
+
 ### Poprawione (przegląd pobieranego launchera — licencja bazy, kolizja portu, znikające logi)
 - **`ollama/README.md` rekomendował model o licencji BADAWCZEJ.** Jako obejście buga
   sterownika Blackwell dokument podawał `FROM qwen2.5-coder:3b`. Wariant 3B — w odróżnieniu

@@ -43,7 +43,7 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 | `GET /api/agents`         | Chorągiew (klasa, model **efektywny** — z `routing.agent_models`, a gdy tam `auto`, z pliku agenta — narzędzia, ROE) | `config:read` |
 | `GET /api/models`         | rejestr modeli | `config:read` |
 | `GET /api/tools`          | narzędzia (kind, egress) | `config:read` |
-| `GET /api/audit?limit=N`  | wpisy audytu + `verified`; `limit` w zakresie `0..10000` (`0` → pusto) | `audit:read` |
+| `GET /api/audit?limit=N`  | wpisy audytu + `verified`; `limit` w zakresie `0..10000` (`0` → pusto). Pole `detail` niesie **wąski podzbiór z allowlisty** (`tool.call` → `tool`/`action`/`ok`); pełny szczegół zostaje w dzienniku na dysku | `audit:read` |
 | `GET /api/usage`          | monitor: `orchestrations`, `chats`, `failures`, limity kosztów | `config:read` |
 | `POST /api/chat`          | `{messages, model?, temperature?, attachments?, images?}` → **bezpośredni czat** z jednym modelem (szybki, konwersacyjny + kodowanie). Model z `models.chat` lub `default` | `agent:run` |
 | `POST /api/orchestrate`   | `{task}` → hetman wieloagentowy. Brak routera → 503; błąd routera → 429/502/503 (nie 500) | `agent:run` |

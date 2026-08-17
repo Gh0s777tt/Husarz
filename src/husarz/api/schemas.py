@@ -63,7 +63,7 @@ class ToolInfo(BaseModel):
 
 
 class AuditEntryView(BaseModel):
-    """Widok pojedynczego wpisu audytu (bez pełnych szczegółów)."""
+    """Widok pojedynczego wpisu audytu (szczegóły WYŁĄCZNIE z allowlisty)."""
 
     timestamp: str
     actor: str  # kto WYKONAŁ (agent albo 'api')
@@ -72,6 +72,10 @@ class AuditEntryView(BaseModel):
     # Kto ZLECIŁ (`user:<id>` / `token:<rola>`); puste = brak uwierzytelnienia. Bez tego pola
     # audyt widziany przez API/konsolę nie odpowiadał na pytanie o rozliczalność (Etap 13c).
     principal: str = ""
+    # Wąski, jawnie dozwolony podzbiór `AuditEntry.detail` — dla `tool.call` odpowiada na
+    # pytanie „KTÓRE narzędzie i czy się powiodło". Pełny szczegół (argumenty, rozmiary,
+    # przypięte IP) zostaje w dzienniku na dysku. Reguła: husarz.api.audit_view.public_detail.
+    detail: dict[str, str | int | bool] = Field(default_factory=dict)
 
 
 class AuditView(BaseModel):
