@@ -57,6 +57,58 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Granice walidacji airgap dla endpointów modeli (data: 2026-08-20)
+
+**Powód notatki.** Przy ocenie zewnętrznej bramki LLM (ADR-0022) padło pytanie: czy taki
+proces, postawiony obok Husarza, przeszedłby naszą walidację profilu `airgap`? **Przeszedłby.**
+To zachowanie jest projektowe, ale jego konsekwencja nie była nigdzie zapisana — a operator
+musi ją znać, zanim na niej polegnie.
+
+**Stan faktyczny.** Walidacja krzyżowa `airgap` używa DWÓCH różnych progów, świadomie:
+
+| Co | Próg | Co przepuszcza |
+|---|---|---|
+| modele (`models.registry[].endpoint`) | `is_local_endpoint` | loopback, **cały prywatny LAN** (RFC 1918 / ULA), `.local`, `.internal` |
+| embedder narzędzia `rag` | `is_local_endpoint` | jak wyżej |
+| wtyczki MCP (`plugins[].endpoint`) | `is_loopback_endpoint` | **wyłącznie** loopback |
+
+Ostrzejszy próg dla wtyczek jest uzasadniony w kodzie: runtime konektora i tak przepuszcza
+poza allowlistą tylko loopback, więc bramka startowa i runtime są spójne (ADR-0019).
+
+**Dlaczego modele mają próg szerszy — i dlaczego to jest poprawne.** Airgap oznacza brak
+trasy do WAN, nie brak sieci lokalnej. Serwer vLLM na osobnej maszynie z GPU, w tej samej
+odciętej podsieci, to normalna i sensowna topologia wdrożenia. Zawężenie modeli do loopbacku
+wykluczyłoby ją bez zysku bezpieczeństwa — maszyna GPU jest w tym samym obwodzie zaufania.
+
+**Ryzyko rezydualne — nazwane wprost.** Walidator sprawdza ADRES, a nie NATURĘ usługi pod tym
+adresem. Nie odróżni serwera modeli od bramki pośredniczącej. W konsekwencji:
+
+- proces-pośrednik uruchomiony na `127.0.0.1` albo na hoście w LAN przechodzi walidację
+  jako „endpoint lokalny";
+- nasza bramka egress ocenia **nasz** wybór hosta, nie to, co ten host zrobi dalej;
+- audyt zapisze wówczas wywołanie do adresu lokalnego, mimo że dane mogły pójść dalej.
+
+Innymi słowy: `airgap` egzekwuje, że **Husarz** nie kieruje ruchu do WAN. Nie egzekwuje — bo
+nie może — że nie robi tego oprogramowanie, któremu operator świadomie powierzył ruch. To
+ograniczenie warstwy aplikacyjnej; pełne wymuszenie należy do warstwy sieciowej
+(NetworkPolicy, reguły zapory), zgodnie z Etapem 6.
+
+**Co z tego wynika dla operatora.**
+
+1. W `airgap` wpisuj do `models.registry` wyłącznie endpointy usług, nad którymi masz
+   kontrolę i których naturę znasz. Adres lokalny nie jest dowodem lokalności DANYCH.
+2. Jeśli topologia tego nie wymaga, trzymaj endpointy modeli na loopbacku — próg jest
+   szerszy z myślą o maszynie GPU w LAN, a nie jako zachęta.
+3. Odcięcie od WAN egzekwuj na poziomie sieci. Walidacja konfiguracji jest bramką startową,
+   nie zaporą.
+4. Szczególna ostrożność przy embedderze `rag`: komentarz w schemacie słusznie zaznacza, że
+   embeddingi bywają **odwracalne do PII**, a obowiązuje tam ten sam szerszy próg.
+
+**Sprawdzone:** `src/husarz/config/schema.py` (modele, wtyczki, embedder), definicje progów
+w `src/husarz/config/net.py`. Zachowanie zgodne z zamierzeniem; zmian w kodzie nie wprowadzono —
+notatka utrwala świadomą decyzję i jej granice.
+
+
 ### Ekspozycja szczegółów audytu przez API (data: 2026-08-17)
 
 **Problem.** Dziennik audytu zapisuje na dysku pełny kontekst zdarzenia (`AuditEntry.detail`) —

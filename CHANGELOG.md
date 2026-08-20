@@ -61,6 +61,39 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (ADR-0022 — kryteria przyjmowania narzędzi zewnętrznych, dwa odrzucenia)
+- **ADR-0022** zapisuje **pięć kryteriów odrzucenia** narzędzia zewnętrznego (cofnięcie
+  deklaracji platformy, niepoliczalna powierzchnia wyjścia, wymóg sieci/uprawnień tam, gdzie
+  deklarujemy ich brak, ryzyko regulaminowe, nieproporcjonalny dług) oraz **regułę pozytywną**:
+  pomysł wolno przejąć zawsze, gdy licencja pozwala — przepisany po swojemu w Pythonie
+  dziedziczy nasze bramki (egress, `UsageMeter`, audyt, RBAC) zamiast je omijać.
+- Udokumentowane odrzucenie **OpenPipe ART** (Apache-2.0): `requires-python >= 3.12` wobec
+  naszego `>= 3.11`; zależności bazowe z czterema klientami usług chmurowych; RULER woła
+  sędziego przez `litellm`, omijając nasz `Router`, bramkę egress, `UsageMeter` i audyt.
+  Do przejęcia jako pomysł: relatywne ocenianie grupowe i zasada, że twardy sygnał
+  deterministyczny nigdy nie jest nadpisywany oceną sędziego LLM.
+- Udokumentowane odrzucenie **OmniRoute** (MIT): to aplikacja Next.js, nie biblioteka (brak
+  `main`/`exports`/`types`); 79 zależności runtime i Node ≥ 22; stan runtime wyłącznie
+  w SQLite, więc konfiguracji nie da się wersjonować; `postinstall` wykonuje kod i pobiera
+  binaria; MITM/TPROXY z instalatorem własnego CA. Rozstrzygające: komponenty do obchodzenia
+  zabezpieczeń antybotowych konsumenckich interfejsów webowych. Żaden z podprojektów
+  (`opencode-plugin`, `opencode-provider` — *deprecated*, `browser-pool`, `open-sse`,
+  `electron`, `skills`) nie ma samodzielnej wartości dla Husarza.
+- Trzy niezależne analizy wskazały ten sam brak — **warstwę pomiaru jakości**. To czyni ją
+  najlepiej uzasadnionym kolejnym etapem.
+
+### Dodane (BEZPIECZENSTWO — granice walidacji airgap dla endpointów modeli)
+- Notatka utrwala **świadomą asymetrię** progów w walidacji krzyżowej profilu `airgap`:
+  modele i embedder `rag` przechodzą przez `is_local_endpoint` (loopback + cały prywatny LAN
+  + `.local`/`.internal`), a wtyczki MCP przez ostrzejsze `is_loopback_endpoint`. Szerszy próg
+  dla modeli jest poprawny — airgap oznacza brak trasy do WAN, nie brak sieci lokalnej,
+  a vLLM na osobnej maszynie z GPU to normalna topologia.
+- Nazwane wprost **ryzyko rezydualne**, dotąd nigdzie niezapisane: walidator sprawdza ADRES,
+  nie NATURĘ usługi, więc nie odróżni serwera modeli od bramki pośredniczącej. `airgap`
+  egzekwuje, że *Husarz* nie kieruje ruchu do WAN — nie egzekwuje, bo nie może, że nie robi
+  tego oprogramowanie, któremu operator świadomie powierzył ruch. Pełne wymuszenie należy do
+  warstwy sieciowej (Etap 6). Zmian w kodzie nie wprowadzono — zachowanie jest zamierzone.
+
 ### Dodane (rozliczalność pętli narzędziowej — `detail` w widoku audytu, allowlista)
 - **`GET /api/audit` zwraca teraz `detail`** — wąski, jawnie dozwolony podzbiór szczegółów
   wpisu. Dla `tool.call` są to `tool`, `action`, `ok`, czyli odpowiedź na podstawowe pytanie

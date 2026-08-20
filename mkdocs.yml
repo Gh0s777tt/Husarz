@@ -115,3 +115,4 @@ nav:
       - 0019 · Wywołanie MCP (tools/call): adr/0019-wywolanie-mcp-tools-call.md
       - 0020 · Pinowanie IP (anty-SSRF): adr/0020-pinowanie-ip-anty-ssrf.md
       - 0021 · Kryptograficzny podpis ROE: adr/0021-podpis-roe.md
+      - 0022 · Zewnętrzne narzędzia agentowe: adr/0022-zewnetrzne-narzedzia-agentowe.md

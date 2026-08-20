@@ -290,6 +290,28 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ⬜ Sesje współdzielone
   (Redis) do skalowania; płatności/subskrypcje; integracje Git/VS Code; załączniki.
 
+## ⬜ Etap 16 — Warstwa pomiaru jakości (ewaluacja)
+
+Trzy niezależne analizy zewnętrznych narzędzi (ART, OmniRoute — patrz
+[ADR-0022](docs/adr/0022-zewnetrzne-narzedzia-agentowe.md)) wskazały ten sam brak: Husarz
+nie ma **żadnego** sposobu, by zmierzyć, czy zmiana promptu, routingu albo modelu poprawiła
+działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
+
+- ⬜ Materializacja przebiegu agenta (`RunRecord`): `run_id`, tożsamość agenta, numer
+  iteracji, wywołania narzędzi z `ok`/`exit_code`, powód terminacji, zużycie tokenów.
+  Granulacja per wiadomość — inaczej późniejsze użycia wymagają ponownego instrumentowania.
+- ⬜ `config/evals/<zestaw>.yaml` (przez `_MULTI_DIRS` w loaderze) + podkomenda `husarz eval`.
+- ⬜ Cztery weryfikatory **deterministyczne**: `exit_code` z `run_tests`; udział odpowiedzi
+  niesparsowalnych; zgodność routingu (`resolve_agent_model`/`select_candidates` — czysta
+  funkcja); blokady bezpieczeństwa (`tool.deny`, odmowy ROE, egress). **Trzy z czterech
+  działają na atrapie — bez modelu, bez GPU, bez sieci — więc wchodzą do CI od razu.**
+- ⬜ Budżet okna kontekstu — dziś clampujemy `max_tokens`, ale nie sprawdzamy, czy prompt
+  mieści się w oknie modelu. Przy 7B i pętli narzędziowej to realny problem (zaobserwowany:
+  agent wyczerpał limit iteracji).
+- ⬜ (hipoteza, poza zakresem etapu) Sędzia LLM z relatywnym ocenianiem grupowym. Poprzedzony
+  pomiarem, czy grupa przebiegów mieści się w oknie modelu, który startuje na tym sprzęcie.
+  Twardy sygnał deterministyczny NIGDY nie jest nadpisywany oceną sędziego.
+
 ## Pozostałe ustalenia
 - Modele (GLM-5.2, Bielik v3, Hermes) pobierane lokalnie do `models/` (gitignored)
   na dysku z zapasem miejsca — dopiero od Etapu 1 (router) i realnego uruchomienia.
