@@ -27,6 +27,7 @@ from pydantic import (
     model_validator,
 )
 
+from husarz.config.evals import EvalSet
 from husarz.config.net import is_local_endpoint, is_loopback_endpoint
 
 # ---------------------------------------------------------------------------
@@ -941,6 +942,9 @@ class HusarzConfig(_StrictModel):
     tools: dict[str, ToolConfig] = Field(default_factory=dict)
     plugins: dict[str, PluginConfig] = Field(default_factory=dict)
     roe: dict[str, RoeConfig] = Field(default_factory=dict)
+    # Zestawy ewaluacyjne (Etap 16) — deterministyczny pomiar poprawności routingu
+    # i bramki narzędziowej. Puste = brak pomiarów; nie wpływa na runtime.
+    evals: dict[str, EvalSet] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _cross_validate(self) -> HusarzConfig:

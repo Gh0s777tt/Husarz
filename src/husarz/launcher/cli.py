@@ -69,6 +69,52 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_eval(args: argparse.Namespace) -> int:
+    """Uruchamia zestawy ewaluacyjne i wypisuje raport.
+
+    Kod wyjścia 0 = wszystko zdane, 1 = choć jeden przypadek niezdany (albo błąd konfiguracji).
+    Dzięki temu polecenie nadaje się wprost na bramkę w CI — nie woła modelu ani sieci.
+    """
+    import tempfile  # noqa: PLC0415 - potrzebne tylko tutaj
+
+    from husarz.eval import run_set  # noqa: PLC0415 - import leniwy jak reszta CLI
+
+    config_dir = resolve_config_dir(args.config, os.environ)
+    try:
+        config = load_config(config_dir)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    wybrane = {k: v for k, v in config.evals.items() if args.set is None or k == args.set}
+    if args.set is not None and not wybrane:
+        dostepne = ", ".join(sorted(config.evals)) or "(brak)"
+        print(f"Nie ma zestawu '{args.set}'. Dostępne: {dostepne}", file=sys.stderr)
+        return 1
+    if not wybrane:
+        print("Brak zestawów ewaluacyjnych w config/evals/ — nie ma czego mierzyć.")
+        return 0
+
+    prompts = Path(args.prompts)
+    ok = True
+    # Narzędzia z przypadków `tool_policy` piszą do workspace'u — dajemy im katalog
+    # tymczasowy, żeby ewaluacja nie dotykała roboczego katalogu operatora.
+    with tempfile.TemporaryDirectory(prefix="husarz-eval-") as tmp:
+        for name in sorted(wybrane):
+            result = run_set(config, wybrane[name], prompts_dir=prompts, workspace=Path(tmp))
+            status = "OK" if result.ok else "BŁĄD"
+            print(
+                f"[{status}] zestaw '{result.name}': {result.passed} zdanych, {result.failed} nie"
+            )
+            for case in result.results:
+                if case.passed:
+                    print(f"    ✓ {case.name} ({case.kind})")
+                else:
+                    print(f"    ✗ {case.name} ({case.kind}) — {case.detail}")
+            ok = ok and result.ok
+    return 0 if ok else 1
+
+
 def _cmd_version(_: argparse.Namespace) -> int:
     print(f"Husarz {__version__}")
     return 0
@@ -473,6 +519,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Katalog konfiguracji (domyślnie ENV HUSARZ_CONFIG_DIR lub ./config).",
     )
     p_validate.set_defaults(func=_cmd_validate)
+
+    p_eval = sub.add_parser(
+        "eval", help="Uruchom zestawy ewaluacyjne (deterministyczne, bez modelu i sieci)."
+    )
+    p_eval.add_argument(
+        "--config",
+        default=None,
+        help="Katalog konfiguracji (domyślnie ENV HUSARZ_CONFIG_DIR lub ./config).",
+    )
+    p_eval.add_argument("--prompts", default="./prompts", help="Katalog promptów agentów.")
+    p_eval.add_argument("--set", default=None, help="Nazwa jednego zestawu (domyślnie: wszystkie).")
+    p_eval.set_defaults(func=_cmd_eval)
 
     p_version = sub.add_parser("version", help="Wypisz wersję.")
     p_version.set_defaults(func=_cmd_version)

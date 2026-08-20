@@ -61,6 +61,35 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (Etap 16, krok 2 — warstwa ewaluacji i podkomenda `husarz eval`)
+- **Zestawy ewaluacyjne** w `config/evals/*.yaml` (nowa sekcja wieloplikowa `evals`, wczytywana
+  przez loader jak agenci i narzędzia). Literówka w polu albo w rodzaju przypadku jest błędem
+  walidacji przy starcie, nie cichym pominięciem.
+- **Podkomenda `husarz eval`** — wypisuje raport per przypadek i zwraca kod wyjścia `1`, gdy
+  choć jeden nie przeszedł. Nadaje się wprost na bramkę CI: nie woła modelu, nie otwiera gniazd,
+  nie potrzebuje GPU. Flagi: `--config`, `--prompts`, `--set`.
+- **Weryfikator `routing`** — czy agent trafi na oczekiwany model. Liczony czystą funkcją
+  (`select_candidates`), w mikrosekundach. Wychwytuje tę samą klasę wady, którą naprawiał commit
+  o panelu Agenci: rozjazd między deklaracją w configu a realnym wyborem routera.
+- **Weryfikator `tool_policy`** — uruchamia PRAWDZIWĄ pętlę narzędziową ze skryptowanym routerem
+  i sprawdza werdykt bramki (allowlista agenta, ROE, budżet). Skryptowany router jest konieczny:
+  bramka bezpieczeństwa musi dawać ten sam werdykt zawsze, a nie zależeć od tego, czy model dziś
+  zechce poprosić o narzędzie.
+- Agent bez `tool_loop_enabled` raportowany jest **uczciwie** („ma wyłączoną pętlę narzędziową"),
+  a nie jako fałszywe „zablokowano" — fałszywy pomiar byłby gorszy niż brak pomiaru.
+- Weryfikator NIGDY nie rzuca: wyjątek w jednym przypadku staje się niezdanym przypadkiem
+  z komunikatem, a nie przerwaniem całego zestawu.
+- Dostarczony zestaw `podstawowy` (3 przypadki routingu) przechodzi; test pilnuje, że przechodzi —
+  publikowanie czerwonej bramki byłoby gorsze niż jej brak.
+- Docs: nowa sekcja `docs/EWALUACJA.md` z jawnym akapitem **„czego ta warstwa jeszcze NIE mierzy"**.
+- Testy: +12 (`tests/unit/test_eval.py`), w tym trzy testy nośności (złe oczekiwanie MUSI paść).
+
+### Zmienione (architektura — modele zestawów w warstwie konfiguracji)
+- `husarz.config.evals` zamiast `husarz.eval.cases`: modele konfiguracji należą do warstwy
+  konfiguracji. Trzymanie ich w pakiecie wykonawczym tworzyło cykl importów
+  (`config.schema` → `eval` → `agents` → `config.schema`) — drugi taki cykl w tym projekcie,
+  po `husarz.ssrf`. Moduł zależy wyłącznie od pydantica.
+
 ### Dodane (Etap 16, krok 1 — materializacja przebiegu agenta)
 - Nowy pakiet **`husarz.runs`**: `RunRecord` (przebieg jednego agenta), `RunStep` (tura),
   `Termination` (powód zakończenia: `final`/`iteration_limit`/`budget`/`roe_refused`) oraz

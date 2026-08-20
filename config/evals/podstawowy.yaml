@@ -1,0 +1,49 @@
+# ============================================================================
+# config/evals/podstawowy.yaml — podstawowy zestaw ewaluacyjny (Etap 16).
+# ----------------------------------------------------------------------------
+# Przypadki sprawdzane DETERMINISTYCZNIE: bez modelu, bez GPU, bez sieci.
+# Uruchomienie:  husarz eval
+# Zestaw nadaje się na bramkę w CI — dlatego nie ma tu nic, co zależy od tego,
+# co model akurat zechce dziś odpowiedzieć.
+# ============================================================================
+name: podstawowy
+description: >-
+  Routing agentów i bramka narzędziowa — niezmienniki, które muszą się trzymać
+  niezależnie od modelu. Wychwytuje rozjazd między deklaracją w configu
+  a rzeczywistym zachowaniem routera oraz regresje w allowliście narzędzi.
+
+cases:
+  # --- Routing: agent trafia tam, gdzie wskazuje tabela routingu -------------
+  - name: kopijnik-na-hermesa
+    kind: routing
+    agent: kopijnik
+    expect_model: hermes
+
+  - name: husarz-na-glm-main
+    kind: routing
+    agent: husarz
+    expect_model: glm-main
+
+  - name: bielik-na-wlasnym-modelu
+    kind: routing
+    agent: bielik
+    expect_model: bielik
+
+  # --- Bramka narzędziowa: allowlista agenta jest egzekwowana ---------------
+  # Uwaga: przypadki `tool_policy` wymagają agenta z `tool_loop_enabled: true`.
+  # W dostarczonym configu pętla jest wyłączona (deny-by-default, ADR-0016),
+  # więc te przypadki są zakomentowane — odkomentuj po włączeniu pętli u agenta.
+  #
+  # - name: bielik-nie-dostaje-shella
+  #   kind: tool_policy
+  #   agent: bielik
+  #   tool: shell
+  #   action: run
+  #   expect: denied
+  #
+  # - name: bielik-dostaje-rag
+  #   kind: tool_policy
+  #   agent: bielik
+  #   tool: rag
+  #   action: search
+  #   expect: allowed

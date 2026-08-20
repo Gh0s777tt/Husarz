@@ -89,6 +89,7 @@ nav:
   - Bezpieczeństwo: BEZPIECZENSTWO.md
   - Operacje:
       - Launcher: LAUNCHER.md
+      - Ewaluacja: EWALUACJA.md
       - Wdrożenie: DEPLOY.md
       - API i konsola WWW: API.md
       - Konta i sesje: KONTA.md

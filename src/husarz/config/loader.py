@@ -51,6 +51,8 @@ _MULTI_DIRS: dict[str, tuple[str, str]] = {
     "tools": ("tools", "name"),
     "plugins": ("plugins", "name"),
     "roe": ("roe", "engagement_id"),
+    # Zestawy ewaluacyjne (Etap 16) — jeden plik = jeden zestaw, klucz z pola `name`.
+    "evals": ("evals", "name"),
 }
 
 

@@ -302,11 +302,13 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   per tura; `run_id` wspólny dla wszystkich przebiegów jednej orkiestracji (semantyka grupy).
   **Rekord niesie metryki, nie treść** — struktura nie ma pola na tekst. Opt-in
   (`platform.runs.enabled`). Testy: +21. Docs: notatka w BEZPIECZENSTWO.md.
-- ⬜ `config/evals/<zestaw>.yaml` (przez `_MULTI_DIRS` w loaderze) + podkomenda `husarz eval`.
-- ⬜ Cztery weryfikatory **deterministyczne**: `exit_code` z `run_tests`; udział odpowiedzi
-  niesparsowalnych; zgodność routingu (`resolve_agent_model`/`select_candidates` — czysta
-  funkcja); blokady bezpieczeństwa (`tool.deny`, odmowy ROE, egress). **Trzy z czterech
-  działają na atrapie — bez modelu, bez GPU, bez sieci — więc wchodzą do CI od razu.**
+- ✅ `config/evals/<zestaw>.yaml` (sekcja `evals` w loaderze) + podkomenda `husarz eval`
+  z kodem wyjścia 1 przy niezdanym przypadku. Docs: `docs/EWALUACJA.md`.
+- ✅ Weryfikator `routing` (czysta funkcja) i `tool_policy` (prawdziwa pętla ze skryptowanym
+  routerem) — oba bez modelu, GPU i sieci, gotowe do CI. Testy: +12.
+- ⬜ Weryfikator `exit_code` z `run_tests` — wymaga sandboxa z Dockerem (środowisko docelowe).
+- ⬜ Weryfikator `malformed_ratio` — metryki już zbieramy (`husarz.runs`), brakuje zestawów
+  zadaniowych uruchamianych na REALNYM modelu (mierzy jakość modelu, nie naszego kodu).
 - ⬜ Budżet okna kontekstu — dziś clampujemy `max_tokens`, ale nie sprawdzamy, czy prompt
   mieści się w oknie modelu. Przy 7B i pętli narzędziowej to realny problem (zaobserwowany:
   agent wyczerpał limit iteracji).
