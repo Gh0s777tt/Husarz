@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from uuid import uuid4
 
 from husarz.agents.base import BaseAgent, SupportsComplete
 from husarz.agents.loader import build_agents
@@ -131,6 +132,7 @@ class Orchestrator:
         budget: ToolCallBudget | None = None,
         meter: UsageMeter | None = None,
         principal: str = "",
+        run_id: str = "",
     ) -> Observation:
         agent = self._agents.get(step.agent)
         if agent is None or step.agent == self._orchestrator_name:
@@ -160,6 +162,7 @@ class Orchestrator:
                 context=step_context,
                 budget=budget,
                 principal=principal,
+                run_id=run_id,
             )
         else:
             result = agent.run(step.task, router=self._router, context=step_context)
@@ -193,14 +196,20 @@ class Orchestrator:
 
     # -- pętla główna -------------------------------------------------------
 
-    def run(self, task: str, *, principal: str = "") -> OrchestratorResult:
+    def run(self, task: str, *, principal: str = "", run_id: str = "") -> OrchestratorResult:
         """Wykonuje pełną orkiestrację zadania i zwraca wynik.
 
         Args:
             task: zadanie użytkownika.
             principal: referencja wywołującego (kto ZLECIŁ) przewlekana do audytu —
                 wpisy niosą wtedy i „kto wykonał" (agent), i „na czyje żądanie".
+            run_id: identyfikator orkiestracji dla pomiaru jakości (Etap 16). Pusty →
+                nadawany losowo. WSZYSTKIE przebiegi agentów w tej orkiestracji dzielą tę
+                wartość — stąd bierze się semantyka grupy, bez której nie da się porównać
+                N przebiegów tego samego scenariusza. Parametr jest jawny, żeby testy
+                mogły być deterministyczne.
         """
+        run_id = run_id or uuid4().hex[:16]
         # Sumator zużycia — ŚWIEŻY per run (jak budżet narzędzi), nigdy współdzielony
         # między żądaniami. Bez niego /api/orchestrate sprawdzał limit, ale go NIE naliczał.
         meter = UsageMeter()
@@ -211,7 +220,7 @@ class Orchestrator:
         # współdzielony między żądaniami/wątkami). None, gdy pętla nieaktywna.
         budget = self._tool_loop.new_budget() if self._tool_loop is not None else None
         observations: list[Observation] = [
-            self._delegate(step, budget=budget, meter=meter, principal=principal)
+            self._delegate(step, budget=budget, meter=meter, principal=principal, run_id=run_id)
             for step in plan.steps
         ]
 
@@ -226,7 +235,12 @@ class Orchestrator:
             extra_steps = reflection.additional_steps[: self._max_plan_steps]
             observations.extend(
                 self._delegate(
-                    step, context=context, budget=budget, meter=meter, principal=principal
+                    step,
+                    context=context,
+                    budget=budget,
+                    meter=meter,
+                    principal=principal,
+                    run_id=run_id,
                 )
                 for step in extra_steps
             )

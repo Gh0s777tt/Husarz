@@ -61,6 +61,39 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (Etap 16, krok 1 — materializacja przebiegu agenta)
+- Nowy pakiet **`husarz.runs`**: `RunRecord` (przebieg jednego agenta), `RunStep` (tura),
+  `Termination` (powód zakończenia: `final`/`iteration_limit`/`budget`/`roe_refused`) oraz
+  magazyn za protokołem `RunStore` — `NullRunStore` (domyślny, nic nie zapisuje) i
+  `JsonlRunStore` (JSONL, ten sam format co dziennik audytu, żeby `grep`/`jq` działały na obu).
+- **Rekord niesie METRYKI, nie TREŚĆ** — struktura fizycznie nie ma pola na tekst. Zapisujemy
+  rodzaj tury, narzędzie i akcję, wynik, czy zablokowała bramka, długości w znakach, tokeny.
+  Nie zapisujemy zadania, odpowiedzi modelu ani argumentów narzędzi. To bezpieczeństwo
+  z konstrukcji: konfiguracja może zostać źle ustawiona, typ nie.
+- Metryki pochodne na rekordzie: `malformed_ratio` (jak model radzi sobie z protokołem — bez
+  dzielenia przez zero dla przebiegu bez tur), `tool_calls`, `failed_tool_calls`,
+  `denied_tool_calls`. Trzy z czterech weryfikatorów Etapu 16 liczą się z nich wprost.
+- Wpięte w `ToolLoop` (wszystkie cztery ścieżki wyjścia) i w orkiestrator: `run()` nadaje
+  `run_id`, który dziedziczą **wszystkie** przebiegi tej orkiestracji — stąd semantyka grupy,
+  bez której nie da się porównać N przebiegów tego samego scenariusza. `run_id` jest jawnym
+  parametrem, żeby testy pozostały deterministyczne.
+- **Domyślnie wyłączone** (`platform.runs.enabled: false`) — opt-in, jak pętla narzędziowa
+  i pamięć trwała. To NIE telemetria: lokalny plik w `data_dir` (gitignored), nic nie opuszcza
+  maszyny. `platform.telemetry_enabled` nadal twardo odrzuca `true`.
+- Zapis nie może wywrócić pracy agenta: `JsonlRunStore.save` połyka `OSError`. Utrata pomiaru
+  jest kosztem akceptowalnym, utrata odpowiedzi agenta nie jest.
+- Testy: +21 (`tests/unit/test_runs.py` 14, `tests/security/test_runs_privacy.py` 7). Nośność
+  potwierdzona: po dodaniu do rekordu tymczasowego pola `task` czerwienieją 3 testy na trzech
+  niezależnych osiach. Docs: notatka weryfikacyjna w `BEZPIECZENSTWO.md`.
+
+### Poprawione (rozliczalność i pomiar — dwa drobiazgi domknięte przy Etapie 16)
+- `toolloop.limit` jako **jedyny** wpis audytu w pętli narzędziowej nie przekazywał
+  `principal` — „osiągnięto limit iteracji" gubiło informację, na czyje żądanie przebieg
+  powstał. Domknięte.
+- Odmowa spoza allowlisty agenta sygnalizowana jest teraz strukturalnie
+  (`ToolResult.metadata["denied"]`), a nie treścią komunikatu błędu. Pomiar nie może zależeć
+  od brzmienia napisu, który widzi model.
+
 ### Dodane (ADR-0022 — kryteria przyjmowania narzędzi zewnętrznych, dwa odrzucenia)
 - **ADR-0022** zapisuje **pięć kryteriów odrzucenia** narzędzia zewnętrznego (cofnięcie
   deklaracji platformy, niepoliczalna powierzchnia wyjścia, wymóg sieci/uprawnień tam, gdzie

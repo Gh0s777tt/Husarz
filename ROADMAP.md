@@ -297,9 +297,11 @@ Trzy niezależne analizy zewnętrznych narzędzi (ART, OmniRoute — patrz
 nie ma **żadnego** sposobu, by zmierzyć, czy zmiana promptu, routingu albo modelu poprawiła
 działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
 
-- ⬜ Materializacja przebiegu agenta (`RunRecord`): `run_id`, tożsamość agenta, numer
-  iteracji, wywołania narzędzi z `ok`/`exit_code`, powód terminacji, zużycie tokenów.
-  Granulacja per wiadomość — inaczej późniejsze użycia wymagają ponownego instrumentowania.
+- ✅ Materializacja przebiegu agenta (`husarz.runs`): `RunRecord`/`RunStep`/`Termination`
+  + magazyn za protokołem (`NullRunStore` domyślny, `JsonlRunStore` opcjonalny). Granulacja
+  per tura; `run_id` wspólny dla wszystkich przebiegów jednej orkiestracji (semantyka grupy).
+  **Rekord niesie metryki, nie treść** — struktura nie ma pola na tekst. Opt-in
+  (`platform.runs.enabled`). Testy: +21. Docs: notatka w BEZPIECZENSTWO.md.
 - ⬜ `config/evals/<zestaw>.yaml` (przez `_MULTI_DIRS` w loaderze) + podkomenda `husarz eval`.
 - ⬜ Cztery weryfikatory **deterministyczne**: `exit_code` z `run_tests`; udział odpowiedzi
   niesparsowalnych; zgodność routingu (`resolve_agent_model`/`select_candidates` — czysta

@@ -30,7 +30,16 @@ from husarz.agents.react import ParseKind, ToolAction, parse_action, protocol_in
 from husarz.config.schema import HusarzConfig, ToolLoopConfig
 from husarz.config.secrets import SecretsProvider
 from husarz.fencing import fence_untrusted
-from husarz.router.types import ChatMessage, ChatRequest, UsageMeter
+from husarz.router.types import ChatMessage, ChatRequest, Usage, UsageMeter
+from husarz.runs import (
+    NullRunStore,
+    RunRecord,
+    RunStep,
+    RunStore,
+    StepKind,
+    Termination,
+    build_run_store,
+)
 from husarz.security.audit import AuditLog
 from husarz.ssrf import HostResolver
 from husarz.tools.base import ToolResult
@@ -105,6 +114,16 @@ def _arg_summary(args: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _tokens(usage: Usage | None) -> int:
+    """Zużycie tokenów jako liczba — ``0``, gdy backend go nie raportuje.
+
+    Podwójny ``None`` jest tu realny: ``UsageMeter.snapshot()`` zwraca ``None``, gdy żaden
+    backend nic nie zgłosił, a samo ``Usage.total_tokens`` też bywa ``None``. Pomiar musi
+    dawać liczbę zawsze — inaczej rekord przebiegu przestaje się sumować.
+    """
+    return (usage.total_tokens or 0) if usage is not None else 0
+
+
 def _result_text(result: ToolResult) -> str:
     parts = [f"ok={result.ok}"]
     if result.output:
@@ -117,10 +136,19 @@ def _result_text(result: ToolResult) -> str:
 class ToolLoop:
     """Wykonuje zadanie agenta w pętli ReAct z autoryzacją per-wywołanie i audytem."""
 
-    def __init__(self, dispatcher: ToolDispatcher, audit: AuditLog, config: ToolLoopConfig) -> None:
+    def __init__(
+        self,
+        dispatcher: ToolDispatcher,
+        audit: AuditLog,
+        config: ToolLoopConfig,
+        runs: RunStore | None = None,
+    ) -> None:
         self._dispatcher = dispatcher
         self._audit = audit
         self._config = config
+        # Pomiar jakości (Etap 16) — domyślnie NullRunStore, czyli nic nie zapisujemy.
+        # Zbieranie jest opt-in, tak jak sama pętla narzędziowa (ADR-0016).
+        self._runs: RunStore = runs if runs is not None else NullRunStore()
 
     def supports(self, agent: BaseAgent) -> bool:
         """Czy agent wchodzi w pętlę: jawny opt-in + niepusta allowlista + brak ROE."""
@@ -147,6 +175,7 @@ class ToolLoop:
         context: str | None = None,
         budget: ToolCallBudget,
         principal: str = "",
+        run_id: str = "",
     ) -> AgentResult:
         """Wykonuje zadanie z narzędziami. Zawsze kończy deterministycznie (limit/budżet).
 
@@ -155,10 +184,15 @@ class ToolLoop:
         żądanie" — a przy wielu kontach to właśnie ta druga informacja jest rozliczalna.
         """
         # L0 (fail-closed, redundantnie wobec supports): ROE-agent nie wchodzi w pętlę.
+        record = RunRecord(
+            run_id=run_id, agent=agent.name, principal=principal, task_chars=len(task)
+        )
         if agent.config.roe_required:
             self._audit.record(
                 agent.name, "toolloop.refuse_roe", {"task_len": len(task)}, principal=principal
             )
+            record.termination = Termination.ROE_REFUSED
+            self._runs.save(record)
             return AgentResult(agent.name, "Agent wymaga ROE — pętla narzędziowa niedostępna.", "")
 
         manual = self._dispatcher.manual(agent.tools)
@@ -177,16 +211,38 @@ class ToolLoop:
         # Pętla to WIELE wywołań modelu na jedno zadanie — sumujemy zużycie, inaczej
         # rozliczenie limitu widziałoby tylko ostatnią iterację.
         meter = UsageMeter()
-        for _ in range(max(1, agent.config.max_iterations)):
+        for index in range(max(1, agent.config.max_iterations)):
             response = router.complete(ChatRequest(messages=list(messages)), agent=agent.name)
             meter.add(response.usage)
             last_model = response.model
             messages.append(ChatMessage("assistant", response.content))
             parsed = parse_action(response.content)
+            turn_tokens = _tokens(response.usage)
 
             if parsed.kind is ParseKind.FINAL:
+                record.steps.append(
+                    RunStep(
+                        index=index,
+                        kind=StepKind.FINAL,
+                        model=last_model,
+                        output_chars=len(parsed.text),
+                        total_tokens=turn_tokens,
+                    )
+                )
+                record.termination = Termination.FINAL
+                record.total_tokens = _tokens(meter.snapshot())
+                self._runs.save(record)
                 return AgentResult(agent.name, parsed.text, last_model, meter.snapshot())
             if parsed.kind is ParseKind.MALFORMED:
+                record.steps.append(
+                    RunStep(
+                        index=index,
+                        kind=StepKind.MALFORMED,
+                        model=last_model,
+                        output_chars=len(response.content),
+                        total_tokens=turn_tokens,
+                    )
+                )
                 messages.append(
                     ChatMessage(
                         "user",
@@ -202,12 +258,30 @@ class ToolLoop:
                 self._audit.record(
                     agent.name, "toolloop.budget", {"tool": action.tool[:64]}, principal=principal
                 )
+                record.termination = Termination.BUDGET
+                record.total_tokens = _tokens(meter.snapshot())
+                self._runs.save(record)
                 return AgentResult(
                     agent.name,
                     "Przerwano: wyczerpano globalny budżet wywołań narzędzi.",
                     last_model,
                     meter.snapshot(),
                 )
+            # `denied` odróżnia „narzędzie zawiodło" od „bramka nie wpuściła" — bez tego
+            # rozróżnienia nie da się zmierzyć skuteczności allowlisty agenta.
+            record.steps.append(
+                RunStep(
+                    index=index,
+                    kind=StepKind.ACTION,
+                    model=last_model,
+                    tool=action.tool[:64],
+                    action=action.action[:64],
+                    ok=result.ok,
+                    denied=bool(result.metadata.get("denied")),
+                    output_chars=len(response.content),
+                    total_tokens=turn_tokens,
+                )
+            )
             fenced, _ = fence_untrusted(
                 f"{action.tool}.{action.action}",
                 _result_text(result),
@@ -216,8 +290,14 @@ class ToolLoop:
             messages.append(ChatMessage("user", fenced))
 
         self._audit.record(
-            agent.name, "toolloop.limit", {"max_iterations": agent.config.max_iterations}
+            agent.name,
+            "toolloop.limit",
+            {"max_iterations": agent.config.max_iterations},
+            principal=principal,
         )
+        record.termination = Termination.ITERATION_LIMIT
+        record.total_tokens = _tokens(meter.snapshot())
+        self._runs.save(record)
         return AgentResult(
             agent.name,
             "Osiągnięto limit iteracji pętli narzędziowej.",
@@ -242,7 +322,14 @@ class ToolLoop:
                 {"tool": action.tool[:64], "action": action.action[:64], "reason": "allowlist"},
                 principal=principal,
             )
-            return ToolResult(action.tool, ok=False, error="Narzędzie spoza allowlisty agenta.")
+            # `denied` w metadanych, a nie porównanie treści komunikatu: pomiar nie może
+            # zależeć od brzmienia napisu widzianego przez model.
+            return ToolResult(
+                action.tool,
+                ok=False,
+                error="Narzędzie spoza allowlisty agenta.",
+                metadata={"denied": True},
+            )
         if not budget.try_spend():
             return None
         result = self._dispatcher.dispatch(action.tool, action.action, action.args)
@@ -303,4 +390,13 @@ def build_tool_loop(
         descriptions=descriptions,
         max_rag_add_bytes=config.security.tool_loop.max_rag_add_bytes,
     )
-    return ToolLoop(dispatcher, audit, config.security.tool_loop)
+    # Pomiar jakości (Etap 16): domyślnie WYŁĄCZONY (NullRunStore). Włączenie wymaga
+    # `platform.runs.enabled: true` — nowa instalacja nie zaczyna po cichu zapisywać
+    # danych o pracy operatora.
+    runs_cfg = config.platform.runs
+    runs_path = runs_cfg.path
+    if runs_cfg.enabled and runs_path is None:
+        base = data_dir if data_dir is not None else config.platform.data_dir
+        runs_path = Path(base) / "runs" / "runs.jsonl"
+    run_store = build_run_store(enabled=runs_cfg.enabled, path=runs_path)
+    return ToolLoop(dispatcher, audit, config.security.tool_loop, runs=run_store)

@@ -117,6 +117,26 @@ class _StrictModel(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class RunsConfig(_StrictModel):
+    """Zbieranie METRYK przebiegów agenta (Etap 16). Domyślnie WYŁĄCZONE.
+
+    To NIE jest telemetria. Telemetria oznacza wysyłanie danych na zewnątrz i jest w Husarzu
+    twardo zakazana (``platform.telemetry_enabled``). Tu chodzi o lokalny plik pomiarowy na
+    dysku operatora, którego nikt poza nim nie widzi — jedyny sposób, by odpowiedzieć na
+    pytanie „czy ta zmiana promptu albo modelu poprawiła działanie agenta".
+
+    Rekord niesie wyłącznie metryki (rodzaj tury, narzędzie, wynik, długości, tokeny) — nigdy
+    treści promptów ani wyników narzędzi. Uzasadnienie: ``husarz.runs.records``.
+
+    Attributes:
+        enabled: czy zapisywać przebiegi. Opt-in, jak pętla narzędziowa i pamięć trwała.
+        path: plik JSONL; ``None`` → ``data_dir/runs/runs.jsonl``.
+    """
+
+    enabled: bool = False
+    path: Path | None = None
+
+
 class PlatformConfig(_StrictModel):
     """Ustawienia globalne platformy."""
 
@@ -128,6 +148,8 @@ class PlatformConfig(_StrictModel):
     language_default: str = "pl"
     # Zero telemetrii — twardy wymóg. Pole istnieje wyłącznie, by jawnie je wyłączyć.
     telemetry_enabled: bool = False
+    # Lokalny pomiar jakości (Etap 16) — opt-in, NIE telemetria (nic nie opuszcza maszyny).
+    runs: RunsConfig = Field(default_factory=RunsConfig)
 
     @model_validator(mode="after")
     def _forbid_telemetry(self) -> PlatformConfig:

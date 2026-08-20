@@ -57,6 +57,64 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Pomiar przebiegów agenta — prywatność z konstrukcji (data: 2026-08-21)
+
+**Kontekst.** Etap 16 wymaga materializacji przebiegu agenta: bez liczby nie da się ocenić,
+czy zmiana promptu, routingu albo modelu cokolwiek poprawiła. Przebieg agenta jest jednak
+**najwrażliwszym materiałem w całym systemie** — niesie treść zadania użytkownika, wyniki
+narzędzi, fragmenty plików i zapytania do pamięci.
+
+**Decyzja: rekord niesie METRYKI, nie TREŚĆ.** `husarz.runs.RunRecord` **fizycznie nie ma pola
+na tekst**. Zapisujemy: rodzaj tury (`final`/`action`/`malformed`), nazwę narzędzia i akcji,
+czy wywołanie się powiodło, czy zablokowała je bramka, długości w znakach, zużycie tokenów
+i powód zakończenia. Nie zapisujemy: treści zadania, odpowiedzi modelu, argumentów narzędzi.
+
+Uzasadnienie kolejności:
+
+1. **Bezpieczeństwo z konstrukcji, nie z konfiguracji.** Struktura bez pola na tekst nie
+   wycieknie go przez błąd, złe ustawienie domyślne ani przez zrzut ekranu w dokumentacji.
+   Konfiguracja może zostać źle ustawiona; typ nie.
+2. **To wystarcza do celu.** Cztery weryfikatory Etapu 16 potrzebują wyłącznie metryk.
+3. **Rozmiar i retencja.** Metryki to setki bajtów na przebieg; transkrypcje wymagałyby
+   szyfrowania, retencji i polityki kasowania — czyli osobnego projektu.
+
+**To nie jest telemetria.** Telemetria oznacza wysyłanie danych na zewnątrz i pozostaje
+w Husarzu twardo zakazana (`platform.telemetry_enabled` odrzuca `true` przy starcie). Pomiar
+to lokalny plik JSONL w `data_dir`, którego nikt poza operatorem nie widzi. Katalog jest
+w `.gitignore` (zweryfikowane dla `data/runs/runs.jsonl`).
+
+**Domyślnie wyłączone.** `platform.runs.enabled: false` — opt-in, jak pętla narzędziowa
+(ADR-0016) i pamięć trwała (ADR-0018). Nowa instalacja nie zaczyna po cichu produkować
+plików o pracy operatora. Fabryka `build_tool_loop` wpina wtedy `NullRunStore`, który nie
+dotyka dysku.
+
+**Zapis nie może wywrócić pracy agenta.** `JsonlRunStore.save` połyka `OSError` (brak
+uprawnień, pełny dysk, kolizja ścieżki). Utrata pomiaru jest kosztem akceptowalnym; utrata
+odpowiedzi agenta nie jest. Świadomie NIE budujemy tu łańcucha skrótów — to dane pomiarowe,
+a rozliczalnością zajmuje się audyt, który ma tamper-evidence.
+
+**Co sprawdzono (`tests/security/test_runs_privacy.py`, marker `security`):**
+
+| Niezmiennik | Test | Wynik |
+|---|---|---|
+| Struktura nie ma pól na treść (`task`, `prompt`, `output`, `args`…) | `test_record_has_no_free_text_fields` | ✅ |
+| Objętość mierzona licznikiem znaków, nie tekstem | `test_only_lengths_are_carried` | ✅ |
+| Treść zadania/odpowiedzi/argumentów nie trafia do rekordu | `test_no_secret_reaches_the_record` | ✅ |
+| …ani do pliku JSONL na dysku | `test_no_secret_reaches_the_file` | ✅ |
+| Dostarczona konfiguracja ma pomiar wyłączony | `test_disabled_by_default_in_shipped_config` | ✅ |
+| Fabryka wpina `NullRunStore`, gdy wyłączone | `test_factory_wires_null_store_when_disabled` | ✅ |
+
+**Weryfikacja nośności testów:** do `RunRecord` dodano tymczasowo pole `task: str` i wypełniono
+je treścią zadania — **3 z 7 testów czerwone**, na trzech niezależnych osiach (kontrola
+strukturalna pól, zrzut rekordu, zawartość pliku). Testy nie są puste.
+
+**Domknięte przy okazji.** Wpis audytu `toolloop.limit` jako jedyny w pętli narzędziowej nie
+przekazywał `principal` — „osiągnięto limit iteracji" gubiło informację, na czyje żądanie
+przebieg powstał. Poprawione. Odmowa allowlisty sygnalizowana jest teraz **strukturalnie**
+(`ToolResult.metadata["denied"]`), a nie porównaniem treści komunikatu — pomiar nie może
+zależeć od brzmienia napisu widzianego przez model.
+
+
 ### Granice walidacji airgap dla endpointów modeli (data: 2026-08-20)
 
 **Powód notatki.** Przy ocenie zewnętrznej bramki LLM (ADR-0022) padło pytanie: czy taki
