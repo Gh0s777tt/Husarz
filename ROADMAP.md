@@ -99,6 +99,10 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   (SCA)**, hadolint + build obrazu; `--allow-insecure` jako jawny opt-out launchera.
 - ✅ Testy: niezmienniki wdrożeń (deny-all, non-root, loopback, brak WAN w airgapie,
   placeholdery sekretów) parsowane bez klastra/Dockera.
+- ✅ Obraz `husarz-api` zbudowany i zweryfikowany na kontenerze: non-root, rootfs
+  niezapisywalny, 401 bez tokenu, fail-closed przy nasłuchu na `0.0.0.0`. Docs: notatka
+  w BEZPIECZENSTWO.md. Przy okazji naprawiony `.dockerignore` — bez wykluczenia sidecarów
+  AppleDouble budowa obrazu na macOS była NIEWYKONALNA.
 - ⬜ Realne uruchomienie na klastrze (CNI+NetworkPolicy, gVisor, Vault unseal) —
   środowisko docelowe; pgvector/RAG (pamięć długoterminowa, przyszły etap).
 
@@ -315,9 +319,9 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   blokujące — realne uruchamianie Dockera przez ewaluację, kanał na treść modelu
   w nazwach narzędzi, fałszywy sukces przy literówce w akcji.
 - ✅ Weryfikator `tests` (kod wyjścia z `run_tests` w sandboxie) — czwarty z czterech.
-- ⬜ **Rozciąć utajony cykl importów `husarz.ssrf` → `router` → `client` → `ssrf`** —
-  ujawnił się już TRZY razy (diagnostics, eval, skrypt diagnostyczny). Działa tylko
-  dlatego, że router bywa importowany pierwszy.
+- ✅ Rozcięty utajony cykl importów `husarz.ssrf` → `router` → `client` → `ssrf`:
+  `RouterError`/`EgressError` przeniesione do `husarz.core.errors`, re-eksport zachowuje
+  wszystkie istniejące ścieżki importu. Testy warstwowania w świeżym procesie.
 - ⬜ Weryfikator `malformed_ratio` — metryki już zbieramy (`husarz.runs`), brakuje zestawów
   zadaniowych uruchamianych na REALNYM modelu (mierzy jakość modelu, nie naszego kodu).
 - ⬜ Budżet okna kontekstu — dziś clampujemy `max_tokens`, ale nie sprawdzamy, czy prompt

@@ -57,6 +57,41 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Obraz `husarz-api` — hardening zweryfikowany na kontenerze (data: 2026-08-21)
+
+**Dlaczego osobna notatka.** Niezmienniki obrazu (non-root, brak zapisu do rootfs, fail-closed
+przy nasłuchu poza loopbackiem) były dotąd sprawdzane wyłącznie przez **parsowanie plików
+wdrożeniowych** (`tests/security/test_deploy_invariants.py`). To weryfikacja deklaracji, nie
+skutku — dokładnie ta sama luka, którą zamknęliśmy dzień wcześniej dla sandboxa.
+
+**Co zweryfikowano na uruchomionym obrazie** (`husarz-api:ci`, 250 MB):
+
+| Niezmiennik | Sprawdzenie | Wynik |
+|---|---|---|
+| Non-root | `id` w kontenerze | ✅ `uid=1000(husarz)` |
+| Rootfs niezapisywalny dla użytkownika aplikacji | `touch /probny` | ✅ `Permission denied` |
+| Konfiguracja działa wewnątrz obrazu | `husarz validate` | ✅ „wczytana poprawnie" |
+| **Fail-closed przy nasłuchu poza loopbackiem** | `up --host 0.0.0.0` bez auth | ✅ odmowa startu, kod ≠ 0 |
+| Liveness bez tokenu | `GET /api/health` | ✅ 200 |
+| Endpoint chroniony bez tokenu | `GET /api/agents` | ✅ **401** |
+| Endpoint chroniony z tokenem | `GET /api/agents` | ✅ 7 agentów |
+| Konsola WWW | `GET /` | ✅ 200 |
+
+Czwarty wiersz jest tu najważniejszy: konteneryzacja z natury nasłuchuje na `0.0.0.0`, więc
+gdyby bramka nie zadziałała, **pierwsze `docker run` wystawiłoby nieuwierzytelnione API**.
+Bramka zadziałała — kontener odmówił startu z czytelnym komunikatem i wskazówką, co ustawić.
+
+Testy: `tests/integration/test_api_image.py` (marker `integration`), pomijane bez obrazu.
+
+**Znalezione przy okazji — obrazu NIE DAŁO SIĘ zbudować na macOS.** `docker build` przerywał
+już przy wysyłaniu kontekstu: `failed to xattr ._.gitlab-ci.yml: operation not permitted`.
+Przyczyną są sidecary AppleDouble (`._*`), które macOS tworzy na wolumenach bez natywnych
+xattr (exFAT/NTFS/sieciowe). `.gitignore` je wykluczał, `.dockerignore` **nie** — więc
+budowa obrazu z takiego wolumenu była niewykonalna, a wada niewidoczna w CI (Linux ich nie
+tworzy). Wykluczenie dodane; z drzewa usunięto 263 sidecary po weryfikacji sygnatury
+AppleDouble (`0x00051607`), żeby nie skasować pliku o zbieżnej nazwie.
+
+
 ### Sandbox — pierwsza weryfikacja na REALNYM silniku (data: 2026-08-21)
 
 **Dlaczego to notatka osobna.** Izolacja sandboxa była dotąd sprawdzana **wyłącznie po

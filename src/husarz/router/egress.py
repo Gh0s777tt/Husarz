@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from husarz.config.net import endpoint_host, is_local_endpoint
 from husarz.config.schema import EgressConfig, EgressPolicy
-from husarz.router.errors import RouterError
 
+# Definicja w `husarz.core.errors` (warstwa najniższa) — zgłasza ją `husarz.ssrf`, który nie
+# może zależeć od routera. Re-eksport zachowuje dotychczasową ścieżkę importu.
+from husarz.core.errors import EgressError
 
-class EgressError(RouterError):
-    """Połączenie wychodzące zablokowane przez politykę egress."""
+__all__ = ["EgressError", "check_endpoint_allowed"]
 
 
 def check_endpoint_allowed(endpoint: str | None, egress: EgressConfig) -> None:

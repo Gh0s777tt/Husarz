@@ -46,3 +46,11 @@ deploy/
 packaging/
 *.md
 !README.md
+
+# --- Artefakty systemów plików (macOS) -------------------------------------
+# Sidecary AppleDouble powstają, gdy macOS zapisuje na wolumenie bez natywnych xattr
+# (exFAT/NTFS/sieciowe). Bez tego wykluczenia `docker build` PADA już przy wysyłaniu
+# kontekstu: "failed to xattr ._.gitlab-ci.yml: operation not permitted" — czyli obrazu
+# nie da się w ogóle zbudować z takiego wolumenu. To samo wykluczenie jest w .gitignore.
+._*
+.DS_Store

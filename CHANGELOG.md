@@ -61,6 +61,40 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Poprawione (cykl importów `husarz.ssrf` — dług, który kosztował cztery razy)
+- **Rozcięty utajony cykl** `ssrf → router.egress → router.__init__ → router.client → ssrf`.
+  `husarz.ssrf` jest warstwą NIŻSZĄ niż router (korzystają z niego narzędzia, wtyczki MCP,
+  klient Gita, embedder), a mimo to importował z niego `EgressError`; import podmodułu pociąga
+  w Pythonie import pakietu nadrzędnego. Działało wyłącznie dlatego, że router bywał
+  importowany pierwszy — każdy nowy moduł sięgający do `ssrf` wcześniej wywracał się na
+  `ImportError`. Zdarzyło się to CZTERY razy (diagnostyka launchera, warstwa ewaluacji,
+  dwa skrypty diagnostyczne), zanim usunięto przyczynę.
+- `RouterError` i `EgressError` mieszkają teraz w `husarz.core.errors` (sam stdlib), a
+  `husarz.router.errors` i `husarz.router.egress` je **re-eksportują**. Wszystkie 19 istniejących
+  importów działa bez zmian, klasy są tożsame (`is`), a dziedziczenie zachowane — istotne, bo
+  `husarz.api.app` łapie `RouterError` i mapuje go na kod HTTP.
+- Testy: +8 (`tests/unit/test_import_layering.py`) — import sześciu modułów niskopoziomowych
+  w ŚWIEŻYM procesie (w jednej sesji pytest inny test mógłby zamaskować cykl), kontrola na
+  poziomie źródła oraz tożsamości klas po re-eksporcie.
+
+### Dodane (obraz `husarz-api` — hardening zweryfikowany na kontenerze)
+- **Niezmienniki obrazu sprawdzone na uruchomionym kontenerze**, nie przez parsowanie plików
+  wdrożeniowych: non-root (`uid=1000(husarz)`), rootfs niezapisywalny, konfiguracja działa
+  wewnątrz obrazu, liveness otwarty, `/api/agents` bez tokenu → **401**, z tokenem → 7 agentów,
+  konsola serwowana.
+- Najważniejsze: **fail-closed przy nasłuchu poza loopbackiem działa też w kontenerze.**
+  Konteneryzacja z natury nasłuchuje na `0.0.0.0`, więc bez tej bramki pierwsze `docker run`
+  wystawiłoby nieuwierzytelnione API. Kontener odmawia startu z czytelnym komunikatem.
+- Testy: +4 (`tests/integration/test_api_image.py`), pomijane bez obrazu.
+
+### Poprawione (obrazu NIE DAŁO SIĘ zbudować na macOS)
+- `docker build` przerywał przy wysyłaniu kontekstu: `failed to xattr ._.gitlab-ci.yml:
+  operation not permitted`. Sidecary AppleDouble (`._*`), które macOS tworzy na wolumenach
+  bez natywnych xattr, były wykluczone w `.gitignore`, ale **nie w `.dockerignore`** — więc
+  budowa obrazu z takiego wolumenu była niewykonalna. Wada niewidoczna w CI, bo Linux tych
+  plików nie tworzy. Wykluczenie dodane; usunięto 263 sidecary po weryfikacji sygnatury
+  AppleDouble, żeby nie skasować pliku o zbieżnej nazwie.
+
 ### Dodane (realny sandbox — pierwsza weryfikacja na silniku, nie po `argv`)
 - **Izolacja sandboxa zweryfikowana na PRAWDZIWYM kontenerze.** Dotąd sprawdzaliśmy wyłącznie
   `argv` (`build_docker_argv`) — czyli to, o co PROSIMY Dockera, a nie to, co silnik

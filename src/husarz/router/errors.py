@@ -6,9 +6,19 @@ backendu (sieć/HTTP/parsowanie) oraz od wyczerpania limitów.
 
 from __future__ import annotations
 
+# Baza hierarchii mieszka w `husarz.core.errors` — patrz tamtejszy docstring: dziedziczy
+# z niej `EgressError`, zgłaszany przez warstwy NIŻSZE niż router (ssrf, narzędzia, wtyczki),
+# a trzymanie jej tutaj tworzyło cykl importów. Re-eksport zachowuje publiczną nazwę.
+from husarz.core.errors import RouterError
 
-class RouterError(Exception):
-    """Bazowy wyjątek routera modeli."""
+__all__ = [
+    "AllModelsFailedError",
+    "ModelBackendError",
+    "NoModelAvailableError",
+    "RateLimitExceededError",
+    "RouterError",
+    "TransportError",
+]
 
 
 class NoModelAvailableError(RouterError):

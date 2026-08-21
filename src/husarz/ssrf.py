@@ -46,7 +46,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
-from husarz.router.egress import EgressError
+from husarz.core.errors import EgressError
 
 # Adres IP (v4/v6) oraz wstrzykiwalny resolver hosta → lista adresów (str).
 # Wstrzykiwalny resolver = testy działają bez DNS i bez sieci.
