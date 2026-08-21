@@ -57,6 +57,44 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Manifesty k8s — weryfikacja po ZBUDOWANIU, nie po parsowaniu (data: 2026-08-21)
+
+**Ograniczenie dotychczasowej weryfikacji.** `test_deploy_invariants.py` parsuje surowe
+pliki. Kustomize je jednak PRZEKSZTAŁCA (namespace, etykiety, selektory), a na klastrze liczy
+się wynik przekształcenia. Klasa wad niewidoczna dla parsowania: selektor, który nie trafia
+w pod (usługa bez endpointów, polityka bez skutku), Ingress wskazujący nieistniejącą usługę,
+`targetPort` bez odpowiadającego portu kontenera.
+
+**Co sprawdzono na ZBUDOWANYM overlayu** (`kubectl kustomize deploy/k8s`, 9 zasobów):
+
+| Kontrola | Wynik |
+|---|---|
+| Selektor Deploymentu trafia w etykiety poda | ✅ |
+| Selektor Service trafia w pod | ✅ |
+| Selektory NetworkPolicy trafiają (albo są puste = wszystkie pody) | ✅ |
+| Ingress wskazuje istniejącą usługę i port | ✅ |
+| `targetPort` odpowiada portowi kontenera | ✅ |
+| `default-deny-all` obejmuje wszystkie pody, oba kierunki | ✅ |
+
+Manifesty okazały się spójne — nie znaleziono wady. Kontrola została mimo to utrwalona jako
+`tests/integration/test_k8s_manifests.py`, bo to dokładnie ta klasa błędów, która przechodzi
+parsowanie i ujawnia się dopiero przy `kubectl apply`. Testy używają `kubectl kustomize`,
+żeby nie odtwarzać semantyki kustomize po swojemu — własna reimplementacja mogłaby się
+rozjechać i dawać fałszywe poczucie bezpieczeństwa.
+
+**Znaleziona pułapka aktualizacyjna.** `kustomization.yaml` używał `commonLabels`, co kubectl
+zgłasza jako przestarzałe. Groźniejsza jest jednak druga właściwość tego pola: **wstrzykuje
+etykiety do SELEKTORÓW**, a selektor Deploymentu jest **niemodyfikowalny po utworzeniu**.
+Każda przyszła zmiana `commonLabels` zablokowałaby więc aktualizację działającego wdrożenia
+komunikatem `field is immutable`, wymuszając ręczne usunięcie zasobu. Zamienione na składnię
+`labels:` z `includeSelectors: false` — etykieta trafia wyłącznie do metadanych. Zmiana jest
+bezpieczna teraz, bo nic nie zostało jeszcze wdrożone; po wdrożeniu byłaby przełomowa.
+
+**Ograniczenie, które zostaje.** Nadal nie zweryfikowano manifestów na DZIAŁAJĄCYM klastrze
+(brak CNI z obsługą NetworkPolicy, gVisor, Vault). Sprawdzona jest spójność wyniku budowy,
+nie egzekwowanie polityk sieciowych przez konkretny CNI.
+
+
 ### Profile `prod` i `airgap` — pierwsze realne uruchomienie (data: 2026-08-21)
 
 **Zakres.** Oba profile wdrożeniowe były dotąd sprawdzane wyłącznie przez parsowanie YAML-a.

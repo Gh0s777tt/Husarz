@@ -110,6 +110,10 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   w BEZPIECZENSTWO.md. Przy okazji: na macOS budowa obrazu wymaga usunięcia sidecarów
   AppleDouble (`scripts/clean_sidecars.py`) — `.dockerignore` tego NIE naprawia, bo błąd
   powstaje w nadawcy kontekstu. Sidecary odrastają, więc to krok do powtarzania.
+- ✅ Manifesty k8s zweryfikowane po ZBUDOWANIU przez kustomize (9 zasobów): selektory
+  trafiają w etykiety poda, Ingress wskazuje istniejącą usługę i port, `targetPort` zgodny
+  z portem kontenera, deny-all obejmuje wszystko. Naprawiona pułapka `commonLabels`
+  (wstrzykiwało etykiety do niemodyfikowalnych selektorów).
 - ⬜ Realne uruchomienie na klastrze (CNI+NetworkPolicy, gVisor, Vault unseal) —
   środowisko docelowe; pgvector/RAG (pamięć długoterminowa, przyszły etap).
 

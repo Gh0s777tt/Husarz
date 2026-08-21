@@ -16,5 +16,11 @@ resources:
   - networkpolicy-default-deny.yaml
   - networkpolicy-allow.yaml
 
-commonLabels:
-  app.kubernetes.io/part-of: husarz
+# `commonLabels` jest przestarzałe I wstrzykuje etykiety do SELEKTORÓW, a selektor
+# Deploymentu jest NIEMODYFIKOWALNY po utworzeniu — każda przyszła zmiana tego pola
+# zablokowałaby aktualizację istniejącego wdrożenia (`field is immutable`). Nowa składnia
+# z `includeSelectors: false` dokłada etykietę wyłącznie do metadanych.
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: husarz
+    includeSelectors: false

@@ -61,6 +61,22 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Poprawione (manifesty k8s — pułapka aktualizacyjna w `kustomization.yaml`)
+- `commonLabels` jest przestarzałe (kubectl ostrzega), ale groźniejsza jest druga właściwość
+  tego pola: **wstrzykuje etykiety do SELEKTORÓW**, a selektor Deploymentu jest
+  **niemodyfikowalny po utworzeniu**. Każda przyszła zmiana zablokowałaby aktualizację
+  działającego wdrożenia komunikatem `field is immutable`, wymuszając ręczne usunięcie
+  zasobu. Zamienione na `labels:` z `includeSelectors: false`. Zmiana jest bezpieczna teraz,
+  bo nic nie zostało jeszcze wdrożone — po wdrożeniu byłaby przełomowa.
+- **Nowe testy spójności po ZBUDOWANIU overlayu** (`tests/integration/test_k8s_manifests.py`):
+  selektory Deploymentu/Service/NetworkPolicy trafiają w etykiety poda, Ingress wskazuje
+  istniejącą usługę i port, `targetPort` odpowiada portowi kontenera, `default-deny-all`
+  obejmuje wszystkie pody w obu kierunkach, a budowa nie zgłasza przestarzałych pól.
+  Dotychczasowe testy parsowały surowe pliki, a kustomize je przekształca — na klastrze
+  liczy się wynik przekształcenia. Testy używają `kubectl kustomize` zamiast odtwarzać jego
+  semantykę, bo własna reimplementacja mogłaby dawać fałszywe poczucie bezpieczeństwa.
+- Same manifesty okazały się spójne — wada dotyczyła wyłącznie pola `commonLabels`.
+
 ### Dodane (audyt dokumentacji + niezmiennik warstw importów)
 - **Weryfikacja poleceń z dokumentacji** (wymóg CLAUDE.md): wyłuskane 54 polecenia z README,
   CONTRIBUTING i `docs/`; wszystkie polecenia CLI uruchomione i potwierdzone —
