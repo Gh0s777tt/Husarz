@@ -61,6 +61,24 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Poprawione (profil `dev` w compose produkował kontener NIEOSIĄGALNY z hosta)
+- `docker compose up -d` dawał kontener w stanie **`healthy`**, do którego nie dało się wejść.
+  API działało (sprawdzone od środka kontenera), ale nie było do niego drogi. Przyczyna:
+  sprzeczność w dostarczonym pliku — `ports: "127.0.0.1:8000:8000"` obok sieci z
+  `internal: true`. **Docker cicho wyłącza publikowanie portów dla sieci internal**: zamiast
+  `127.0.0.1:8000->8000/tcp` raportuje samo `8000/tcp`. Ten sam mechanizm odcinał dostęp do
+  modelu na hoście, więc czat w tym profilu też nie miał prawa działać.
+- **Testy to utrwalały.** `test_deploy_invariants.py` asertował OBIE wartości naraz, nie
+  zauważając, że się wykluczają — statyczna asercja przechodziła, a rzecz nie działała.
+  Zastąpione niezmiennikiem `test_published_ports_are_not_paired_with_internal_only_network`,
+  który odrzuca każdą usługę publikującą porty wyłącznie w sieci internal. Nośność
+  potwierdzona: przywrócenie `internal: true` czerwieni test.
+- Sieć profilu `dev` nie jest już `internal`. Świadomy kompromis udokumentowany w pliku: dev
+  nie ma proxy do mostkowania (w `prod` robi to Caddy w `husarz_edge`, a API pozostaje
+  wewnętrzne — tam sprzeczności nie było), a egress egzekwuje warstwa aplikacji (deny-all +
+  allowlista + pinowanie IP). Wymuszenie sieciowe zostaje w k8s NetworkPolicy i profilu airgap.
+- Zweryfikowane po naprawie: `127.0.0.1:8000->8000/tcp`, health OK, konsola 200, 7 agentów.
+
 ### Poprawione (cykl importów `husarz.ssrf` — dług, który kosztował cztery razy)
 - **Rozcięty utajony cykl** `ssrf → router.egress → router.__init__ → router.client → ssrf`.
   `husarz.ssrf` jest warstwą NIŻSZĄ niż router (korzystają z niego narzędzia, wtyczki MCP,
@@ -88,12 +106,20 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 - Testy: +4 (`tests/integration/test_api_image.py`), pomijane bez obrazu.
 
 ### Poprawione (obrazu NIE DAŁO SIĘ zbudować na macOS)
-- `docker build` przerywał przy wysyłaniu kontekstu: `failed to xattr ._.gitlab-ci.yml:
+- `docker build` przerywa przy wysyłaniu kontekstu: `failed to xattr ._CHANGELOG.md:
   operation not permitted`. Sidecary AppleDouble (`._*`), które macOS tworzy na wolumenach
-  bez natywnych xattr, były wykluczone w `.gitignore`, ale **nie w `.dockerignore`** — więc
-  budowa obrazu z takiego wolumenu była niewykonalna. Wada niewidoczna w CI, bo Linux tych
-  plików nie tworzy. Wykluczenie dodane; usunięto 263 sidecary po weryfikacji sygnatury
-  AppleDouble, żeby nie skasować pliku o zbieżnej nazwie.
+  bez natywnych atrybutów rozszerzonych, uniemożliwiają budowę obrazu z takiego wolumenu.
+  Wada niewidoczna w CI, bo Linux tych plików nie tworzy.
+- **SPROSTOWANIE do poprzedniego wpisu**: napisano tam, że problem rozwiązuje dodanie `._*`
+  do `.dockerignore`. To NIEPRAWDA — zweryfikowane empirycznie: z sidecarem build kończy się
+  kodem 1 mimo wpisu, bez sidecara kodem 0. Błąd powstaje w nadawcy kontekstu, zanim reguły
+  ignorowania zostaną zastosowane. Wpis zostaje (jest poprawny co do zasady), ale realnym
+  rozwiązaniem jest usunięcie plików przed budową — a że odrastają przy każdym zapisie,
+  jest to krok do POWTARZANIA, nie jednorazowe sprzątanie.
+- Nowy `scripts/clean_sidecars.py` (narzędzie operatora): kasuje wyłącznie pliki o sygnaturze
+  AppleDouble `0x00051607` i pomija wnętrze `.git` — skasowanie tam `._pack-*.idx` potrafi
+  uszkodzić indeks paczek. Tryb `--dry-run`. Pliki o zbieżnej nazwie, ale innej treści, są
+  raportowane i nietknięte.
 
 ### Dodane (realny sandbox — pierwsza weryfikacja na silniku, nie po `argv`)
 - **Izolacja sandboxa zweryfikowana na PRAWDZIWYM kontenerze.** Dotąd sprawdzaliśmy wyłącznie

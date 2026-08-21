@@ -45,8 +45,36 @@ def test_dev_compose_publishes_api_only_on_loopback() -> None:
     assert ports, "dev api powinno publikować port"
     for entry in ports:
         assert str(entry).startswith("127.0.0.1:"), f"api wystawione poza loopback: {entry}"
-    # Sieć wewnętrzna bez trasy do WAN.
-    assert compose["networks"]["husarz_internal"]["internal"] is True
+
+
+def test_published_ports_are_not_paired_with_internal_only_network() -> None:
+    """Docker CICHO wyłącza publikowanie portów dla sieci `internal: true`.
+
+    Ta sprzeczność była w dostarczonym profilu dev: `ports: 127.0.0.1:8000:8000` obok sieci
+    `internal: true`. `docker compose up` kończyło się kontenerem `healthy`, do którego NIE
+    DAŁO SIĘ wejść z hosta — Docker raportował „8000/tcp" zamiast „127.0.0.1:8000->8000/tcp",
+    a deklaracja `ports` była martwa. Poprzednia wersja tego testu asertowała OBIE wartości
+    naraz, nie zauważając, że się wykluczają: statyczna asercja przechodziła, a rzecz nie
+    działała.
+
+    W profilu prod sprzeczności nie ma, bo ruch mostkuje Caddy w sieci `husarz_edge`
+    (nie-internal), a samo API pozostaje wewnętrzne i portów nie publikuje.
+    """
+    compose = _load(_ROOT / "docker-compose.yaml")
+    siec_wewnetrzna = {
+        nazwa
+        for nazwa, spec in (compose.get("networks") or {}).items()
+        if isinstance(spec, dict) and spec.get("internal") is True
+    }
+    for nazwa_uslugi, usluga in (compose.get("services") or {}).items():
+        if not usluga.get("ports"):
+            continue
+        sieci = set(usluga.get("networks") or [])
+        assert not (sieci and sieci <= siec_wewnetrzna), (
+            f"usługa '{nazwa_uslugi}' publikuje porty, ale jest WYŁĄCZNIE w sieci internal "
+            f"({sorted(sieci)}) — Docker po cichu wyłączy publikowanie i kontener będzie "
+            "nieosiągalny z hosta"
+        )
 
 
 def test_dev_compose_uses_allow_insecure_without_token() -> None:

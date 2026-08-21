@@ -93,6 +93,9 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   (obraz narzędzi uruchamiany z `--network none`); `.dockerignore` bez wag/sekretów.
 - ✅ docker-compose profile dev/prod/airgap (dev samowystarczalny; prod = Caddy TLS
   dla `HUSARZ_PUBLIC_HOST`; airgap bez WAN, tylko loopback).
+- ✅ Profil `dev` URUCHOMIONY i zweryfikowany: `127.0.0.1:8000->8000/tcp`, health, konsola,
+  7 agentów. Naprawiona sprzeczność `ports` + `internal: true`, przez którą kontener był
+  `healthy`, ale nieosiągalny z hosta. Docs: notatka w BEZPIECZENSTWO.md.
 - ✅ Manifesty k8s (Kustomize): **NetworkPolicy deny-all** + wąskie reguły (bez
   `0.0.0.0/0`), Deployment hardened (non-root, read-only rootfs, drop ALL), Ingress TLS.
 - ✅ CI pełne (GitHub + GitLab): lint, format, typy, testy, gitleaks, **pip-audit
@@ -101,8 +104,9 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   placeholdery sekretów) parsowane bez klastra/Dockera.
 - ✅ Obraz `husarz-api` zbudowany i zweryfikowany na kontenerze: non-root, rootfs
   niezapisywalny, 401 bez tokenu, fail-closed przy nasłuchu na `0.0.0.0`. Docs: notatka
-  w BEZPIECZENSTWO.md. Przy okazji naprawiony `.dockerignore` — bez wykluczenia sidecarów
-  AppleDouble budowa obrazu na macOS była NIEWYKONALNA.
+  w BEZPIECZENSTWO.md. Przy okazji: na macOS budowa obrazu wymaga usunięcia sidecarów
+  AppleDouble (`scripts/clean_sidecars.py`) — `.dockerignore` tego NIE naprawia, bo błąd
+  powstaje w nadawcy kontekstu. Sidecary odrastają, więc to krok do powtarzania.
 - ⬜ Realne uruchomienie na klastrze (CNI+NetworkPolicy, gVisor, Vault unseal) —
   środowisko docelowe; pgvector/RAG (pamięć długoterminowa, przyszły etap).
 

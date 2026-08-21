@@ -57,6 +57,41 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Profil `dev` w compose — kontener był NIEOSIĄGALNY (data: 2026-08-21)
+
+**Objaw.** `docker compose up -d` kończył się kontenerem w stanie **`healthy`**, ale
+`curl http://127.0.0.1:8000/api/health` nie łączył się w ogóle. API działało — sprawdzone
+od środka kontenera (`{"status":"ok",...}`) — tylko nie było do niego drogi z hosta.
+
+**Przyczyna.** Sprzeczność w dostarczonym `docker-compose.yaml`: deklaracja
+`ports: "127.0.0.1:8000:8000"` obok sieci `husarz_internal` z `internal: true`. **Docker
+cicho wyłącza publikowanie portów dla sieci internal** — zamiast
+`127.0.0.1:8000->8000/tcp` raportuje samo `8000/tcp`, a deklaracja `ports` jest martwa.
+Ten sam mechanizm odcinał dostęp do modelu na hoście, więc czat w tym profilu też nie miał
+prawa działać.
+
+**Dlaczego nie wykryły tego testy.** `test_deploy_invariants.py` asertował OBIE wartości
+naraz — publikowanie na loopbacku ORAZ `internal: true` — nie zauważając, że się wykluczają.
+Statyczna asercja przechodziła, a rzecz nie działała. To ten sam wzorzec, co przy sandboxie
+i obrazie API: weryfikacja deklaracji zamiast skutku.
+
+**Naprawa.** Sieć profilu `dev` nie jest już `internal`. To świadomy kompromis, opisany
+w pliku: dev **nie ma proxy**, które mogłoby mostkować ruch (w `prod` robi to Caddy w sieci
+`husarz_edge`, a samo API pozostaje wewnętrzne i portów nie publikuje — tam sprzeczności nie
+było). Egress w profilu `dev` jest egzekwowany **warstwą aplikacji**:
+`security.egress.default_policy: deny` + allowlista + pinowanie IP (ADR-0020). Wymuszenie
+sieciowe pozostaje tam, gdzie było zaprojektowane — k8s NetworkPolicy deny-all
+(`deploy/k8s/`) oraz profil `airgap` bez trasy do WAN.
+
+**Nowy niezmiennik w testach.** `test_published_ports_are_not_paired_with_internal_only_network`
+odrzuca każdą usługę, która publikuje porty, będąc wyłącznie w sieci `internal`. Nośność
+potwierdzona: przywrócenie `internal: true` czerwieni test.
+
+**Zweryfikowane po naprawie** (`docker compose up -d`): mapowanie
+`127.0.0.1:8000->8000/tcp`, `/api/health` → `{"status":"ok","profile":"dev"}`, konsola → 200,
+`/api/agents` → 7 agentów.
+
+
 ### Obraz `husarz-api` — hardening zweryfikowany na kontenerze (data: 2026-08-21)
 
 **Dlaczego osobna notatka.** Niezmienniki obrazu (non-root, brak zapisu do rootfs, fail-closed
@@ -83,13 +118,28 @@ Bramka zadziałała — kontener odmówił startu z czytelnym komunikatem i wska
 
 Testy: `tests/integration/test_api_image.py` (marker `integration`), pomijane bez obrazu.
 
-**Znalezione przy okazji — obrazu NIE DAŁO SIĘ zbudować na macOS.** `docker build` przerywał
-już przy wysyłaniu kontekstu: `failed to xattr ._.gitlab-ci.yml: operation not permitted`.
+**Znalezione przy okazji — obrazu NIE DAŁO SIĘ zbudować na macOS.** `docker build` przerywa
+już przy wysyłaniu kontekstu: `failed to xattr ._CHANGELOG.md: operation not permitted`.
 Przyczyną są sidecary AppleDouble (`._*`), które macOS tworzy na wolumenach bez natywnych
-xattr (exFAT/NTFS/sieciowe). `.gitignore` je wykluczał, `.dockerignore` **nie** — więc
-budowa obrazu z takiego wolumenu była niewykonalna, a wada niewidoczna w CI (Linux ich nie
-tworzy). Wykluczenie dodane; z drzewa usunięto 263 sidecary po weryfikacji sygnatury
-AppleDouble (`0x00051607`), żeby nie skasować pliku o zbieżnej nazwie.
+atrybutów rozszerzonych (exFAT/NTFS/sieciowe). Wada jest niewidoczna w CI, bo Linux tych
+plików nie tworzy.
+
+!!! warning "Sprostowanie: `.dockerignore` tego NIE naprawia"
+    Pierwotnie zapisano tu, że dodanie `._*` do `.dockerignore` rozwiązuje problem. **To
+    nieprawda** — zweryfikowane empirycznie: z jednym sidecarem `docker build` kończy się
+    kodem **1** mimo wpisu, bez sidecara kodem **0**. Błąd powstaje w nadawcy kontekstu,
+    zanim reguły ignorowania zostaną zastosowane. Wpis w `.dockerignore` zostaje, bo jest
+    poprawny co do zasady (nie wpuszcza śmieci do obrazu), ale **sam problem rozwiązuje
+    wyłącznie usunięcie plików przed budową**.
+
+    Sidecary **odrastają przy każdym zapisie** na wolumen, więc to krok do powtarzania:
+
+    ```bash
+    python scripts/clean_sidecars.py && docker build -t husarz-api:ci .
+    ```
+
+    Skrypt kasuje wyłącznie pliki o sygnaturze AppleDouble (`0x00051607`) i pomija wnętrze
+    `.git` — skasowanie tam `._pack-*.idx` potrafi uszkodzić indeks paczek.
 
 
 ### Sandbox — pierwsza weryfikacja na REALNYM silniku (data: 2026-08-21)

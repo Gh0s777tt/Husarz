@@ -41,10 +41,19 @@ services:
     restart: unless-stopped
 
 networks:
-  # Sieć wewnętrzna bez trasy do WAN — spójne z deny-all egress.
   husarz_internal:
     driver: bridge
-    internal: true
+    # UWAGA: `internal: true` w Dockerze CICHO WYŁĄCZA publikowanie portów — kontener staje
+    # się nieosiągalny z hosta, a deklaracja `ports` przestaje cokolwiek znaczyć (Docker
+    # raportuje wtedy „8000/tcp" zamiast „127.0.0.1:8000->8000/tcp"). Profil dev nie ma
+    # proxy, które mogłoby to mostkować (w prod robi to Caddy w sieci `husarz_edge`), więc
+    # sieć MUSI być zwykła — inaczej `docker compose up` daje kontener, do którego nie da
+    # się wejść. Blokuje to również dostęp do modelu na hoście (Ollama), czyli czat.
+    #
+    # Egress jest tu egzekwowany WARSTWĄ APLIKACJI: `security.egress.default_policy: deny`
+    # + allowlista + pinowanie IP (ADR-0020). Wymuszenie sieciowe należy do produkcji —
+    # k8s NetworkPolicy deny-all (deploy/k8s/) oraz profil airgap bez trasy do WAN.
+    internal: false
 
 volumes:
   husarz_audit:
