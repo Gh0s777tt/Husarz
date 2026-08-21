@@ -41,19 +41,30 @@ zostawia repozytorium i dokumentację w stanie spójnym, kompletnym i gotowym do
 
 ## Bramki jakości (muszą być zielone przed commitem)
 
-Uruchamiaj z aktywnego venv (`.venv`):
+Uruchamiaj z aktywnego venv. Ścieżka zależy od systemu — `.venv/Scripts/python.exe` na
+Windows, `.venv/bin/python` na Linuksie i macOS. **Zanim uruchomisz bramki, upewnij się, że
+venv pasuje do TEGO systemu** — venv zbudowany gdzie indziej nie zadziała, a objawi się to
+mylącymi błędami importu, nie czytelnym komunikatem.
 
 ```bash
-.venv/Scripts/python.exe -m ruff check .
-.venv/Scripts/python.exe -m black --check src tests
-.venv/Scripts/python.exe -m mypy
-.venv/Scripts/python.exe -m pytest -q
+python -m ruff check .
+python -m black --check src tests scripts
+python -m mypy
+python -m pytest
+python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
+python -m mkdocs build --strict
 ```
 
-Definicja „ukończone": kod otypowany, testy (unit + integration + security)
-zielone, brak sekretów (gitleaks czysty), **cała dokumentacja zaktualizowana**
-(README/CHANGELOG/ROADMAP/`docs/`/wiki/PDF), repozytorium spójne i **gotowe do push**
-(zacommitowane, właściwy branch, tag przy wydaniu), stan zaraportowany operatorowi.
+Dwie ostatnie pozycje są równoprawnymi bramkami, nie dodatkiem: `husarz eval` sprawdza
+niezmienniki routingu i bramki narzędziowej bez modelu i sieci, a `mkdocs --strict`
+wychwytuje martwe odnośniki, czyli rozjazd dokumentacji.
+
+Osobno, przed commitem: `gitleaks protect --staged` musi być czysty.
+
+Definicja „ukończone": kod otypowany, testy (unit + integration + security) zielone, bramka
+ewaluacyjna zielona, dokumentacja buduje się w trybie `--strict`, brak sekretów, **cała
+dokumentacja zaktualizowana** (README/CHANGELOG/ROADMAP/`docs/`/wiki/PDF), repozytorium
+spójne, zmiany zacommitowane i **wypchnięte na oba zdalne**, stan zaraportowany operatorowi.
 
 ## Dokumentacja — utrzymywana na bieżąco i WERYFIKOWANA (wymóg użytkownika)
 
@@ -119,32 +130,167 @@ Przy każdej zmianie dotykającej bezpieczeństwa lub przed zamknięciem etapu:
 6. Przed zamknięciem etapu z komponentem bezpieczeństwa: krótka notatka
    weryfikacyjna w `docs/BEZPIECZENSTWO.md` (co sprawdzono, jak, wynik).
 
+## Weryfikacja: sprawdzaj SKUTEK, nie deklarację (zasada nadrzędna)
+
+To najdroższa lekcja tego projektu. Zielony zestaw testów **nie znaczy, że rzecz działa** —
+znaczy, że przechodzą asercje, które ktoś napisał. Sześć realnych wad przeszło przez komplet
+zielonych testów, bo testy sprawdzały DEKLARACJĘ zamiast SKUTKU:
+
+| Sprawdzano | Czego nie wykryto |
+|---|---|
+| `argv` przekazywane Dockerowi | czy silnik faktycznie egzekwuje `--network none` |
+| manifesty k8s przez parsowanie YAML | czy selektory trafiają w pod po przekształceniu kustomize |
+| compose przez asercje na YAML | że `internal: true` **cicho wyłącza** publikowanie portów |
+| konfigurację przez walidację schematu | że `run_tests` naprawdę uruchamia kontener |
+| stan panelu przez odczyt pliku agenta | że router wybiera model wg innej reguły |
+
+Dlatego:
+
+1. **Uruchom to, co opisujesz.** Każda funkcja opisana w dokumentacji ma być choć raz wykonana
+   w realnym środowisku, a wynik zaraportowany. Polecenia z README i `docs/` muszą działać.
+2. **Testuj obserwowalny skutek**, gdy tylko środowisko na to pozwala. Test na `argv` jest
+   dobry jako uzupełnienie, nigdy jako jedyny dowód dla warstwy bezpieczeństwa.
+3. **Test wymagający środowiska pomija się z czytelnym powodem** (brak Dockera, brak klastra) —
+   NIGDY nie udaje sukcesu. Pomiar, który zaokrągla „nie dało się sprawdzić" do „w porządku",
+   jest gorszy niż brak pomiaru.
+4. **Ograniczenia zapisuj wprost.** Jeśli czegoś nie zweryfikowano (u nas: gVisor, klaster
+   k8s, podpis kodu), ma to być napisane w notatce weryfikacyjnej, a nie przemilczane.
+
+## Nośność testów (każdy nowy test)
+
+Po napisaniu testu **cofnij poprawkę i sprawdź, że test czerwieni się**. Test, który przechodzi
+bez poprawki, nie chroni niczego, a daje fałszywe poczucie bezpieczeństwa — zdarzyło się to
+w tym projekcie: asercja sprawdzała tylko `kind` wyniku, podczas gdy funkcja łapała wyjątki
+szeroko, więc awaria objawiała się jako „niezdany przypadek", a nie jako czerwony test.
+
+W teście porównującym dwie wartości dopisz asercję, że **są różne** (`assert przed != po`) —
+inaczej test przechodzi także wtedy, gdy mechanizm w ogóle nie zadziałał.
+
+## Sprostowania — obowiązek, nie uprzejmość
+
+Gdy wcześniejsze twierdzenie okaże się nieprawdziwe (w commicie, CHANGELOG-u albo notatce),
+**popraw je jawnie**, z wyjaśnieniem, co zweryfikowano i jak. Nie usuwaj po cichu i nie licz,
+że nikt nie zauważy. Dokumentacja, której nie można ufać w jednym miejscu, przestaje być
+wiarygodna w całości.
+
+Dotyczy to również pomiarów: jeśli okaże się, że metoda pomiaru była wadliwa (u nas: błędne
+przechwytywanie kodu wyjścia w pętli powłoki), powiedz to wprost i powtórz pomiar rzetelnie.
+
+## Warstwy importów (niezmiennik architektoniczny)
+
+Moduł NIŻSZEJ warstwy nie importuje z WYŻSZEJ — patrz tabela w
+[docs/ARCHITEKTURA.md](docs/ARCHITEKTURA.md). Złamanie tej reguły tworzy cykl importów, który
+**działa dopóty, dopóki ktoś importuje moduły w szczęśliwej kolejności**, i wywraca się przy
+pierwszym module, który zrobi inaczej. Nowy pakiet MUSI dostać warstwę — pilnuje tego
+`tests/unit/test_import_layering.py`.
+
 ## Rytm etapów
 
 Realizuj Etapy 0→6 (patrz ROADMAP.md). Po KAŻDYM etapie:
 **testy → wpis do docs/ (+ CHANGELOG/ROADMAP) → commit**. Nie zaczynaj kolejnego
 etapu, dopóki bieżący nie jest „ukończony" wg definicji powyżej.
 
-## Synchronizacja repozytoriów, wersjonowanie i push-readiness
+## Rytm „na bieżąco" — obowiązek ciągły (wymóg użytkownika)
+
+Poniższe NIE są czynnościami „na koniec etapu". Wykonuje się je **w tym samym kroku**, co
+zmianę, która ich wymaga. Jeżeli którakolwiek pozycja zostaje w tyle, krok nie jest ukończony.
+
+| Obszar | Co robisz na bieżąco |
+|---|---|
+| Dokumentacja | `docs/` zsynchronizowane z kodem; nowy komponent = nowa sekcja; istotna decyzja = ADR |
+| README | odzwierciedla aktualny sposób instalacji, uruchomienia i użycia |
+| CHANGELOG | wpis do `[Unreleased]` przy KAŻDEJ zmianie funkcjonalnej; sprostowania też |
+| ROADMAP | odhaczone zrealizowane, dopisane nowe ustalenia i ograniczenia |
+| Commity | małe, opisowe, z uzasadnieniem DLACZEGO — nie tylko CO |
+| Push | po zielonych bramkach wypychasz na **oba** zdalne (zasady niżej) |
+| Wydania i tagi | tag `vX.Y.Z` spójny z CHANGELOG-iem; nigdy na czerwonych bramkach |
+| Gałąź | świadomie wybrana i zaraportowana; brak wiszących gałęzi tematycznych |
+| Dokumentacja kodu | docstring po polsku dla każdego modułu, klasy i funkcji publicznej |
+| Audyty i security checki | przy każdej zmianie dotykającej bezpieczeństwa |
+| Spójność wersji | numer wersji = tag = CHANGELOG = obrazy w plikach wdrożeniowych |
+| PR, CI, jakość | stan pipeline'ów sprawdzony i zaraportowany |
+| Podpisy | commity i tagi podpisane, gdy operator skonfigurował klucz (zasady niżej) |
+| Kod niebezpieczny | opisany: po co istnieje, jakie ryzyko niesie, co go chroni |
+| Sekrety | zweryfikowane, że nic prywatnego nie trafia do publicznego repo |
+| Porządek w repo | brak osieroconych plików, duplikatów i martwych artefaktów |
+
+## Synchronizacja repozytoriów, push i wydania
 
 - Zdalne (utrzymywane W SYNCHRONIZACJI — te same commity, tagi, wiki):
   - GitLab: https://gitlab.com/Gh0s777tt/husarz
   - GitHub: https://github.com/Gh0s777tt/Husarz
-- **Push, mirroring oraz publikację wiki/PDF wykonuje OPERATOR** (wymaga uwierzytelnienia).
-  Ty przygotowujesz WSZYSTKO do publikacji i jawnie raportujesz gotowość; nigdy nie zapisujesz
-  poświadczeń w repo i nie próbujesz pushować samodzielnie.
-- **Higiena gita na bieżąco** — po każdym etapie/istotnym kroku zweryfikuj i zaraportuj:
-  - wszystko zacommitowane (czyste `git status`), sensowne komunikaty, żadnych zgubionych zmian;
-  - właściwy branch; gałęzie tematyczne zmergowane do głównej po zakończeniu (bez wiszących/martwych);
-  - historia gotowa do push na OBA zdalne; wskaż operatorowi dokładnie, co jest do wypchnięcia/zmergowania.
-- **Wersjonowanie (SemVer + tagi)**: przy wydaniu nadaj/zaproponuj tag `vX.Y.Z` spójny z
-  `CHANGELOG.md` (sekcja `[Unreleased]` → numer wersji). Tag to migawka, w której kod + docs +
-  wiki + PDF są spójne. NIE taguj stanu z czerwonymi bramkami jakości.
+- **Push wykonujesz samodzielnie, na bieżąco**, gdy spełnione są WSZYSTKIE warunki:
+  1. bramki jakości zielone (ruff, black, mypy, pytest, `husarz eval`),
+  2. `gitleaks` czysty na zmianach wchodzących do commita,
+  3. dokumentacja zaktualizowana w tym samym kroku,
+  4. `git status` czysty, właściwa gałąź.
+- **Czego NIE robisz samodzielnie, nawet przy rytmie „na bieżąco":**
+  - `push --force` / `--force-with-lease` na gałąź główną — nadpisuje cudzą pracę;
+    przygotuj polecenie i poproś operatora o decyzję,
+  - usuwanie gałęzi zdalnych, tagów i wydań — operacje nieodwracalne,
+  - publikowanie wiki i PDF na zdalne oraz tworzenie GitHub/GitLab Release — wymaga
+    świadomej decyzji o tym, co staje się publiczne,
+  - zapisywanie poświadczeń w repozytorium — nigdy, w żadnej formie.
+- **Higiena gita** — po każdym istotnym kroku zweryfikuj i zaraportuj: wszystko zacommitowane,
+  sensowne komunikaty, żadnych zgubionych zmian, właściwa gałąź, gałęzie tematyczne zmergowane.
+- **Wersjonowanie (SemVer + tagi)**: tag `vX.Y.Z` spójny z `CHANGELOG.md` (sekcja
+  `[Unreleased]` → numer wersji). Tag to migawka, w której kod + docs + wiki + PDF są spójne.
+  NIE taguj stanu z czerwonymi bramkami. Przy każdym wydaniu sprawdź, że numer wersji zgadza
+  się we WSZYSTKICH miejscach: `pyproject.toml`, `husarz.__version__`, CHANGELOG, tag oraz
+  pliki wdrożeniowe (`deploy/compose/*`, `deploy/k8s/*`) — rozjazd tam jest niewidoczny
+  w testach jednostkowych i ujawnia się dopiero na wdrożeniu.
+- **Podpisy commitów i tagów**: jeżeli operator skonfigurował klucz (`user.signingkey`
+  + `commit.gpgsign`/`tag.gpgsign`), podpisuj. Jeżeli NIE — **nie konfiguruj go za niego
+  i nie podpisuj**: podpis to kryptograficzne oświadczenie konkretnej osoby, że firmuje tę
+  zmianę, więc decyzja o jego włączeniu należy do operatora. Zawsze natomiast dodawaj
+  `Co-Authored-By`, żeby współautorstwo było jawne.
+
+## Porządek i struktura repozytorium (automatyczne pilnowanie)
+
+Po każdym istotnym kroku sprawdź i napraw:
+
+- **Brak osieroconych artefaktów**: plików, do których nic nie prowadzi; katalogów po
+  usuniętych funkcjach; duplikatów dokumentacji mówiących różne rzeczy o tym samym.
+- **Odnośniki żyją**: przy zmianie nazwy albo lokalizacji zaktualizuj WSZYSTKIE odwołania.
+  `mkdocs build --strict` musi przechodzić — traktuj to jak bramkę jakości, nie ozdobę.
+- **Nic wygenerowanego w gicie**: `site/`, `dist/`, `data/`, `audit/`, `artifacts/`,
+  `workspace/` i wagi modeli są ignorowane. Przed commitem sprawdź `git status`.
+- **Śmieci systemu plików**: na wolumenach bez natywnych atrybutów rozszerzonych (exFAT,
+  NTFS, dyski sieciowe) macOS tworzy sidecary `._*`. Blokują `docker build` **jeszcze przed
+  zastosowaniem `.dockerignore`** i wpadają w globy `*.md`/`*.py`. Sprzątaj je
+  `scripts/clean_sidecars.py`; odrastają przy każdym zapisie, więc to krok do POWTARZANIA.
+- **Każdy pakiet ma sekcję w `docs/`** — brak pokrycia traktuj jak brak testu.
+- **Skrypty operatora w `scripts/`** z docstringiem mówiącym, po co istnieją i kiedy się je
+  uruchamia. Nie są zależnością projektu ani częścią CI.
+
+## Sekrety i dane prywatne — kontrola przed każdą publikacją
+
+Repozytoria są **publiczne**. Przed każdym pushem, wydaniem i publikacją wiki/PDF:
+
+1. `gitleaks` czysty na zmianach wchodzących do commita — bramka twarda.
+2. Przejrzyj **ręcznie** nowe i zmienione pliki. Skaner nie wykryje wszystkiego: adresów
+   wewnętrznych, nazw kont, ścieżek zdradzających strukturę katalogów operatora.
+3. **Zrzuty ekranu są osobnym ryzykiem** — UI potrafi pokazać ścieżki, tokeny, e-maile
+   i treść rozmów. Obejrzyj każdy przed dołączeniem; rób je wyłącznie na instancji z danymi
+   demonstracyjnymi.
+4. W configu wyłącznie **referencje** do sekretów (`env:` / `file:` / `vault:` / `sops:`),
+   nigdy same materiały. Jeżeli funkcja wymaga ZAPISU sekretu (np. token z OAuth), zapisuj go
+   przez dostawcę sekretów, a w konfiguracji zostaw referencję — model „config nie zawiera
+   materiału" musi zostać nienaruszony.
+5. Pliki pomiarowe i dzienniki (`data/runs/`, `audit/`) nie trafiają do dokumentacji, wiki
+   ani zrzutów.
 
 ## Szybki start (dev)
 
 ```bash
 python -m venv .venv
-.venv/Scripts/python.exe -m pip install -e ".[dev]"
-.venv/Scripts/python.exe -m husarz.launcher.cli validate --config ./config
+# Windows:            .venv\Scripts\python.exe -m pip install -e ".[dev]"
+# Linux / macOS:      .venv/bin/python -m pip install -e ".[dev]"
+python -m husarz.launcher.cli validate --config ./config
+python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
 ```
+
+Uruchomienie z modelem lokalnym (Ollama) opisuje README, sekcja „Lokalny czat i kodowanie".
+Pamiętaj o kroku, który README wskazuje osobno: dostarczony `config/routing.yaml` kieruje
+agentów na modele vLLM, więc orkiestracja na samej Ollamie wymaga przypisania ich do modelu
+lokalnego.

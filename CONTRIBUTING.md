@@ -21,12 +21,22 @@ python -m venv .venv
 
 ## Bramki jakości (muszą przejść przed PR)
 
+Z aktywnego venv — `.venv\Scripts\python.exe` na Windows, `.venv/bin/python` na Linuksie
+i macOS:
+
 ```bash
-.venv\Scripts\python.exe -m ruff check .
-.venv\Scripts\python.exe -m black --check src tests
-.venv\Scripts\python.exe -m mypy
-.venv\Scripts\python.exe -m pytest -q
+python -m ruff check .
+python -m black --check src tests scripts
+python -m mypy
+python -m pytest
+python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
+python -m mkdocs build --strict
+gitleaks protect --staged
 ```
+
+Dwie pozycje bywają pomijane, a są równoprawnymi bramkami: `husarz eval` sprawdza niezmienniki
+routingu i bramki narzędziowej (bez modelu i sieci), a `mkdocs --strict` wychwytuje martwe
+odnośniki, czyli rozjazd dokumentacji.
 
 ## Definicja „ukończone"
 
@@ -36,6 +46,11 @@ python -m venv .venv
 - Dokumentacja zaktualizowana i **zweryfikowana** (README/CHANGELOG/ROADMAP/docs);
   przykłady i polecenia z dokumentów faktycznie działają.
 - Istotne decyzje udokumentowane jako ADR (`docs/adr/NNNN-*.md`).
+- **Nośność testów sprawdzona**: cofnij poprawkę i upewnij się, że nowy test się czerwieni.
+  Test przechodzący bez poprawki nie chroni niczego, a daje fałszywe poczucie bezpieczeństwa.
+- **Weryfikacja skutku, nie deklaracji**: gdy środowisko pozwala, sprawdź obserwowalny efekt,
+  a nie samą konfigurację. Test na `argv` jest uzupełnieniem, nie dowodem dla warstwy
+  bezpieczeństwa — szczegóły w [SECURITY.md](SECURITY.md).
 - Gdy zmiana dotyka **konsoli WWW** — zrzuty w dokumentacji odświeżone (patrz niżej).
 
 ## Odświeżanie zrzutów ekranu

@@ -61,6 +61,36 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Zmienione (standard prowadzenia projektu — CLAUDE.md, SECURITY.md, CONTRIBUTING.md)
+- **Push wykonuje się na bieżąco**, a nie wyłącznie ręką operatora — po spełnieniu czterech
+  warunków (zielone bramki, czysty gitleaks, zaktualizowana dokumentacja, czysty `git status`).
+  Poza tym pozostają decyzją operatora: `push --force` na gałąź główną, usuwanie gałęzi/tagów/
+  wydań oraz publikacja wiki, PDF i Release — czyli operacje nieodwracalne albo decydujące
+  o tym, co staje się publiczne.
+- **Tabela rytmu „na bieżąco"** — 16 obszarów (dokumentacja, README, CHANGELOG, ROADMAP,
+  commity, push, tagi, gałąź, docstringi, audyty, spójność wersji, CI, podpisy, kod wrażliwy,
+  sekrety, porządek w repo) z jednoznacznym wymogiem: robione W TYM SAMYM kroku co zmiana.
+- **Nowa zasada nadrzędna: „sprawdzaj SKUTEK, nie deklarację".** Wyprowadzona z sześciu
+  realnych wad, które przeszły przez komplet zielonych testów, bo testy asertowały `argv`
+  i YAML zamiast obserwowalnego efektu. Wraz z wymogiem, by test zależny od środowiska
+  pomijał się z czytelnym powodem, nigdy nie udając sukcesu.
+- **Nośność testów jako obowiązek**: po napisaniu testu cofnij poprawkę i sprawdź, że się
+  czerwieni. Plus wymóg asercji „wartości są różne" w testach porównujących stan przed/po.
+- **Sprostowania jako obowiązek** — nieprawdziwe twierdzenie w commicie, CHANGELOG-u albo
+  notatce poprawia się jawnie, z wyjaśnieniem, co zweryfikowano; dotyczy też wadliwych metod
+  pomiaru.
+- **Bramki jakości rozszerzone** o `husarz eval`, `mkdocs build --strict` i `gitleaks protect`;
+  ścieżki venv rozdzielone na Windows i Linux/macOS (dotychczasowe działały tylko na Windows).
+- **Podpisy**: podpisujemy, gdy operator skonfigurował klucz; NIE konfigurujemy klucza za niego
+  i nie podpisujemy w jego imieniu — podpis to oświadczenie konkretnej osoby. `Co-Authored-By`
+  zawsze, żeby pochodzenie kodu było jawne.
+- **SECURITY.md**: sekcje o audytach ciągłych (tabela: co i kiedy), obowiązku opisu kodu
+  wrażliwego (po co / jakie ryzyko / co chroni / czy da się usunąć), zapisie sekretów
+  (`SecretsProvider` jest jednokierunkowy — rozszerzenie o zapis to nowa powierzchnia ataku)
+  oraz podpisach.
+- **Porządek w repo** jako wymóg z listą kontrolną, w tym powtarzalne sprzątanie sidecarów
+  AppleDouble, które blokują `docker build` i wpadają w globy plików.
+
 ### Poprawione (manifesty k8s — pułapka aktualizacyjna w `kustomization.yaml`)
 - `commonLabels` jest przestarzałe (kubectl ostrzega), ale groźniejsza jest druga właściwość
   tego pola: **wstrzykuje etykiety do SELEKTORÓW**, a selektor Deploymentu jest
