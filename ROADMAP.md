@@ -33,7 +33,10 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   allowlisty, dwuwarstwowy egress — wszystko bez Dockera/DB/sieci.
 
 ### Pozostałe z Etapu 3 (do domknięcia w środowisku z Dockerem/DB)
-- ⬜ Realne wykonanie `DockerSandboxExecutor` + obraz `husarz-sandbox` (Etap 6).
+- ✅ Realne wykonanie `DockerSandboxExecutor` + obraz `husarz-sandbox` — zweryfikowane
+  na silniku, nie po `argv`: non-root, brak sieci, read-only rootfs, montaż workspace,
+  `run_tests` end-to-end. gVisor (`runsc`) niedostępny na tej maszynie — ta jedna
+  warstwa pozostaje niesprawdzona empirycznie. Docs: notatka w BEZPIECZENSTWO.md.
 - ⬜ Backend RAG pgvector + embeddingi; sekcja `MemoryConfig`/`StorageConfig`
   (referencje `postgres_dsn_ref`, `redis_dsn_ref`, `embeddings_model_id`, `vector_dim`).
 - ✅ Typowane ustawienia per-kind (Etap 3b): `ToolConfig.config` walidowany przy STARCIE
@@ -311,7 +314,7 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
 - ✅ Adwersaryjny przegląd (29 agentów): 12 potwierdzonych wad naprawionych, w tym trzy
   blokujące — realne uruchamianie Dockera przez ewaluację, kanał na treść modelu
   w nazwach narzędzi, fałszywy sukces przy literówce w akcji.
-- ⬜ Weryfikator `exit_code` z `run_tests` — wymaga sandboxa z Dockerem (środowisko docelowe).
+- ✅ Weryfikator `tests` (kod wyjścia z `run_tests` w sandboxie) — czwarty z czterech.
 - ⬜ **Rozciąć utajony cykl importów `husarz.ssrf` → `router` → `client` → `ssrf`** —
   ujawnił się już TRZY razy (diagnostics, eval, skrypt diagnostyczny). Działa tylko
   dlatego, że router bywa importowany pierwszy.

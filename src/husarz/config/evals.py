@@ -18,6 +18,11 @@ Dwa rodzaje przypadków:
     dokładnie tę klasę błędu, którą naprawiał commit o panelu Agenci: rozjazd między tym,
     co config deklaruje, a tym, co router faktycznie wybierze.
 
+``tests``
+    Kod wyjścia zestawu testów uruchomionego w sandboxie. JEDYNY rodzaj wymagający
+    środowiska (Docker) — bez niego przypadek jest niezdany z czytelnym powodem, nigdy
+    fałszywie zielony.
+
 ``tool_policy``
     Czy bramka narzędziowa przepuści albo zablokuje wskazane narzędzie dla agenta.
     Uruchamia PRAWDZIWĄ pętlę narzędziową ze skryptowanym routerem, więc sprawdza realną
@@ -76,7 +81,36 @@ class ToolPolicyCase(_StrictModel):
 
 
 # Dyskryminator MUSI stać przy unii, nie przy polu listy — inaczej pydantic odrzuca schemat.
-EvalCase = Annotated[RoutingCase | ToolPolicyCase, Field(discriminator="kind")]
+class SuiteCase(_StrictModel):
+    """Oczekiwanie wobec zestawu testów uruchomionego w sandboxie.
+
+    Nazwa klasy celowo NIE zaczyna się od Test — pytest zbierałby ją jako klasę testową
+    i zaśmiecał przebieg ostrzeżeniem o konstruktorze.
+
+    Jedyny weryfikator, który WYMAGA środowiska: narzędzie ``run_tests`` wykonuje polecenie
+    w kontenerze, więc przypadek bez Dockera zgłosi się jako niezdany z czytelnym powodem —
+    a nie jako fałszywy sukces. Dlatego jest osobnym rodzajem: pozostałe dwa da się wpiąć
+    w CI bezwarunkowo, ten wymaga świadomej decyzji operatora.
+
+    Mierzy KOD WYJŚCIA, czyli twardy sygnał deterministyczny — najmocniejszy, jaki mamy,
+    i taki, którego nigdy nie nadpisuje ocena modelu.
+
+    Attributes:
+        name: krótki identyfikator przypadku.
+        kind: dyskryminator rodzaju.
+        workspace: katalog z testami, względem katalogu roboczego procesu.
+        extra_args: dodatkowe argumenty przekazane poleceniu testów (np. ścieżka pliku).
+        expect_exit_code: oczekiwany kod wyjścia (``0`` = zestaw zielony).
+    """
+
+    name: str = Field(min_length=1)
+    kind: Literal["tests"]
+    workspace: str = Field(min_length=1)
+    extra_args: list[str] = Field(default_factory=list)
+    expect_exit_code: int = 0
+
+
+EvalCase = Annotated[RoutingCase | ToolPolicyCase | SuiteCase, Field(discriminator="kind")]
 
 
 class EvalSet(_StrictModel):

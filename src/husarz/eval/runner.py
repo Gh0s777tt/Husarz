@@ -19,7 +19,7 @@ from husarz.agents.base import BaseAgent
 from husarz.agents.loader import build_agents
 from husarz.agents.react import ACTION_CLOSE, ACTION_OPEN
 from husarz.agents.tool_loop import ToolLoop
-from husarz.config.evals import EvalCase, EvalSet, RoutingCase, ToolPolicyCase
+from husarz.config.evals import EvalCase, EvalSet, RoutingCase, SuiteCase, ToolPolicyCase
 from husarz.config.schema import HusarzConfig
 from husarz.router.selection import select_candidates
 from husarz.router.types import ChatRequest, ChatResponse
@@ -208,6 +208,46 @@ def _check_tool_policy(
     return CaseResult(case.name, case.kind, False, f"oczekiwano '{case.expect}', było {stan}")
 
 
+def _check_tests(config: HusarzConfig, case: SuiteCase) -> CaseResult:
+    """Uruchamia zestaw testów w sandboxie i porównuje KOD WYJŚCIA z oczekiwanym.
+
+    Jedyny weryfikator używający realnego środowiska (Docker). Świadomie NIE podstawiamy tu
+    atrapy egzekutora — sensem przypadku jest to, że polecenie NAPRAWDĘ się wykonało. Brak
+    Dockera albo brak obrazu daje niezdany przypadek z czytelnym powodem, nigdy fałszywy
+    sukces: pomiar, który zaokrągla „nie dało się sprawdzić" do „w porządku", jest gorszy
+    niż brak pomiaru.
+
+    Args:
+        config: wczytana konfiguracja (dostarcza polecenie testów i politykę sandboxa).
+        case: przypadek do sprawdzenia.
+
+    Returns:
+        Wynik przypadku.
+    """
+    workspace = Path(case.workspace)
+    if not workspace.is_dir():
+        return CaseResult(case.name, case.kind, False, f"brak katalogu '{case.workspace}'")
+    tools = build_tools(config, workspace=workspace, rag_backend=InMemoryRagBackend())
+    kind_of = {name: tc.kind for name, tc in config.tools.items()}
+    dispatcher = ToolDispatcher(tools, kind_of)
+    if not dispatcher.supports("run_tests", "run"):
+        return CaseResult(case.name, case.kind, False, "narzędzie 'run_tests' niedostępne")
+    result = dispatcher.dispatch("run_tests", "run", {"extra_args": list(case.extra_args)})
+    exit_code = result.metadata.get("exit_code")
+    if exit_code is None:
+        # Sandbox w ogóle nie wystartował (brak Dockera, brak obrazu, timeout).
+        powod = (result.error or "brak kodu wyjścia").strip()[:120]
+        return CaseResult(case.name, case.kind, False, f"sandbox nie wykonał testów: {powod}")
+    if exit_code == case.expect_exit_code:
+        return CaseResult(case.name, case.kind, True)
+    return CaseResult(
+        case.name,
+        case.kind,
+        False,
+        f"oczekiwano kodu {case.expect_exit_code}, otrzymano {exit_code}",
+    )
+
+
 def run_case(
     config: HusarzConfig, case: EvalCase, *, agents: dict[str, BaseAgent], workspace: Path
 ) -> CaseResult:
@@ -225,6 +265,8 @@ def run_case(
     try:
         if isinstance(case, RoutingCase):
             return _check_routing(config, case)
+        if isinstance(case, SuiteCase):
+            return _check_tests(config, case)
         return _check_tool_policy(config, case, agents=agents, workspace=workspace)
     except Exception as exc:  # noqa: BLE001 - jeden zły przypadek nie wywraca zestawu
         return CaseResult(case.name, case.kind, False, f"błąd wykonania: {exc}")

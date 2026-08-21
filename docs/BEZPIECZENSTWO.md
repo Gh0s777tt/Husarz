@@ -57,6 +57,50 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Sandbox — pierwsza weryfikacja na REALNYM silniku (data: 2026-08-21)
+
+**Dlaczego to notatka osobna.** Izolacja sandboxa była dotąd sprawdzana **wyłącznie po
+`argv`** (`build_docker_argv`). To dobre testy jednostkowe, ale odpowiadają tylko na pytanie
+„czy poprosiliśmy Dockera o właściwe flagi" — nie na pytanie, czy silnik faktycznie je
+egzekwuje. Flaga w wierszu poleceń i zachowanie runtime'u to dwie różne rzeczy, a cała
+warstwa L2 opierała się na tym niesprawdzonym założeniu.
+
+**Środowisko.** Docker 29.6.1 (Docker Desktop, macOS arm64), obraz `husarz-sandbox:latest`
+zbudowany z `docker/husarz-sandbox.Dockerfile` (377 MB, python:3.13-slim + git + pytest).
+gVisor (`runsc`) **niedostępny** — dostępne runtime'y to `runc` i `io.containerd.runc.v2`,
+więc `runtime_class` zostało w testach ustawione na `None`. To jedyna zmieniona wartość;
+wszystkie pozostałe niezmienniki obowiązywały w postaci dostarczonej w `config/security.yaml`.
+
+**Co zweryfikowano — skutki, nie deklaracje:**
+
+| Niezmiennik | Sprawdzenie | Wynik |
+|---|---|---|
+| Wykonanie w kontenerze | `python --version` | ✅ `Python 3.13.15` |
+| Non-root | `id` | ✅ `uid=1000(sandbox) gid=1000(sandbox)` |
+| **Brak sieci** | `urlopen('https://1.1.1.1')` — literał IP, żeby mierzyć sieć, a nie DNS | ✅ pada |
+| Rootfs tylko-do-odczytu | `touch /probny` | ✅ `Read-only file system` |
+| `/tmp` zapisywalny mimo powyższego | `touch /tmp/ok` | ✅ działa |
+| Montaż workspace | odczyt pliku z `/workspace` | ✅ |
+| `run_tests` przez pełną warstwę narzędzi | zestaw zielony / czerwony | ✅ `exit=0` / `exit=1` |
+
+Testy: `tests/integration/test_sandbox_real.py` (marker `integration`). Bez Dockera albo bez
+obrazu są **pomijane z czytelnym powodem** — nigdy nie udają sukcesu.
+
+**Ograniczenie, które zostaje.** Nie zweryfikowano ścieżki z gVisorem, bo `runsc` nie jest
+dostępny na tej maszynie. Profil produkcyjny deklaruje `engine: docker+gvisor`, więc
+**dodatkowa warstwa izolacji jądra pozostaje niesprawdzona empirycznie** — sprawdzone jest
+wszystko poza nią. To zadanie dla środowiska docelowego (Etap 6).
+
+**Znalezione przy okazji — ciche pomijanie nieznanych argumentów narzędzia.** Docstring
+`ToolDispatcher.dispatch` obiecywał „Nieznane tool/action/args → `ToolResult(ok=False)`",
+ale nieznane **argumenty** były w rzeczywistości po cichu odrzucane. Model proszący o
+`run_tests.run(path="x")` dostawał przebieg CAŁEGO zestawu i był przekonany, że zawęził
+zakres. To ta sama klasa wady, którą projekt domknął w Etapie 3b dla martwych kluczy
+konfiguracji. Dispatch waliduje teraz argumenty wobec `ActionSpec.params` — zbioru
+zamkniętego, identycznego z tym, który model widzi w manuale — i zwraca komunikat wprost
+poprawialny: `Akcja 'run_tests.run' nie przyjmuje argumentów: path. Dozwolone: extra_args.`
+
+
 ### Pomiar przebiegów agenta — prywatność z konstrukcji (data: 2026-08-21)
 
 **Kontekst.** Etap 16 wymaga materializacji przebiegu agenta: bez liczby nie da się ocenić,

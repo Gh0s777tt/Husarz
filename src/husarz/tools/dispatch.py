@@ -314,6 +314,20 @@ class ToolDispatcher:
         spec = self._registry.get(kind, action) if kind is not None else None
         if spec is None:
             return _err(tool, f"Narzędzie '{tool}' nie obsługuje akcji '{action}'.")
+        # Nieznany argument NIE może zniknąć po cichu. Model, który poprosi o
+        # `run_tests.run(path="x")`, dostawał wcześniej przebieg CAŁEGO zestawu i był
+        # przekonany, że zawęził zakres — a to ta sama klasa wady, którą projekt domknął
+        # w Etapie 3b dla martwych kluczy configu. `spec.params` jest zbiorem zamkniętym
+        # i dokładnie tym samym, który model widzi w manuale, więc komunikat jest dla
+        # niego wprost poprawialny.
+        nieznane = sorted(set(args) - set(spec.params))
+        if nieznane:
+            dozwolone = ", ".join(sorted(spec.params)) or "(brak)"
+            return _err(
+                tool,
+                f"Akcja '{tool}.{action}' nie przyjmuje argumentów: {', '.join(nieznane)}. "
+                f"Dozwolone: {dozwolone}.",
+            )
         try:
             return spec.invoker(instance, args)
         except AttributeError:

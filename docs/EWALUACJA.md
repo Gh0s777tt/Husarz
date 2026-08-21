@@ -65,6 +65,27 @@ dawać ten sam werdykt zawsze, a nie zależeć od tego, czy model dziś zechce p
     więc taki przypadek zgłosi się jako niezdany z komunikatem „agent ma wyłączoną pętlę
     narzędziową". To celowe: fałszywe „zablokowano" byłoby gorsze niż brak pomiaru.
 
+### `tests` — kod wyjścia zestawu testów
+
+Uruchamia `run_tests` w sandboxie i porównuje **kod wyjścia** z oczekiwanym. To najtwardszy
+sygnał deterministyczny, jaki mamy — i taki, którego nigdy nie nadpisuje ocena modelu.
+
+| Pole | Znaczenie |
+|---|---|
+| `workspace` | katalog z testami |
+| `extra_args` | argumenty polecenia testów (np. ścieżka pliku) |
+| `expect_exit_code` | oczekiwany kod (`0` = zestaw zielony) |
+
+!!! warning "Jedyny rodzaj wymagający środowiska"
+    `tests` potrzebuje Dockera i obrazu `husarz-sandbox`. Bez nich przypadek jest **niezdany
+    z czytelnym powodem** — nigdy fałszywie zielony. Pomiar, który zaokrągla „nie dało się
+    sprawdzić" do „w porządku", jest gorszy niż brak pomiaru. Dlatego `tests` nie trafia
+    do dostarczonego zestawu `podstawowy`: bramka CI ma działać bezwarunkowo.
+
+    ```bash
+    docker build -f docker/husarz-sandbox.Dockerfile -t husarz-sandbox:latest .
+    ```
+
 ## Czego ta warstwa jeszcze NIE mierzy
 
 Uczciwie, żeby nie budować złudzeń:
@@ -72,7 +93,6 @@ Uczciwie, żeby nie budować złudzeń:
 - **Jakości odpowiedzi modelu.** Do tego potrzebny jest przebieg na realnym modelu i miara
   w rodzaju `malformed_ratio` z [`husarz.runs`](https://github.com/Gh0s777tt/Husarz/blob/main/src/husarz/runs/records.py).
   Metryki już zbieramy, brakuje zestawów zadaniowych.
-- **Kodu wyjścia z `run_tests`.** Wymaga sandboxa z Dockerem — środowisko docelowe.
 - **Sędziego LLM.** Świadomie odłożony: oceny relatywne są nieporównywalne między grupami,
   a skuteczność metody jest udokumentowana dla sędziów znacznie większych niż model, który
   startuje na sprzęcie operatora. Patrz [ADR-0022](adr/0022-zewnetrzne-narzedzia-agentowe.md).

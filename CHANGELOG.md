@@ -61,6 +61,34 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (realny sandbox — pierwsza weryfikacja na silniku, nie po `argv`)
+- **Izolacja sandboxa zweryfikowana na PRAWDZIWYM kontenerze.** Dotąd sprawdzaliśmy wyłącznie
+  `argv` (`build_docker_argv`) — czyli to, o co PROSIMY Dockera, a nie to, co silnik
+  faktycznie egzekwuje. Cała warstwa L2 stała na niesprawdzonym założeniu. Potwierdzone
+  skutki: non-root (`uid=1000`), **brak sieci** (`urlopen` na literał IP pada), rootfs
+  tylko-do-odczytu, `/tmp` mimo to zapisywalny, montaż workspace, `run_tests` przez pełną
+  warstwę narzędzi (`exit=0` / `exit=1`). Testy: `tests/integration/test_sandbox_real.py`,
+  pomijane z czytelnym powodem bez Dockera — nigdy nie udają sukcesu.
+- **Weryfikator `tests`** w warstwie ewaluacji — czwarty i ostatni z planowanych. Porównuje
+  KOD WYJŚCIA zestawu z oczekiwanym; to najtwardszy sygnał deterministyczny, jaki mamy.
+  Świadomie NIE podstawia atrapy egzekutora: sensem przypadku jest to, że polecenie NAPRAWDĘ
+  się wykonało. Brak Dockera → niezdany przypadek z powodem, nigdy fałszywy sukces. Nie trafia
+  do dostarczonego zestawu `podstawowy`, bo bramka CI ma działać bezwarunkowo.
+- Nowe `ToolDispatcher.supports(tool, action)` wykorzystane też przez ten weryfikator.
+
+### Poprawione (ciche pomijanie nieznanych argumentów narzędzia)
+- Docstring `ToolDispatcher.dispatch` obiecywał „Nieznane tool/action/args → `ok=False`",
+  ale nieznane **argumenty** były w rzeczywistości po cichu odrzucane. Model proszący
+  o `run_tests.run(path="x")` dostawał przebieg CAŁEGO zestawu i był przekonany, że zawęził
+  zakres. Wykryte dopiero przy uruchomieniu z realnym Dockerem. To ta sama klasa wady, którą
+  projekt domknął w Etapie 3b dla martwych kluczy configu: wejście, które WYGLĄDA na
+  znaczące, a jest ignorowane.
+- Argumenty są teraz walidowane wobec `ActionSpec.params` — zbioru zamkniętego, identycznego
+  z tym, który model widzi w manuale, więc komunikat jest dla niego wprost poprawialny:
+  `Akcja 'run_tests.run' nie przyjmuje argumentów: path. Dozwolone: extra_args.`
+- Klasa `SuiteCase` (a nie `TestsCase`) — nazwa zaczynająca się od `Test` byłaby zbierana
+  przez pytest jako klasa testowa i zaśmiecała przebieg ostrzeżeniem.
+
 ### Dodane (Etap 16, krok 3 — pomiar orkiestracji, bramka w CI)
 - **`OrchestrationRecord`** — pomiar warstwy wyżej niż `RunRecord`: kroki planu, delegacje,
   kroki wskazujące nieistniejącego agenta, pominięcia i odmowy ROE, rundy refleksji, tokeny.
