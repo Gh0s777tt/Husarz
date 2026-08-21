@@ -23,9 +23,9 @@ from husarz.config.evals import EvalCase, EvalSet, RoutingCase, ToolPolicyCase
 from husarz.config.schema import HusarzConfig
 from husarz.router.selection import select_candidates
 from husarz.router.types import ChatRequest, ChatResponse
-from husarz.runs import RunRecord, StepKind
+from husarz.runs import OrchestrationRecord, RunRecord, StepKind, Termination
 from husarz.security.audit import AuditLog
-from husarz.tools import InMemoryRagBackend, build_tools
+from husarz.tools import ExecResult, InMemoryRagBackend, build_tools
 from husarz.tools.dispatch import ToolDispatcher
 
 
@@ -93,14 +93,39 @@ class _ScriptedRouter:
         return ChatResponse(model="eval-stub", content=content)
 
 
+class _NullExecutor:
+    """Sandbox, który NICZEGO nie uruchamia.
+
+    KLUCZOWE dla obietnicy „ewaluacja bez modelu, GPU i sieci": ``build_tools`` bez jawnego
+    egzekutora podstawia ``DockerSandboxExecutor``, więc przypadek ``expect: allowed`` dla
+    narzędzia ``shell`` albo ``run_tests`` naprawdę wywołałby ``docker run`` — w CI, na
+    maszynie operatora, przy każdym przebiegu bramki.
+    """
+
+    def run(self, spec: Any) -> ExecResult:
+        return ExecResult(exit_code=0, stdout="[eval] sandbox nieaktywny")
+
+
+def _null_fetch(target: Any, *, timeout: int, max_bytes: int) -> tuple[int, str]:
+    """Warstwa HTTP, która nie wychodzi do sieci.
+
+    Z tego samego powodu co :class:`_NullExecutor`: bez jawnego fetchera ``build_tools``
+    podstawia realny transport HTTP.
+    """
+    return 200, "[eval] sieć nieaktywna"
+
+
 class _Collector:
     """Magazyn przebiegów zbierający rekordy w pamięci (ewaluacja nie dotyka dysku)."""
 
     def __init__(self) -> None:
         self.saved: list[RunRecord] = []
 
-    def save(self, record: RunRecord) -> None:
-        self.saved.append(record)
+    def save(self, record: RunRecord | OrchestrationRecord) -> None:
+        # Ewaluacja `tool_policy` interesuje się wyłącznie przebiegiem agenta; rekord
+        # orkiestracji nie powstaje w tej ścieżce, ale sygnatura musi zgadzać się z protokołem.
+        if isinstance(record, RunRecord):
+            self.saved.append(record)
 
 
 def _check_routing(config: HusarzConfig, case: RoutingCase) -> CaseResult:
@@ -132,12 +157,27 @@ def _check_tool_policy(
             case.name, case.kind, False, f"agent '{case.agent}' ma wyłączoną pętlę narzędziową"
         )
 
-    tools = build_tools(config, workspace=workspace, rag_backend=InMemoryRagBackend())
-    kind_of = {name: tc.kind for name, tc in config.tools.items()}
-    collector = _Collector()
-    loop = ToolLoop(
-        ToolDispatcher(tools, kind_of), AuditLog(), config.security.tool_loop, runs=collector
+    # Atrapy sandboxa i sieci — ewaluacja MUSI być wykonalna w CI bez Dockera i bez WAN.
+    tools = build_tools(
+        config,
+        workspace=workspace,
+        executor=_NullExecutor(),
+        fetcher=_null_fetch,
+        rag_backend=InMemoryRagBackend(),
     )
+    kind_of = {name: tc.kind for name, tc in config.tools.items()}
+    dispatcher = ToolDispatcher(tools, kind_of)
+    # Literówka w nazwie akcji dawałaby `passed=True` dla `expect: allowed` — bramka jej nie
+    # blokuje, a to, że akcja nie istnieje, byłoby niewidoczne. Odrzucamy jako błąd ZESTAWU.
+    if case.expect == "allowed" and not dispatcher.supports(case.tool, case.action):
+        return CaseResult(
+            case.name,
+            case.kind,
+            False,
+            f"'{case.tool}.{case.action}' nie jest wywoływalne — sprawdź nazwę w zestawie",
+        )
+    collector = _Collector()
+    loop = ToolLoop(dispatcher, AuditLog(), config.security.tool_loop, runs=collector)
     loop.run(
         agent,
         f"[eval] {case.name}",
@@ -148,6 +188,15 @@ def _check_tool_policy(
     if not collector.saved:
         return CaseResult(case.name, case.kind, False, "pętla nie zapisała przebiegu")
     record = collector.saved[0]
+    # Agent `roe_required` NIE wchodzi w pętlę (L0) — nie będzie żadnej tury ACTION, a mimo to
+    # narzędzie zostało skutecznie zablokowane. Bez tej gałęzi niezmiennika „Puszkarz nie ma
+    # narzędzi" nie dałoby się wyrazić zdawalnym przypadkiem w ŻADNEJ konfiguracji.
+    if record.termination is Termination.ROE_REFUSED:
+        if case.expect == "denied":
+            return CaseResult(case.name, case.kind, True)
+        return CaseResult(
+            case.name, case.kind, False, "agent wymaga ROE — pętla narzędziowa niedostępna"
+        )
     actions = [s for s in record.steps if s.kind is StepKind.ACTION]
     if not actions:
         return CaseResult(case.name, case.kind, False, "pętla nie zarejestrowała wywołania")

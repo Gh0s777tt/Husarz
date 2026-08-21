@@ -77,5 +77,12 @@ Uczciwie, żeby nie budować złudzeń:
   a skuteczność metody jest udokumentowana dla sędziów znacznie większych niż model, który
   startuje na sprzęcie operatora. Patrz [ADR-0022](adr/0022-zewnetrzne-narzedzia-agentowe.md).
 
+### Granice metryki `denied_tool_calls`
+
+Liczone są **wyłącznie** odmowy allowlisty agenta (warstwa L1). Blokady warstw niższych —
+egress, pinowanie IP (ADR-0020), polityka konektora wtyczki — docierają do narzędzia i wracają
+jako zwykłe `ok=False`, więc trafiają do `failed_tool_calls`. Kto chce mierzyć skuteczność
+bramek sieciowych, musi sięgnąć do dziennika audytu, nie do tej metryki.
+
 Trend jakości budujemy wyłącznie na weryfikatorach deterministycznych. Sędzia — gdy w ogóle —
 będzie służył porównaniom A/B w obrębie jednej grupy, nigdy krzywej w czasie.

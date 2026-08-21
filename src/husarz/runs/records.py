@@ -103,6 +103,8 @@ class RunRecord:
     agent: str
     principal: str = ""
     task_chars: int = 0
+    # Oba rodzaje rekordów dzielą jeden plik — czytelnik musi je odróżnić bez zgadywania.
+    record_type: str = "agent"
     steps: list[RunStep] = field(default_factory=list)
     termination: Termination = Termination.FINAL
     total_tokens: int = 0
@@ -121,15 +123,92 @@ class RunRecord:
 
     @property
     def tool_calls(self) -> int:
-        """Liczba tur, w których faktycznie wywołano narzędzie (bez odrzuconych przez bramkę)."""
-        return sum(1 for s in self.steps if s.ok is not None)
+        """Liczba wywołań, które FAKTYCZNIE dotarły do narzędzia.
+
+        Odrzucone przez bramkę nie są tu liczone: instancja narzędzia nigdy nie została
+        wywołana, więc doliczanie ich zawyżałoby mianownik wskaźnika awaryjności.
+        """
+        return sum(1 for s in self.steps if s.ok is not None and not s.denied)
 
     @property
     def failed_tool_calls(self) -> int:
-        """Liczba wywołań narzędzi zakończonych niepowodzeniem."""
-        return sum(1 for s in self.steps if s.ok is False)
+        """Liczba wywołań narzędzi zakończonych niepowodzeniem SAMEGO narzędzia.
+
+        Odmowa bramki NIE jest awarią narzędzia — jest sukcesem polityki. Wliczanie jej
+        sprawiałoby, że wskaźnik awaryjności rośnie wprost proporcjonalnie do skuteczności
+        allowlisty, czyli metryka nagradzałaby słabsze zabezpieczenie.
+        """
+        return sum(1 for s in self.steps if s.ok is False and not s.denied)
 
     @property
     def denied_tool_calls(self) -> int:
-        """Liczba wywołań zablokowanych przez bramkę — niezmiennik bezpieczeństwa do pomiaru."""
+        """Liczba wywołań odrzuconych przez allowlistę agenta (warstwa L1).
+
+        UWAGA na zakres: liczone są WYŁĄCZNIE odmowy allowlisty. Blokady warstw niższych —
+        egress, pinowanie IP, polityka konektora wtyczki — docierają do narzędzia i wracają
+        jako zwykłe ``ok=False``, więc trafiają do :attr:`failed_tool_calls`. Patrz
+        `docs/EWALUACJA.md`, sekcja o granicach pomiaru.
+        """
         return sum(1 for s in self.steps if s.denied)
+
+
+@dataclass(slots=True)
+class OrchestrationRecord:
+    """Przebieg CAŁEJ orkiestracji: plan, delegacje, rundy refleksji, synteza.
+
+    :class:`RunRecord` mierzy pojedynczego agenta. Ten rekord mierzy warstwę wyżej — jakość
+    PLANU, której inaczej nie widać. To nie jest teoretyczna potrzeba: przy realnym modelu 7B
+    planista potrafi wskazać agenta, który nie istnieje (np. „Kanclerz" zamiast „kanclerz"),
+    a orkiestrator fail-closed pomija taki krok. Bez pomiaru wygląda to jak krótsza odpowiedź,
+    nie jak wada planowania.
+
+    Obowiązuje ta sama zasada co w :class:`RunRecord`: METRYKI, nie TREŚĆ. Ani zadania, ani
+    planu, ani syntezy nie zapisujemy — tylko liczby.
+
+    Attributes:
+        run_id: identyfikator orkiestracji, wspólny z :class:`RunRecord` jej agentów.
+        principal: referencja zleceniodawcy; pusta bez uwierzytelnienia.
+        task_chars: długość zadania w znakach.
+        plan_steps: liczba kroków z PIERWOTNEGO planu (po twardym capie).
+        delegations: liczba WSZYSTKICH delegacji, łącznie z krokami z rund refleksji —
+            dlatego bywa większa niż ``plan_steps``.
+        plan_unknown_agent: kroki PLANU wskazujące agenta, którego nie ma — mianownikiem
+            jakości planu jest ``plan_steps``, więc kroki z refleksji tu nie wchodzą.
+        skipped_unknown_agent: to samo, ale dla WSZYSTKICH delegacji (plan + refleksja).
+        skipped_roe: kroki pominięte, bo agent wymaga ROE, a runtime ROE nie jest wpięty.
+        roe_denied: kroki odrzucone przez bramkę ROE mimo wpiętego runtime'u.
+        rounds: liczba dodatkowych rund refleksji.
+        answer_chars: długość syntezy w znakach.
+        total_tokens: zużycie CAŁEJ orkiestracji.
+        record_type: dyskryminator rodzaju rekordu w pliku JSONL.
+    """
+
+    run_id: str
+    principal: str = ""
+    task_chars: int = 0
+    plan_steps: int = 0
+    delegations: int = 0
+    plan_unknown_agent: int = 0
+    skipped_unknown_agent: int = 0
+    skipped_roe: int = 0
+    roe_denied: int = 0
+    rounds: int = 0
+    answer_chars: int = 0
+    total_tokens: int = 0
+    record_type: str = "orchestration"
+
+    @property
+    def plan_validity(self) -> float:
+        """Udział kroków PIERWOTNEGO planu, które wskazały istniejącego agenta.
+
+        Kroki dodane przez refleksję są celowo poza mianownikiem: powstają w innej fazie,
+        na podstawie już zebranych obserwacji, więc mieszanie ich z planem zaciera to, co
+        chcemy mierzyć — trafność planisty na starcie.
+
+        Returns:
+            0.0–1.0; ``1.0`` dla pustego planu (brak kroków = brak błędnych kroków).
+            To najczystsza miara jakości planisty, jaką da się policzyć bez sędziego.
+        """
+        if not self.plan_steps:
+            return 1.0
+        return max(0.0, (self.plan_steps - self.plan_unknown_agent) / self.plan_steps)

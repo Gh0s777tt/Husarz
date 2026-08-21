@@ -44,6 +44,12 @@ jobs:
       - name: Pytest (testy)
         run: pytest -q
 
+      # Bramka jakości Husarza (Etap 16): weryfikatory deterministyczne — routing agentów
+      # i bramka narzędziowa. Nie wołają modelu ani sieci, więc działają w CI jak zwykły
+      # test; kod wyjścia 1 przy niezdanym przypadku zatrzymuje pipeline.
+      - name: Husarz eval (bramka jakości)
+        run: python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
+
   gitleaks:
     name: Skan sekretów (gitleaks)
     runs-on: ubuntu-latest

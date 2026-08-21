@@ -4,11 +4,24 @@ Rekord przebiegu niesie WYŁĄCZNIE metryki (rodzaj tury, narzędzie, wynik, dł
 nigdy treści promptów ani wyników narzędzi. Uzasadnienie: :mod:`husarz.runs.records`.
 """
 
-from husarz.runs.records import RunRecord, RunStep, StepKind, Termination
-from husarz.runs.store import JsonlRunStore, NullRunStore, RunStore, build_run_store
+from husarz.runs.records import (
+    OrchestrationRecord,
+    RunRecord,
+    RunStep,
+    StepKind,
+    Termination,
+)
+from husarz.runs.store import (
+    JsonlRunStore,
+    NullRunStore,
+    RunStore,
+    build_run_store,
+    build_run_store_from_config,
+)
 
 __all__ = [
     "JsonlRunStore",
+    "OrchestrationRecord",
     "NullRunStore",
     "RunRecord",
     "RunStep",
@@ -16,4 +29,5 @@ __all__ = [
     "StepKind",
     "Termination",
     "build_run_store",
+    "build_run_store_from_config",
 ]

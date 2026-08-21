@@ -92,16 +92,24 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         print(f"Nie ma zestawu '{args.set}'. Dostępne: {dostepne}", file=sys.stderr)
         return 1
     if not wybrane:
-        print("Brak zestawów ewaluacyjnych w config/evals/ — nie ma czego mierzyć.")
-        return 0
+        # Zielona bramka bez ani jednego pomiaru to najgorszy możliwy sygnał: CI melduje
+        # sukces, choć nic nie sprawdzono (brak podkatalogu evals/ w obrazie, zły wolumen).
+        print(
+            "Brak zestawów ewaluacyjnych w config/evals/ — nie ma czego mierzyć. "
+            "Użyj --allow-empty, jeśli to zamierzone.",
+            file=sys.stderr,
+        )
+        return 0 if args.allow_empty else 1
 
     prompts = Path(args.prompts)
     ok = True
+    wykonane = 0
     # Narzędzia z przypadków `tool_policy` piszą do workspace'u — dajemy im katalog
     # tymczasowy, żeby ewaluacja nie dotykała roboczego katalogu operatora.
     with tempfile.TemporaryDirectory(prefix="husarz-eval-") as tmp:
         for name in sorted(wybrane):
             result = run_set(config, wybrane[name], prompts_dir=prompts, workspace=Path(tmp))
+            wykonane += len(result.results)
             status = "OK" if result.ok else "BŁĄD"
             print(
                 f"[{status}] zestaw '{result.name}': {result.passed} zdanych, {result.failed} nie"
@@ -112,6 +120,9 @@ def _cmd_eval(args: argparse.Namespace) -> int:
                 else:
                     print(f"    ✗ {case.name} ({case.kind}) — {case.detail}")
             ok = ok and result.ok
+    if wykonane == 0 and not args.allow_empty:
+        print("Zestawy istnieją, ale nie zawierają ani jednego przypadku.", file=sys.stderr)
+        return 1
     return 0 if ok else 1
 
 
@@ -530,6 +541,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_eval.add_argument("--prompts", default="./prompts", help="Katalog promptów agentów.")
     p_eval.add_argument("--set", default=None, help="Nazwa jednego zestawu (domyślnie: wszystkie).")
+    p_eval.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="Nie traktuj braku przypadków jako błędu (domyślnie: brak pomiarów = kod 1).",
+    )
     p_eval.set_defaults(func=_cmd_eval)
 
     p_version = sub.add_parser("version", help="Wypisz wersję.")

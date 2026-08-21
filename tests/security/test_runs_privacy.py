@@ -177,3 +177,47 @@ def test_factory_wires_file_store_when_enabled(tmp_path: Path, repo_config_dir: 
     )
     assert isinstance(loop._runs, JsonlRunStore)  # noqa: SLF001
     assert loop._runs.path == tmp_path / "runs" / "runs.jsonl"  # noqa: SLF001
+
+
+# --- 4. Nazwy sterowane przez model nie są kanałem na treść -----------------
+
+
+def test_model_controlled_tool_name_never_reaches_the_record(
+    tmp_path: Path, repo_config_dir: Path
+) -> None:
+    """ZNALEZISKO Z PRZEGLĄDU: `tool` i `action` pochodzą z bloku akcji, czyli OD MODELU.
+
+    Zapisywanie ich wprost dawało 64-znakowy kanał na dowolną treść w pliku, który
+    z założenia treści nie niesie. Do rekordu wpuszczamy je tylko, gdy należą do zbiorów
+    zamkniętych: `tool` musi być w allowliście agenta, `action` musi być wywoływalna.
+    """
+    config = load_config(repo_config_dir)
+    tools = build_tools(
+        config, workspace=tmp_path, executor=_Executor(), rag_backend=InMemoryRagBackend()
+    )
+    kind_of = {name: tc.kind for name, tc in config.tools.items()}
+
+    class _Collect:
+        def __init__(self) -> None:
+            self.saved: list[RunRecord] = []
+
+        def save(self, record: Any) -> None:
+            if isinstance(record, RunRecord):
+                self.saved.append(record)
+
+    store = _Collect()
+    loop = ToolLoop(ToolDispatcher(tools, kind_of), AuditLog(), ToolLoopConfig(), runs=store)
+    # Model wstawia sekret w NAZWĘ narzędzia i akcji.
+    zadanie = {
+        "tool": f"SEKRET-{_TAJNE_ZADANIE}",
+        "action": f"SEKRET-{_TAJNA_ODPOWIEDZ}",
+        "args": {},
+    }
+    akcja = f"{ACTION_OPEN}{json.dumps(zadanie)}{ACTION_CLOSE}"
+    loop.run(_agent(["rag"]), "x", router=_Router([akcja, "koniec"]), budget=loop.new_budget())
+
+    (record,) = store.saved
+    zrzut = json.dumps(asdict(record), ensure_ascii=False)
+    assert "SEKRET" not in zrzut, "nazwa narzędzia/akcji od modelu nie może trafić do rekordu"
+    assert record.steps[0].tool == "<nieznane>"
+    assert record.steps[0].action == "<nieznane>"

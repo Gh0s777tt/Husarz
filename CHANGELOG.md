@@ -61,6 +61,55 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (Etap 16, krok 3 — pomiar orkiestracji, bramka w CI)
+- **`OrchestrationRecord`** — pomiar warstwy wyżej niż `RunRecord`: kroki planu, delegacje,
+  kroki wskazujące nieistniejącego agenta, pominięcia i odmowy ROE, rundy refleksji, tokeny.
+  Metryka `plan_validity` liczona po krokach PIERWOTNEGO planu.
+- Zliczanie **strukturalne** (`_Tally`) w miejscu podjęcia decyzji, a nie przez porównywanie
+  treści obserwacji z napisami `SKIPPED_*` — te napisy widzi model i mogą się zmienić przy
+  pierwszej korekcie językowej.
+- Wspólna fabryka `build_run_store_from_config` dla pętli, orkiestratora i API — jedno miejsce
+  rozwiązywania ścieżki, więc rekordy agenta i orkiestracji trafiają do tego samego pliku
+  i łączą się po `run_id`. Zweryfikowane na żywo.
+- **`husarz eval` wpięte w OBA pipeline'y CI** (GitHub + GitLab) plus test-niezmiennik
+  pilnujący, że nikt go po cichu nie usunie z żadnego z nich.
+- Nowe `ToolDispatcher.supports(tool, action)` — introspekcja wywoływalności pary.
+
+### Poprawione (adwersaryjny przegląd Etapu 16 — 29 agentów, 12 potwierdzonych, 3 blokujące)
+- **BLOKER: ewaluacja naprawdę uruchamiała Dockera.** `build_tools` bez jawnego egzekutora
+  podstawia `DockerSandboxExecutor` (`tools/loader.py:171`), więc przypadek `expect: allowed`
+  dla `shell`/`run_tests` wywołałby `docker run` — w CI i na maszynie operatora, wbrew
+  obietnicy „bez modelu, GPU i sieci" z `docs/EWALUACJA.md`. Zweryfikowane empirycznie
+  (1 konstrukcja bez egzekutora, 0 z jawnym). Wstrzyknięte atrapy sandboxa i warstwy HTTP.
+- **BLOKER: nazwy narzędzia i akcji były kanałem na treść modelu.** Pola `tool`/`action`
+  pochodzą z bloku akcji, czyli OD MODELU; zapisywane wprost dawały 64-znakowy kanał na
+  dowolny tekst w pliku, który z założenia treści nie niesie. Wpuszczamy je teraz wyłącznie
+  ze zbiorów zamkniętych (allowlista agenta / rejestr akcji), inaczej `<nieznane>`.
+  Sprostowane też nieprawdziwe zdanie w `BEZPIECZENSTWO.md` — sama nieobecność pola
+  tekstowego NIE wystarczała.
+- **BLOKER: literówka w akcji dawała fałszywy sukces.** `expect: allowed` przechodziło dla
+  `rag.searchh`, bo bramka takiej pary nie blokuje, a nieistnienie akcji było niewidoczne.
+  Teraz przypadek jest odrzucany jako błąd zestawu.
+- **Pusta bramka świeciła na zielono.** Brak podkatalogu `evals/` (obraz Docker, zły wolumen)
+  albo zestaw bez przypadków dawały kod 0 — CI meldowało sukces, choć nic nie sprawdzono.
+  Teraz kod 1, z jawną furtką `--allow-empty`.
+- **Metryki kłamały w dwóch miejscach.** `tool_calls`/`failed_tool_calls` wliczały odmowy
+  bramki, więc wskaźnik awaryjności rósł wprost proporcjonalnie do skuteczności allowlisty —
+  metryka nagradzała słabsze zabezpieczenie. `plan_validity` liczyło kroki refleksji jako
+  kroki planu; na realnym przebiegu dawało 0,50 zamiast 1,00, obwiniając planistę za błąd
+  popełniony w innej fazie.
+- **Tura wyczerpująca budżet znikała ze `steps`** — zaniżała sumę tur i zawyżała
+  `malformed_ratio`, bo mianownik był mniejszy.
+- **Agent `roe_required` nie dawał się zmierzyć.** Nie wchodzi w pętlę (L0), więc nie ma tury
+  ACTION, choć narzędzie jest skutecznie zablokowane — niezmiennika „Puszkarz nie ma narzędzi"
+  nie dało się wyrazić zdawalnym przypadkiem w ŻADNEJ konfiguracji. `Termination.ROE_REFUSED`
+  liczy się teraz jako `denied`.
+- Plik pomiarowy tworzony z prawami `0600` w katalogu `0700`; doprecyzowany zakres blokady
+  zapisu (chroni przed przeplotem w jednym procesie; między procesami polega na `O_APPEND`).
+- Zawężony docstring `denied_tool_calls` do warstwy L1 + sekcja o granicach tej metryki
+  w `docs/EWALUACJA.md` — blokady egress i pinowania IP trafiają do `failed_tool_calls`.
+- Testy: +11 regresyjnych, każdy z potwierdzoną nośnością (cofnięcie poprawki czerwieni test).
+
 ### Dodane (Etap 16, krok 2 — warstwa ewaluacji i podkomenda `husarz eval`)
 - **Zestawy ewaluacyjne** w `config/evals/*.yaml` (nowa sekcja wieloplikowa `evals`, wczytywana
   przez loader jak agenci i narzędzia). Literówka w polu albo w rodzaju przypadku jest błędem

@@ -32,6 +32,8 @@ quality:
     - black --check src tests
     - mypy
     - pytest -q
+    # Bramka jakości Husarza (Etap 16) — weryfikatory deterministyczne, bez modelu i sieci.
+    - python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
 
 # --- Skan sekretów ----------------------------------------------------------
 gitleaks:

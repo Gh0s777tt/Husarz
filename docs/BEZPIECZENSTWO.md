@@ -71,9 +71,16 @@ i powód zakończenia. Nie zapisujemy: treści zadania, odpowiedzi modelu, argum
 
 Uzasadnienie kolejności:
 
-1. **Bezpieczeństwo z konstrukcji, nie z konfiguracji.** Struktura bez pola na tekst nie
-   wycieknie go przez błąd, złe ustawienie domyślne ani przez zrzut ekranu w dokumentacji.
-   Konfiguracja może zostać źle ustawiona; typ nie.
+1. **Bezpieczeństwo z konstrukcji, nie z konfiguracji.** Struktura nie ma pola na swobodny
+   tekst, więc nie wycieknie go przez błąd ani przez złe ustawienie domyślne.
+
+    !!! warning "Doprecyzowanie po przeglądzie adwersaryjnym"
+        Sama nieobecność pola tekstowego NIE wystarcza. Pola `tool` i `action` pochodzą
+        z bloku akcji, czyli **od modelu** — zapisywane wprost dawały 64-znakowy kanał na
+        dowolną treść. Dlatego wpuszczamy je do rekordu wyłącznie, gdy należą do **zbiorów
+        zamkniętych**: `tool` musi być w allowliście agenta, a `action` musi być wywoływalna
+        wg rejestru dispatcha; w przeciwnym razie zapisujemy `<nieznane>`. Niezmiennika
+        pilnuje `test_model_controlled_tool_name_never_reaches_the_record`.
 2. **To wystarcza do celu.** Cztery weryfikatory Etapu 16 potrzebują wyłącznie metryk.
 3. **Rozmiar i retencja.** Metryki to setki bajtów na przebieg; transkrypcje wymagałyby
    szyfrowania, retencji i polityki kasowania — czyli osobnego projektu.

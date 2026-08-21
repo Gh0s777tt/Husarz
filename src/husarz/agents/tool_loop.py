@@ -38,7 +38,7 @@ from husarz.runs import (
     RunStore,
     StepKind,
     Termination,
-    build_run_store,
+    build_run_store_from_config,
 )
 from husarz.security.audit import AuditLog
 from husarz.ssrf import HostResolver
@@ -112,6 +112,10 @@ def _arg_summary(args: dict[str, Any]) -> dict[str, Any]:
         else:
             out[key] = f"<{type(value).__name__}>"
     return out
+
+
+# Zastępnik dla nazw spoza zbiorów zamkniętych — patrz komentarz przy budowie RunStep.
+_UNKNOWN_NAME = "<nieznane>"
 
 
 def _tokens(usage: Usage | None) -> int:
@@ -258,6 +262,17 @@ class ToolLoop:
                 self._audit.record(
                     agent.name, "toolloop.budget", {"tool": action.tool[:64]}, principal=principal
                 )
+                # Tura MIAŁA miejsce (model odpowiedział, tokeny poszły) — pominięcie jej
+                # zaniżałoby sumę tur i zawyżało `malformed_ratio`, bo mianownik byłby mniejszy.
+                record.steps.append(
+                    RunStep(
+                        index=index,
+                        kind=StepKind.ACTION,
+                        model=last_model,
+                        output_chars=len(response.content),
+                        total_tokens=turn_tokens,
+                    )
+                )
                 record.termination = Termination.BUDGET
                 record.total_tokens = _tokens(meter.snapshot())
                 self._runs.save(record)
@@ -269,13 +284,21 @@ class ToolLoop:
                 )
             # `denied` odróżnia „narzędzie zawiodło" od „bramka nie wpuściła" — bez tego
             # rozróżnienia nie da się zmierzyć skuteczności allowlisty agenta.
+            # Nazwy pochodzą z bloku akcji, czyli OD MODELU. Do rekordu wpuszczamy je
+            # wyłącznie, gdy należą do zbiorów zamkniętych (allowlista agenta / rejestr
+            # akcji) — inaczej model mógłby przemycić dowolne 64 znaki treści do pliku,
+            # który z założenia treści nie niesie.
             record.steps.append(
                 RunStep(
                     index=index,
                     kind=StepKind.ACTION,
                     model=last_model,
-                    tool=action.tool[:64],
-                    action=action.action[:64],
+                    tool=action.tool if action.tool in allowed else _UNKNOWN_NAME,
+                    action=(
+                        action.action
+                        if self._dispatcher.supports(action.tool, action.action)
+                        else _UNKNOWN_NAME
+                    ),
                     ok=result.ok,
                     denied=bool(result.metadata.get("denied")),
                     output_chars=len(response.content),
@@ -393,10 +416,5 @@ def build_tool_loop(
     # Pomiar jakości (Etap 16): domyślnie WYŁĄCZONY (NullRunStore). Włączenie wymaga
     # `platform.runs.enabled: true` — nowa instalacja nie zaczyna po cichu zapisywać
     # danych o pracy operatora.
-    runs_cfg = config.platform.runs
-    runs_path = runs_cfg.path
-    if runs_cfg.enabled and runs_path is None:
-        base = data_dir if data_dir is not None else config.platform.data_dir
-        runs_path = Path(base) / "runs" / "runs.jsonl"
-    run_store = build_run_store(enabled=runs_cfg.enabled, path=runs_path)
+    run_store = build_run_store_from_config(config, data_dir=data_dir)
     return ToolLoop(dispatcher, audit, config.security.tool_loop, runs=run_store)

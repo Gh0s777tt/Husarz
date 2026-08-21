@@ -116,8 +116,11 @@ def test_metrics_count_correctly() -> None:
         ],
     )
     assert record.malformed_ratio == pytest.approx(0.2)
-    assert record.tool_calls == 3
-    assert record.failed_tool_calls == 2
+    # Odmowa bramki NIE jest wywołaniem narzędzia ani jego awarią — narzędzie nigdy nie
+    # zostało dotknięte. Wliczanie jej sprawiałoby, że wskaźnik awaryjności rośnie wraz
+    # ze skutecznością allowlisty, czyli metryka nagradzałaby słabsze zabezpieczenie.
+    assert record.tool_calls == 2
+    assert record.failed_tool_calls == 1
     assert record.denied_tool_calls == 1
 
 
@@ -279,3 +282,93 @@ def test_tokens_are_summed_and_survive_missing_usage(tmp_path: Path, repo_config
     )
     assert store2.saved[0].total_tokens == 17
     assert store2.saved[0].steps[0].total_tokens == 17
+
+
+# --- Rekord orkiestracji ----------------------------------------------------
+
+
+def test_plan_validity_counts_only_bad_steps() -> None:
+    from husarz.runs import OrchestrationRecord
+
+    # Mianownikiem jest liczba kroków PLANU, nie wszystkich delegacji: kroki z refleksji
+    # powstają w innej fazie i zacierałyby trafność planisty na starcie.
+    rec = OrchestrationRecord(
+        run_id="r", plan_steps=4, plan_unknown_agent=1, delegations=6, skipped_unknown_agent=2
+    )
+    assert rec.plan_validity == pytest.approx(0.75)
+
+
+def test_plan_validity_of_empty_plan_is_one() -> None:
+    """Brak kroków to brak BŁĘDNYCH kroków — inaczej pusty plan wyglądałby na katastrofę."""
+    from husarz.runs import OrchestrationRecord
+
+    assert OrchestrationRecord(run_id="r").plan_validity == 1.0
+
+
+def test_orchestration_record_has_no_content_fields() -> None:
+    """Ta sama zasada co w RunRecord: metryki, nie treść — także dla planu i syntezy."""
+    from dataclasses import fields
+
+    from husarz.runs import OrchestrationRecord
+
+    zakazane = {"task", "plan", "answer", "prompt", "observations", "content", "text"}
+    assert {f.name for f in fields(OrchestrationRecord)} & zakazane == set()
+
+
+def test_orchestrator_records_plan_quality(repo_config_dir: Path, tmp_path: Path) -> None:
+    """Krok planu wskazujący NIEISTNIEJĄCEGO agenta musi być policzony jako wada planu.
+
+    To nie jest przypadek teoretyczny — przy realnym modelu 7B planista pisał „Kanclerz"
+    zamiast „kanclerz", a orkiestrator fail-closed pomijał taki krok. Bez pomiaru wyglądało
+    to na krótszą odpowiedź, nie na wadę planowania.
+    """
+    from husarz.config import load_config
+    from husarz.orchestrator import build_orchestrator
+    from husarz.runs import OrchestrationRecord
+
+    config = load_config(repo_config_dir)
+    istniejacy = next(a for a in config.agents if a != "husarz")
+
+    class _PlanRouter:
+        """Zwraca plan z jednym agentem istniejącym i jednym widmowym."""
+
+        def __init__(self) -> None:
+            self._i = 0
+
+        def complete(self, request: Any, **kwargs: Any) -> ChatResponse:
+            self._i += 1
+            if self._i == 1:
+                # Plan jest JSON-em (patrz husarz.orchestrator.plan.parse_plan).
+                plan = json.dumps(
+                    {
+                        "steps": [
+                            {"agent": istniejacy, "task": "zrób A"},
+                            {"agent": "Agent-Widmo", "task": "zrób B"},
+                        ]
+                    }
+                )
+                return ChatResponse(model="m", content=plan)
+            return ChatResponse(model="m", content="gotowe")
+
+    class _Store:
+        def __init__(self) -> None:
+            self.orch: list[OrchestrationRecord] = []
+
+        def save(self, record: Any) -> None:
+            if isinstance(record, OrchestrationRecord):
+                self.orch.append(record)
+
+    store = _Store()
+    orch = build_orchestrator(
+        config,
+        _PlanRouter(),
+        prompts_dir=repo_config_dir.parent / "prompts",
+        runs=store,
+    )
+    orch.run("zadanie testowe", run_id="orch-1")
+
+    (record,) = store.orch
+    assert record.run_id == "orch-1"
+    assert record.task_chars == len("zadanie testowe")
+    assert record.skipped_unknown_agent >= 1, "krok z widmowym agentem musi być policzony"
+    assert record.plan_validity < 1.0

@@ -94,6 +94,7 @@ from husarz.router.errors import (
     RouterError,
 )
 from husarz.router.selection import resolve_agent_model
+from husarz.runs import build_run_store_from_config
 from husarz.security.audit import AuditLog, build_audit_log
 from husarz.security.errors import AuditError, SecurityError
 from husarz.security.rbac import Rbac
@@ -311,8 +312,17 @@ def create_app(
         # podpisu albo treści zlecenia obowiązuje bez restartu, a agent `roe_required` jest
         # delegowany wyłącznie pod zleceniem z ważnym podpisem (ADR-0021).
         roe_runtime = build_roe_runtime(cfg, audit_log, secrets=secrets)
+        # Magazyn budowany tą SAMĄ fabryką co w pętli narzędziowej, więc obie ścieżki piszą
+        # do tego samego PLIKU i rekordy łączą się po `run_id`. To dwie instancje, nie jeden
+        # obiekt: każda ma własny zamek, więc atomowość opiera się na `O_APPEND` systemu
+        # plików. Przy domyślnych limitach rekord ma ~1 KB i mieści się w jednym zapisie.
         orch = build_orchestrator(
-            cfg, active, prompts_dir=prompts_dir, tool_loop=loop, roe_runtime=roe_runtime
+            cfg,
+            active,
+            prompts_dir=prompts_dir,
+            tool_loop=loop,
+            roe_runtime=roe_runtime,
+            runs=build_run_store_from_config(cfg, data_dir=cfg.platform.data_dir),
         )
         return active, orch, plugins, loop, git
 

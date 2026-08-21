@@ -26,6 +26,7 @@ from husarz.orchestrator.prompts import (
     SYNTHESIS_INSTRUCTION,
 )
 from husarz.router.types import ChatMessage, ChatRequest, Usage, UsageMeter
+from husarz.runs import NullRunStore, OrchestrationRecord, RunStore
 from husarz.security.roe_runtime import RoeRuntime
 
 DEFAULT_ORCHESTRATOR = "husarz"
@@ -39,6 +40,22 @@ ROE_DRY_RUN_NOTE = (
     "aktywnych i nie masz dostępu do narzędzi — przygotowujesz wyłącznie plan, analizę "
     "i rekomendacje. Nie twierdź, że cokolwiek uruchomiłeś."
 )
+
+
+@dataclass(slots=True)
+class _Tally:
+    """Licznik zdarzeń delegacji dla pomiaru jakości planu (Etap 16).
+
+    Zliczamy STRUKTURALNIE, w miejscu podjęcia decyzji — a nie przez porównywanie treści
+    obserwacji z napisami `SKIPPED_*`. Napis widzi model i może się zmienić przy pierwszej
+    korekcie językowej; licznik ma przeżyć taką zmianę.
+    """
+
+    delegations: int = 0
+    plan_unknown_agent: int = 0
+    skipped_unknown_agent: int = 0
+    skipped_roe: int = 0
+    roe_denied: int = 0
 
 
 class OrchestratorError(Exception):
@@ -83,6 +100,7 @@ class Orchestrator:
         tool_loop: ToolLoop | None = None,
         max_plan_steps: int = 20,
         roe_runtime: RoeRuntime | None = None,
+        runs: RunStore | None = None,
     ) -> None:
         if orchestrator_name not in agents:
             raise OrchestratorError(
@@ -100,6 +118,9 @@ class Orchestrator:
         # Runtime ROE (opcjonalny). Bez niego agenci `roe_required` są pomijani jak dotąd —
         # fail-closed: brak wpiętej bramki NIE może oznaczać zgody na delegację.
         self._roe = roe_runtime
+        # Pomiar jakości orkiestracji (Etap 16) — domyślnie NullRunStore, czyli nic
+        # nie zapisujemy. Włączenie: `platform.runs.enabled`.
+        self._runs: RunStore = runs if runs is not None else NullRunStore()
 
     # -- fazy ---------------------------------------------------------------
 
@@ -133,9 +154,19 @@ class Orchestrator:
         meter: UsageMeter | None = None,
         principal: str = "",
         run_id: str = "",
+        tally: _Tally | None = None,
+        from_plan: bool = False,
     ) -> Observation:
+        if tally is not None:
+            tally.delegations += 1
         agent = self._agents.get(step.agent)
         if agent is None or step.agent == self._orchestrator_name:
+            if tally is not None:
+                tally.skipped_unknown_agent += 1
+                if from_plan:
+                    # Jakość PLANU liczymy tylko po krokach planu — kroki z refleksji
+                    # powstają w innej fazie i zacierałyby to, co chcemy zmierzyć.
+                    tally.plan_unknown_agent += 1
             return Observation(step.agent, step.task, SKIPPED_UNKNOWN_AGENT, "")
         # Bramka ROE na poziomie orkiestracji (ADR-0006/0021, Etap 4c): agent wymagający
         # ROE jest delegowany WYŁĄCZNIE pod zleceniem, które ma zgodę, ważny KRYPTOGRAFICZNIE
@@ -144,9 +175,13 @@ class Orchestrator:
         step_context = context
         if agent.config.roe_required:
             if self._roe is None:
+                if tally is not None:
+                    tally.skipped_roe += 1
                 return Observation(step.agent, step.task, SKIPPED_ROE, "")
             decision = self._roe.authorize_delegation(step.task, principal=principal)
             if not decision.allowed:
+                if tally is not None:
+                    tally.roe_denied += 1
                 message = f"[odmowa ROE: {decision.reason}]"
                 if decision.alternative:
                     message = f"{message} {decision.alternative}"
@@ -213,6 +248,7 @@ class Orchestrator:
         # Sumator zużycia — ŚWIEŻY per run (jak budżet narzędzi), nigdy współdzielony
         # między żądaniami. Bez niego /api/orchestrate sprawdzał limit, ale go NIE naliczał.
         meter = UsageMeter()
+        tally = _Tally()
         plan = self._plan(task, meter)
         # Plan z NIEZAUFANEGO wyjścia modelu — twardy cap liczby kroków (anty-amplifikacja).
         plan = Plan(steps=plan.steps[: self._max_plan_steps])
@@ -220,7 +256,15 @@ class Orchestrator:
         # współdzielony między żądaniami/wątkami). None, gdy pętla nieaktywna.
         budget = self._tool_loop.new_budget() if self._tool_loop is not None else None
         observations: list[Observation] = [
-            self._delegate(step, budget=budget, meter=meter, principal=principal, run_id=run_id)
+            self._delegate(
+                step,
+                budget=budget,
+                meter=meter,
+                principal=principal,
+                run_id=run_id,
+                tally=tally,
+                from_plan=True,
+            )
             for step in plan.steps
         ]
 
@@ -241,12 +285,30 @@ class Orchestrator:
                     meter=meter,
                     principal=principal,
                     run_id=run_id,
+                    tally=tally,
                 )
                 for step in extra_steps
             )
             rounds += 1
 
         answer = self._synthesize(task, observations, meter)
+        snapshot = meter.snapshot()
+        self._runs.save(
+            OrchestrationRecord(
+                run_id=run_id,
+                principal=principal,
+                task_chars=len(task),
+                plan_steps=len(plan.steps),
+                delegations=tally.delegations,
+                plan_unknown_agent=tally.plan_unknown_agent,
+                skipped_unknown_agent=tally.skipped_unknown_agent,
+                skipped_roe=tally.skipped_roe,
+                roe_denied=tally.roe_denied,
+                rounds=rounds,
+                answer_chars=len(answer),
+                total_tokens=(snapshot.total_tokens or 0) if snapshot is not None else 0,
+            )
+        )
         return OrchestratorResult(
             task=task,
             plan=plan,
@@ -266,6 +328,7 @@ def build_orchestrator(
     max_extra_rounds: int = 1,
     tool_loop: ToolLoop | None = None,
     roe_runtime: RoeRuntime | None = None,
+    runs: RunStore | None = None,
 ) -> Orchestrator:
     """Buduje Chorągiew (agentów) z konfiguracji i składa orkiestratora.
 
@@ -285,4 +348,5 @@ def build_orchestrator(
         tool_loop=tool_loop,
         max_plan_steps=config.security.tool_loop.max_plan_steps,
         roe_runtime=roe_runtime,
+        runs=runs,
     )

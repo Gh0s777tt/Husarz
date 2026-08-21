@@ -285,6 +285,26 @@ class ToolDispatcher:
             else default_action_registry(max_rag_add_bytes=max_rag_add_bytes)
         )
 
+    def supports(self, tool: str, action: str) -> bool:
+        """Czy para narzędzie+akcja jest w ogóle WYWOŁYWALNA w tym dispatcherze.
+
+        Potrzebne warstwie ewaluacji: przypadek oczekujący ``allowed`` dla literówki
+        (``rag.searchh``) przechodziłby, bo bramka allowlisty go nie zablokowała — a to,
+        że akcja nie istnieje, jest wtedy niewidoczne. Introspekcja pozwala odrzucić taki
+        przypadek jako błąd zestawu, zamiast raportować fałszywy sukces.
+
+        Args:
+            tool: nazwa narzędzia z rejestru.
+            action: nazwa akcji.
+
+        Returns:
+            ``True``, gdy narzędzie istnieje i obsługuje tę akcję.
+        """
+        if tool not in self._tools:
+            return False
+        kind = self._kind_of.get(tool)
+        return kind is not None and self._registry.get(kind, action) is not None
+
     def dispatch(self, tool: str, action: str, args: dict[str, Any]) -> ToolResult:
         """Wywołuje akcję narzędzia. Nieznane tool/action/args → ``ToolResult(ok=False)``."""
         instance = self._tools.get(tool)

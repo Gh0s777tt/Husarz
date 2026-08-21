@@ -306,7 +306,15 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   z kodem wyjścia 1 przy niezdanym przypadku. Docs: `docs/EWALUACJA.md`.
 - ✅ Weryfikator `routing` (czysta funkcja) i `tool_policy` (prawdziwa pętla ze skryptowanym
   routerem) — oba bez modelu, GPU i sieci, gotowe do CI. Testy: +12.
+- ✅ Pomiar orkiestracji (`OrchestrationRecord`): jakość planu, delegacje, ROE, rundy.
+- ✅ `husarz eval` wpięte w oba pipeline'y CI + test-niezmiennik.
+- ✅ Adwersaryjny przegląd (29 agentów): 12 potwierdzonych wad naprawionych, w tym trzy
+  blokujące — realne uruchamianie Dockera przez ewaluację, kanał na treść modelu
+  w nazwach narzędzi, fałszywy sukces przy literówce w akcji.
 - ⬜ Weryfikator `exit_code` z `run_tests` — wymaga sandboxa z Dockerem (środowisko docelowe).
+- ⬜ **Rozciąć utajony cykl importów `husarz.ssrf` → `router` → `client` → `ssrf`** —
+  ujawnił się już TRZY razy (diagnostics, eval, skrypt diagnostyczny). Działa tylko
+  dlatego, że router bywa importowany pierwszy.
 - ⬜ Weryfikator `malformed_ratio` — metryki już zbieramy (`husarz.runs`), brakuje zestawów
   zadaniowych uruchamianych na REALNYM modelu (mierzy jakość modelu, nie naszego kodu).
 - ⬜ Budżet okna kontekstu — dziś clampujemy `max_tokens`, ale nie sprawdzamy, czy prompt
