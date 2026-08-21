@@ -67,3 +67,85 @@ def test_egress_error_identity_is_preserved() -> None:
     assert issubclass(z_core, RouterError)
     # `husarz.api.app` łapie RouterError i mapuje go na kod HTTP — blokada egress musi się łapać.
     assert isinstance(z_core("test"), RouterError)
+
+
+# --- Hierarchia warstw (niezmiennik architektoniczny) -----------------------
+
+# Warstwy wg `docs/ARCHITEKTURA.md`, sekcja „Warstwy importów". Moduł NIŻSZEJ warstwy
+# nie może importować z WYŻSZEJ — złamanie tej reguły tworzy cykl, który działa dopóty,
+# dopóki ktoś importuje moduły we właściwej kolejności.
+_WARSTWY: dict[str, int] = {
+    "core": 0,
+    "config": 1,
+    "ssrf": 2,
+    "fencing": 2,
+    "textjson": 2,
+    # Sanityzacja załączników czatu: zależy od `config` i `fencing`, konsumuje ją wyłącznie API.
+    "attachments": 2,
+    "router": 3,
+    "tools": 3,
+    "security": 3,
+    "plugins": 3,
+    "git": 3,
+    "memory": 3,
+    "accounts": 3,
+    "runs": 3,
+    "agents": 4,
+    "orchestrator": 4,
+    "eval": 4,
+    "api": 5,
+    "launcher": 5,
+}
+
+
+def _warstwa(modul: str) -> int | None:
+    """Numer warstwy dla modułu ``husarz.X...``; ``None`` dla obcych."""
+    czesci = modul.split(".")
+    return _WARSTWY.get(czesci[1]) if len(czesci) > 1 and czesci[0] == "husarz" else None
+
+
+def test_no_module_imports_from_a_higher_layer() -> None:
+    """Automatyczny odpowiednik tabeli warstw z dokumentacji.
+
+    Poprzedni test pilnował sześciu WYBRANYCH modułów. Ten sprawdza CAŁE drzewo, więc
+    złapie kolejny cykl, zanim ktoś na niego wpadnie — a nie po czwartym razie, jak
+    było z `husarz.ssrf`.
+    """
+    import ast
+    from pathlib import Path as _Path
+
+    naruszenia: list[str] = []
+    for plik in _Path("src/husarz").rglob("*.py"):
+        if plik.name.startswith("._"):  # sidecary AppleDouble na wolumenach bez xattr
+            continue
+        wlasny = "husarz." + str(plik.relative_to("src/husarz")).replace("/", ".").removesuffix(
+            ".py"
+        )
+        moja = _warstwa(wlasny)
+        if moja is None:
+            continue
+        for wezel in ast.walk(ast.parse(plik.read_text(encoding="utf-8"))):
+            cele: list[str] = []
+            if isinstance(wezel, ast.ImportFrom) and wezel.module and wezel.level == 0:
+                cele = [wezel.module]
+            elif isinstance(wezel, ast.Import):
+                cele = [a.name for a in wezel.names if a.name.startswith("husarz.")]
+            for cel in cele:
+                ich = _warstwa(cel)
+                if ich is not None and ich > moja:
+                    naruszenia.append(f"{wlasny} (warstwa {moja}) → {cel} (warstwa {ich})")
+    assert not naruszenia, "import z wyższej warstwy:\n  " + "\n  ".join(naruszenia)
+
+
+def test_layer_table_covers_every_package() -> None:
+    """Nowy pakiet MUSI dostać warstwę — inaczej powyższy test cicho go pomija."""
+    from pathlib import Path as _Path
+
+    pakiety = {
+        p.name
+        for p in _Path("src/husarz").iterdir()
+        if p.is_dir() and not p.name.startswith(("_", "."))
+    }
+    moduly = {p.stem for p in _Path("src/husarz").glob("*.py") if not p.name.startswith(("_", "."))}
+    brakujace = (pakiety | moduly) - set(_WARSTWY)
+    assert not brakujace, f"dopisz warstwę w _WARSTWY i w docs/ARCHITEKTURA.md: {sorted(brakujace)}"

@@ -61,6 +61,24 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (audyt dokumentacji + niezmiennik warstw importów)
+- **Weryfikacja poleceń z dokumentacji** (wymóg CLAUDE.md): wyłuskane 54 polecenia z README,
+  CONTRIBUTING i `docs/`; wszystkie polecenia CLI uruchomione i potwierdzone —
+  `validate`, `eval`, `eval --set`, `version` zwracają 0, a `roe verify` zwraca 1 zgodnie
+  z zasadą fail-closed (brak klucza), czyli tak, jak opisuje dokumentacja.
+- **Audyt pokrycia pakietów w `docs/`** wykrył trzy luki: `husarz.core` i `husarz.eval`
+  (oba nowe) oraz zaległą `husarz.textjson`. Wszystkie opisane w `ARCHITEKTURA.md`;
+  `EWALUACJA.md` nazywa teraz moduły wykonawcze.
+- **Nowa sekcja „Warstwy importów"** w `ARCHITEKTURA.md` — tabela sześciu warstw z regułą
+  „moduł niższej warstwy nie importuje z wyższej" i wyjaśnieniem, dlaczego jej złamanie
+  daje cykl działający wyłącznie przy szczęśliwej kolejności importów. Tabela jest
+  **opisowa, nie życzeniowa**: analiza AST całego drzewa wykazała zero naruszeń.
+- **Niezmiennik zautomatyzowany.** `test_no_module_imports_from_a_higher_layer` sprawdza
+  CAŁE drzewo (AST), a nie sześć wybranych modułów jak poprzedni test — złapie kolejny cykl,
+  zanim ktoś na niego wpadnie, a nie po czwartym razie jak przy `husarz.ssrf`. Drugi test
+  pilnuje, by nowy pakiet MUSIAŁ dostać warstwę — inaczej pierwszy cicho by go pomijał.
+  Ten drugi od razu się przydał: wykrył pominięty `husarz.attachments`.
+
 ### Dodane (profile `prod` i `airgap` uruchomione po raz pierwszy)
 - Oba profile wdrożeniowe były dotąd sprawdzane wyłącznie przez parsowanie YAML-a.
   **`prod` zweryfikowany w komplecie:** `"profile": "prod"`, API nie publikuje portów

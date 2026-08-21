@@ -37,6 +37,10 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
 
 ## Zaimplementowane
 
+- **Pakiet `husarz.core`** — definicje NAJNIŻSZEJ warstwy, zależne wyłącznie od stdlib.
+  Dziś mieszkają tu wyjątki `RouterError` i `EgressError` (`husarz.core.errors`),
+  re-eksportowane przez `husarz.router`. Powód jest architektoniczny — patrz
+  „Warstwy importów" niżej.
 - **Pakiet `husarz.config`** (Etap 0) — schematy, loader, dostawcy sekretów.
 - **Launcher CLI** (`husarz.launcher.cli`) — `validate`, `version`.
 - **Pakiet `husarz.router`** (Etap 1) — warstwa OpenAI-compat (vLLM/Ollama/SGLang),
@@ -46,6 +50,13 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   Towarzysz/Pocztowy, ładowarka agentów, hetman „Husarz" (plan → deleguj →
   obserwuj → refleksja → synteza). Szczegóły: [ORKIESTRATOR.md](ORKIESTRATOR.md),
   [ADR-0004](adr/0004-orkiestrator-agenci.md).
+- **Pakiet `husarz.eval`** (Etap 16) — wykonanie zestawów ewaluacyjnych: weryfikatory
+  `routing`, `tool_policy` i `tests`. Modele samych zestawów mieszkają w warstwie
+  konfiguracji (`husarz.config.evals`), bo wczytuje je loader. Szczegóły:
+  [EWALUACJA.md](EWALUACJA.md).
+- **Moduł `husarz.textjson`** — odporne wyłuskiwanie obiektu JSON z tekstu modelu.
+  Wspólny dla planowania orkiestratora i protokołu ReAct pętli narzędziowej. Kontrakt:
+  szum, proza albo wiele obiektów → pierwszy poprawny obiekt lub `None`, **nigdy wyjątek**.
 - **Pakiet `husarz.tools`** (Etap 3) — narzędzia (`file_edit`, `shell`, `git`,
   `run_tests`, `web`, `rag`) z konfinacją, allowlistami i sandboxem bez sieci;
   executor/fetcher/backend wstrzykiwalne. Szczegóły: [NARZEDZIA.md](NARZEDZIA.md),
@@ -71,6 +82,42 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   są zablokowane niezależnie od nich. Domyka okno TOCTOU DNS-rebindingu. Szczegóły:
   [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md), [ADR-0020](adr/0020-pinowanie-ip-anty-ssrf.md).
 - Pakiet `core` to na razie zaślepka; mTLS/OIDC oraz runtime egress/sandbox — Etap 6.
+
+## Warstwy importów
+
+Moduł NIŻSZEJ warstwy nie może importować z WYŻSZEJ. Reguła nie jest estetyczna — jej
+złamanie tworzy cykl importów, który **działa dopóty, dopóki ktoś importuje moduły we
+właściwej kolejności**, i wywraca się przy pierwszym module, który zrobi inaczej.
+
+Tak było z `husarz.ssrf` (pinowanie IP, ADR-0020). Jest to warstwa niższa niż router —
+korzystają z niego narzędzia, wtyczki MCP, klient Gita i embedder — a mimo to zgłaszał
+`EgressError` importowany z `husarz.router.egress`. Import podmodułu pociąga w Pythonie
+import pakietu nadrzędnego, więc powstawał cykl:
+
+```
+husarz.ssrf → husarz.router.egress → husarz.router.__init__
+            → husarz.router.client → husarz.ssrf (częściowo zainicjalizowany)
+```
+
+Ujawnił się **czterokrotnie**, zawsze przy nowym module sięgającym do `ssrf` przed routerem.
+Rozwiązaniem było przeniesienie definicji do `husarz.core.errors` (sam stdlib) i re-eksport
+z `husarz.router` — wszystkie istniejące ścieżki importu działają bez zmian, a klasy
+pozostają tożsame, więc `except`/`isinstance` zachowują się identycznie.
+
+Kolejność warstw, od najniższej:
+
+| Warstwa | Zawartość | Może importować |
+|---|---|---|
+| `husarz.core` | wyjątki wspólne | wyłącznie stdlib |
+| `husarz.config` | schematy, loader, `net`, `evals` | `core` + stdlib |
+| `husarz.ssrf`, `husarz.fencing`, `husarz.textjson`, `husarz.attachments` | prymitywy współdzielone | `core`, `config` |
+| `husarz.router`, `husarz.tools`, `husarz.security` | usługi domenowe | powyższe |
+| `husarz.agents`, `husarz.orchestrator`, `husarz.eval` | logika agentowa | powyższe |
+| `husarz.api`, `husarz.launcher` | wejście do systemu | wszystko |
+
+Niezmiennika pilnuje `tests/unit/test_import_layering.py` — importuje moduły niskopoziomowe
+w **świeżym procesie**, bo w obrębie jednej sesji testowej inny test mógłby wciągnąć router
+i zamaskować cykl.
 
 ## Hierarchia konfiguracji (zaimplementowana)
 

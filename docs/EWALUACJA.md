@@ -4,6 +4,9 @@ Husarz długo nie miał **żadnej liczby** opisującej własne działanie. Możn
 tabelę routingu albo model i nie dowiedzieć się, czy cokolwiek się poprawiło. Warstwa
 ewaluacji (Etap 16) zamyka tę lukę od strony, która nie wymaga ani modelu, ani GPU, ani sieci.
 
+Kod: modele zestawów w `husarz.config.evals` (wczytuje je loader razem z resztą
+konfiguracji), wykonanie w `husarz.eval.runner`.
+
 ## Zasada: mierzymy NASZ kod, nie humor modelu
 
 Weryfikator, który woła model, mierzy jakość **modelu** — i daje inny wynik przy każdym
