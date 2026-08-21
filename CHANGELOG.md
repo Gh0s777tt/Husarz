@@ -61,6 +61,32 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (profile `prod` i `airgap` uruchomione po raz pierwszy)
+- Oba profile wdrożeniowe były dotąd sprawdzane wyłącznie przez parsowanie YAML-a.
+  **`prod` zweryfikowany w komplecie:** `"profile": "prod"`, API nie publikuje portów
+  (`8000/tcp`, bez mapowania), nieosiągalne bezpośrednio z hosta (`HTTP 000` — jedynym
+  wejściem jest Caddy), bez tokenu **401**, z tokenem **200**. Wzorzec z `prod` okazał się
+  poprawny: sprzeczności `ports` + `internal` tam nie ma, bo API portów nie publikuje.
+
+### Poprawione (profil `airgap` NIE spełniał własnej obietnicy)
+- Nakładka deklarowała `ports: "127.0.0.1:8000:8000"` i zapowiadała „dostęp do API wyłącznie
+  przez loopback HOSTA", ale dziedziczyła `internal: true` z base. Kontener wstawał jako
+  `healthy` z poprawnym profilem w środku, a `curl` z hosta nie łączył się w ogóle. Nakładka
+  nadpisuje teraz `internal: false`; uzasadnienie w pliku i w `BEZPIECZENSTWO.md`: na maszynie
+  faktycznie odciętej nie ma trasy do WAN, a profil `airgap` w configu wymusza przy starcie
+  deny-all egress, pustą allowlistę, brak sieci w sandboxie i lokalne endpointy modeli.
+- **Luka we własnym teście z poprzedniego commita.** Niezmiennik sprawdzał wyłącznie główny
+  `docker-compose.yaml`, więc przegapił nakładkę. Dołożony `test_overlay_profiles_have_no_port_contradiction`
+  scala nakładki z base — bo `internal` bywa nadpisywane właśnie tam.
+
+### Poprawione (tag obrazu w compose kłamał o wersji)
+- `docker-compose.base.yml` przypinał `husarz-api:0.1.0`, gdy projekt był w **0.14.0**.
+  Compose sam buduje ten obraz i nadaje mu etykietę, więc wdrożony artefakt niósł nieprawdziwą
+  wersję. Tag jest teraz parametrem `HUSARZ_IMAGE_TAG` z domyślną wartością sparowaną
+  z `husarz.__version__`; `test_compose_image_tag_matches_project_version` pilnuje, żeby nie
+  rozjechał się przy kolejnym wydaniu — bez tego rozjazd wraca, bo nikt nie pamięta o pliku
+  wdrożeniowym. Wpis dodany do `.env.example`.
+
 ### Poprawione (profil `dev` w compose produkował kontener NIEOSIĄGALNY z hosta)
 - `docker compose up -d` dawał kontener w stanie **`healthy`**, do którego nie dało się wejść.
   API działało (sprawdzone od środka kontenera), ale nie było do niego drogi. Przyczyna:

@@ -93,6 +93,9 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   (obraz narzędzi uruchamiany z `--network none`); `.dockerignore` bez wag/sekretów.
 - ✅ docker-compose profile dev/prod/airgap (dev samowystarczalny; prod = Caddy TLS
   dla `HUSARZ_PUBLIC_HOST`; airgap bez WAN, tylko loopback).
+- ✅ Profile `prod` i `airgap` URUCHOMIONE po raz pierwszy: prod bez publikacji portów,
+  nieosiągalny z hosta, 401/200 na token; airgap naprawiony (deklarował loopback hosta,
+  a był nieosiągalny). Tag obrazu sparametryzowany i sparowany z wersją projektu.
 - ✅ Profil `dev` URUCHOMIONY i zweryfikowany: `127.0.0.1:8000->8000/tcp`, health, konsola,
   7 agentów. Naprawiona sprzeczność `ports` + `internal: true`, przez którą kontener był
   `healthy`, ale nieosiągalny z hosta. Docs: notatka w BEZPIECZENSTWO.md.

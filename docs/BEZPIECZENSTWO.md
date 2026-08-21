@@ -57,6 +57,55 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Profile `prod` i `airgap` — pierwsze realne uruchomienie (data: 2026-08-21)
+
+**Zakres.** Oba profile wdrożeniowe były dotąd sprawdzane wyłącznie przez parsowanie YAML-a.
+Uruchomiono je po raz pierwszy (obrazy budowane lokalnie; `.env` z wartościami próbnymi,
+poza repozytorium).
+
+**Profil `prod` — niezmienniki potwierdzone:**
+
+| Niezmiennik | Wynik |
+|---|---|
+| Profil w runtime | ✅ `"profile": "prod"` |
+| API **nie publikuje** portów | ✅ `8000/tcp` (bez mapowania na host) |
+| API nieosiągalne bezpośrednio z hosta | ✅ `HTTP 000` — jedynym wejściem jest Caddy |
+| Token wymagany | ✅ bez tokenu **401**, z tokenem **200** |
+
+Sprzeczności `ports` + `internal` tu **nie ma** i nigdy nie było: API portów nie publikuje,
+bo ruch mostkuje proxy w sieci brzegowej `husarz_edge`. To potwierdza, że wzorzec z `prod`
+był poprawny, a wadliwe były profile bez proxy.
+
+**Profil `airgap` — ta sama wada co w `dev`.** Nakładka deklarowała
+`ports: "127.0.0.1:8000:8000"` i zapowiadała w komentarzu „dostęp do API wyłącznie przez
+loopback HOSTA", ale dziedziczyła sieć `internal: true` z base. Skutek: kontener wstawał
+jako `healthy` z poprawnym profilem w środku (`"profile": "airgap"`), a `curl` z hosta nie
+łączył się w ogóle (`HTTP 000`). **Profil nie spełniał własnej obietnicy.**
+
+Nakładka nadpisuje teraz `internal: false`. Dlaczego to nie osłabia airgapu:
+
+1. Na maszynie faktycznie odciętej **nie ma trasy do WAN** — nie ma czego blokować.
+2. Profil `airgap` w konfiguracji wymusza przy STARCIE: deny-all egress, pustą allowlistę,
+   brak sieci w sandboxie i wyłącznie lokalne endpointy modeli (walidacja krzyżowa schematu).
+   To bramka aplikacyjna, niezależna od sieci Dockera.
+3. Ruch narzędzi przechodzi dodatkowo przez pinowanie IP (ADR-0020).
+
+`prod` zostaje na sieci `internal` z base — tam sprzeczności nie ma.
+
+**Luka we WŁASNYM teście.** Niezmiennik dodany dzień wcześniej
+(`test_published_ports_are_not_paired_with_internal_only_network`) sprawdzał **wyłącznie
+główny `docker-compose.yaml`** i dlatego przegapił nakładkę `airgap`. Dołożono
+`test_overlay_profiles_have_no_port_contradiction`, który scala nakładki z base — bo
+`internal` bywa nadpisywane właśnie tam.
+
+**Znalezione przy okazji — tag obrazu kłamał o wersji.** `docker-compose.base.yml` przypinał
+`husarz-api:0.1.0`, gdy projekt był w **0.14.0**. Compose sam buduje ten obraz i nadaje mu
+etykietę, więc wdrożony artefakt niósł nieprawdziwą wersję. Tag jest teraz parametrem
+(`HUSARZ_IMAGE_TAG`) z domyślną wartością sparowaną z `husarz.__version__`, a
+`test_compose_image_tag_matches_project_version` pilnuje, żeby nie rozjechał się przy
+kolejnym wydaniu.
+
+
 ### Profil `dev` w compose — kontener był NIEOSIĄGALNY (data: 2026-08-21)
 
 **Objaw.** `docker compose up -d` kończył się kontenerem w stanie **`healthy`**, ale

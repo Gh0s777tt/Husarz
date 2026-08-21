@@ -60,7 +60,34 @@ def test_published_ports_are_not_paired_with_internal_only_network() -> None:
     W profilu prod sprzeczności nie ma, bo ruch mostkuje Caddy w sieci `husarz_edge`
     (nie-internal), a samo API pozostaje wewnętrzne i portów nie publikuje.
     """
-    compose = _load(_ROOT / "docker-compose.yaml")
+    _sprawdz_brak_sprzecznosci(_load(_ROOT / "docker-compose.yaml"))
+
+
+def test_overlay_profiles_have_no_port_contradiction() -> None:
+    """Ta sama pułapka była w nakładce `airgap` — i pierwsza wersja testu jej NIE łapała,
+    bo sprawdzała wyłącznie główny plik. Nakładki scalamy z base, bo `internal` bywa
+    nadpisywane właśnie tam."""
+    base = _load(_COMPOSE / "docker-compose.base.yml")
+    for nakladka in ("docker-compose.prod.yml", "docker-compose.airgap.yml"):
+        scalone = _scal(base, _load(_COMPOSE / nakladka))
+        _sprawdz_brak_sprzecznosci(scalone, zrodlo=nakladka)
+
+
+def _scal(base: dict, nakladka: dict) -> dict:
+    """Płytkie scalenie sekcji `services`/`networks` — tak jak robi to compose."""
+    wynik = {k: dict(v) if isinstance(v, dict) else v for k, v in base.items()}
+    for sekcja in ("services", "networks"):
+        scalona = dict(wynik.get(sekcja) or {})
+        for nazwa, spec in (nakladka.get(sekcja) or {}).items():
+            biezace = dict(scalona.get(nazwa) or {})
+            biezace.update(spec or {})
+            scalona[nazwa] = biezace
+        wynik[sekcja] = scalona
+    return wynik
+
+
+def _sprawdz_brak_sprzecznosci(compose: dict, zrodlo: str = "docker-compose.yaml") -> None:
+    """Usługa publikująca porty nie może być WYŁĄCZNIE w sieci `internal`."""
     siec_wewnetrzna = {
         nazwa
         for nazwa, spec in (compose.get("networks") or {}).items()
@@ -71,9 +98,9 @@ def test_published_ports_are_not_paired_with_internal_only_network() -> None:
             continue
         sieci = set(usluga.get("networks") or [])
         assert not (sieci and sieci <= siec_wewnetrzna), (
-            f"usługa '{nazwa_uslugi}' publikuje porty, ale jest WYŁĄCZNIE w sieci internal "
-            f"({sorted(sieci)}) — Docker po cichu wyłączy publikowanie i kontener będzie "
-            "nieosiągalny z hosta"
+            f"{zrodlo}: usługa '{nazwa_uslugi}' publikuje porty, ale jest WYŁĄCZNIE w sieci "
+            f"internal ({sorted(sieci)}) — Docker po cichu wyłączy publikowanie i kontener "
+            "będzie nieosiągalny z hosta"
         )
 
 
@@ -258,3 +285,18 @@ def test_k8s_deployment_has_no_allow_insecure() -> None:
     # Profil prod w k8s nigdy nie może obchodzić uwierzytelniania.
     container = _load(_K8S / "deployment.yaml")["spec"]["template"]["spec"]["containers"][0]
     assert "--allow-insecure" not in container["args"]
+
+
+def test_compose_image_tag_matches_project_version() -> None:
+    """Domyślny tag obrazu w compose MUSI odpowiadać wersji projektu.
+
+    Plik przypinał `husarz-api:0.1.0`, gdy projekt był już w 0.14.0 — compose buduje obraz
+    i nadaje mu tę etykietę, więc wdrożony artefakt kłamał o wersji. Bez tego testu rozjazd
+    wraca przy każdym wydaniu, bo nikt nie pamięta o pliku wdrożeniowym.
+    """
+    from husarz import __version__
+
+    tresc = (_COMPOSE / "docker-compose.base.yml").read_text(encoding="utf-8")
+    assert (
+        f"husarz-api:${{HUSARZ_IMAGE_TAG:-{__version__}}}" in tresc
+    ), f"domyślny tag obrazu w docker-compose.base.yml nie zgadza się z wersją {__version__}"

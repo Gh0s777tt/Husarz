@@ -18,7 +18,12 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: husarz-api:0.1.0
+    # Tag obrazu ODJECHAŁ: plik przypinał 0.1.0, gdy projekt był już w 0.14.0 — obraz
+    # budowany przez compose dostawał więc etykietę kłamiącą o wersji. Wartość domyślna
+    # jest teraz sparowana z `husarz.__version__`, a test
+    # `test_compose_image_tag_matches_project_version` pilnuje, żeby nie rozjechała się
+    # przy kolejnym wydaniu. Nadpisanie: HUSARZ_IMAGE_TAG w .env.
+    image: husarz-api:${HUSARZ_IMAGE_TAG:-0.14.0}
     # Hardening kontenera — lustro securityContext z k8s (non-root, rootfs RO, brak
     # eskalacji, zrzut capabilities). Zapis tylko do woluminów audit/data i tmpfs /tmp.
     user: "1000:1000"

@@ -30,3 +30,24 @@ services:
     pull_policy: never
   vault:
     pull_policy: never
+
+# ----------------------------------------------------------------------------
+# Sieć: nadpisanie `internal` z base — INACZEJ PROFIL NIE DZIAŁA.
+# ----------------------------------------------------------------------------
+# Docker CICHO wyłącza publikowanie portów dla sieci `internal: true`. Deklaracja
+# `ports: "127.0.0.1:8000:8000"` wyżej była wtedy MARTWA: kontener wstawał jako `healthy`,
+# ale `curl http://127.0.0.1:8000/api/health` z hosta nie łączył się w ogóle (Docker
+# raportował „8000/tcp" zamiast „127.0.0.1:8000->8000/tcp"). Profil obiecywał dostęp
+# przez loopback hosta i tej obietnicy nie spełniał.
+#
+# Dlaczego to NIE jest osłabienie airgapu:
+#   1. Na maszynie faktycznie odciętej nie ma trasy do WAN — nie ma czego blokować.
+#   2. Profil `airgap` w configu wymusza przy STARCIE: deny-all egress, pustą allowlistę,
+#      brak sieci w sandboxie i wyłącznie lokalne endpointy modeli (walidacja krzyżowa
+#      w husarz.config.schema). To bramka aplikacyjna, niezależna od sieci Dockera.
+#   3. Ruch wychodzący narzędzi przechodzi dodatkowo przez pinowanie IP (ADR-0020).
+# Profil `prod` zostaje na sieci `internal` z base — tam API portów NIE publikuje,
+# bo jedynym wejściem jest Caddy w sieci brzegowej, więc sprzeczności nie ma.
+networks:
+  husarz_internal:
+    internal: false
