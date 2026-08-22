@@ -81,6 +81,17 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   nadpisaniu runtime, martwy parametr `secret_store`, nieusuwalne połączenie z ukośnikiem
   w nazwie, brak `principal` w audycie, mutacja pamięci przed zapisem, brak `fsync`.
   Plus 41 testów tam, gdzie było zero. Szczegóły: `docs/BEZPIECZENSTWO.md`, „Etap 17d".
+- ✅ **Trzy wady z drugiego przeglądu** (Etap 17e): przebudowa serwisu Git kasująca połączenia,
+  magazyn połączeń z tą samą wadą kolejności co magazyn sekretów, oraz sekret trwały przy
+  ulotnym magazynie połączeń (gwarantowana sierota). Szczegóły: `docs/BEZPIECZENSTWO.md`.
+- ⬜ **Pozostałe zgłoszenia z drugiego przeglądu** (faza weryfikacji nie zdążyła się wykonać;
+  z szesnastu sprawdzono trzy): wyłączenie magazynu zamyka tylko ZAPIS — istniejące tokeny
+  nadal się rozwiązują i uwierzytelniają Gita; bramka czyta wyłącznie `enabled`, więc zmiana
+  `key_ref`/`path` w runtime jest cicho ignorowana; `ca_bundle` wraca dosłownie w odpowiedzi
+  400 (druga droga echa obok bramki 422); panel wyświetla błędy 422 jako `[object Object]`;
+  `POST /api/git/connections` jest poza zamkiem `_mutex_polaczen`; bramka magazynu sprawdzana
+  poza zamkiem (żądanie w locie zapisuje token po wyłączeniu); endpointy konfiguracji odsyłają
+  bezwzględną ścieżkę operatora; brak blokady pliku przy dwóch procesach na tym samym magazynie.
 - ⬜ **Magazyn sekretów — pozostałe** (mniejsza waga): brak limitu liczby wpisów, brak rotacji
   i sygnalizacji wygasania tokenów, niezweryfikowane zachowanie na systemach plików bez
   atomowego `rename` (część udziałów sieciowych).

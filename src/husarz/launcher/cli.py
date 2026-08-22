@@ -376,9 +376,10 @@ def _cmd_up(args: argparse.Namespace) -> int:
         git_service=git_service,
         # Fabryka: po `POST /api/config/runtime` serwis Git jest przebudowywany z NOWĄ
         # polityką egress, ale z tym samym magazynem połączeń (bez utraty danych).
-        git_service_factory=lambda cfg: _build_git(
-            cfg, store=git_service.store if git_service is not None else None
-        ),
+        # Magazyn przychodzi OD API (serwis aktualny), a nie z domknięcia na `git_service`
+        # z chwili startu — to domknięcie gubiło połączenia, gdy Git był przy starcie
+        # wyłączony i włączono go dopiero nadpisaniem runtime.
+        git_service_factory=lambda cfg, store: _build_git(cfg, store=store),
         plugin_service=plugin_service,
         # Fabryka: przy nadpisaniu runtime serwis wtyczek (polityka konektorów: allow_call/
         # call_allowlist/enabled/egress) jest przebudowywany z NOWEGO configu — jak router.

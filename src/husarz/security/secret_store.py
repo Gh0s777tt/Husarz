@@ -37,6 +37,7 @@ Plik + klucz z dostawcy działa wszędzie tak samo i pozostaje audytowalny.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import re
@@ -283,7 +284,12 @@ class EncryptedFileSecretStore:
             os.replace(tmp, self._path)
             self._fsync_katalogu()
         except OSError as exc:
-            tmp.unlink(missing_ok=True)
+            # Sprzątanie nie może SAMO rzucić: `unlink(missing_ok=True)` tłumi wyłącznie
+            # FileNotFoundError, a gdy katalog nadrzędny nie istnieje (albo jest plikiem),
+            # leci NotADirectoryError — i wymykał się tej obsłudze, przesłaniając
+            # właściwą przyczynę awarii.
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
             raise SecretStoreError(
                 f"Nie można zapisać magazynu sekretów do {self._path}: {exc}"
             ) from exc

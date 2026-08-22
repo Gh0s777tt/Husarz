@@ -234,7 +234,7 @@ def create_app(
     rbac: Rbac | None = None,
     accounts: AccountService | None = None,
     git_service: GitService | None = None,
-    git_service_factory: Callable[[HusarzConfig], GitService | None] | None = None,
+    git_service_factory: Callable[[HusarzConfig, Any], GitService | None] | None = None,
     plugin_service: PluginService | None = None,
     plugin_service_factory: Callable[[HusarzConfig], PluginService | None] | None = None,
     chat_model: str | None = None,
@@ -326,15 +326,27 @@ def create_app(
     role = api_role if api_role is not None else config.security.auth.api_role
     authz = rbac if rbac is not None else Rbac()
 
+    # Ostatnio zbudowany serwis Git — źródło magazynu połączeń przy przebudowie.
+    # Jednoelementowa lista, a nie zmienna: `_active_git` jest domknięciem definiowanym
+    # PRZED `state`, więc musi mieć uchwyt, który da się podmienić w miejscu.
+    _ostatni_git: list[GitService | None] = [git_service]
+
     def _active_git(cfg: HusarzConfig) -> GitService | None:
         # Serwis Git PRZEBUDOWANY z bieżącego configu (jak router i wtyczki) — inaczej
         # nadpisanie runtime nie propagowałoby polityki egress na JEDYNĄ ścieżkę wychodzącą
         # niosącą token z prawem ZAPISU do repozytoriów (fail-open kill-switch: przełączenie
-        # na profil `airgap` nie blokowałoby Gita aż do restartu). Magazyn połączeń jest
-        # PRZEKAZYWANY dalej, więc przebudowa nie gubi połączeń dodanych przez API.
+        # na profil `airgap` nie blokowałoby Gita aż do restartu).
+        #
+        # Magazyn połączeń przekazujemy fabryce JAWNIE i bierzemy go z serwisu AKTUALNEGO,
+        # nie z tego przekazanego przy starcie. Wcześniej fabryka launchera domykała na
+        # `git_service` z chwili uruchomienia; gdy Git był wtedy WYŁĄCZONY (domyślnie jest),
+        # domknięta wartość zostawała `None`, więc każda kolejna przebudowa tworzyła PUSTY
+        # magazyn i kasowała połączenia dodane przez API. Przy włączonym magazynie sekretów
+        # token zostawał wtedy na dysku jako sekret osierocony. Sprawdzone i odtworzone.
         if git_service_factory is None:
             return git_service
-        return git_service_factory(cfg)
+        biezacy = _ostatni_git[0]
+        return git_service_factory(cfg, biezacy.store if biezacy is not None else None)
 
     def _active_plugins(cfg: HusarzConfig) -> PluginService | None:
         # Serwis wtyczek PRZEBUDOWANY z bieżącego configu (jak router) — inaczej nadpisanie
@@ -389,6 +401,7 @@ def create_app(
         return chat_model or cfg.models.chat or cfg.models.default
 
     initial_router, initial_orch, initial_plugins, initial_loop, initial_git = _build_stack(config)
+    _ostatni_git[0] = initial_git
     state: dict[str, Any] = {
         "config": config,
         "config_dir": config_dir,
@@ -760,6 +773,7 @@ def create_app(
             state["orchestrator"] = new_orch
             state["plugin_service"] = new_plugins
             state["git_service"] = new_git
+            _ostatni_git[0] = new_git
             old_loop = state["tool_loop"]
             state["tool_loop"] = new_loop
         # Zamknij STARĄ pętlę (zwalnia np. połączenie sqlite RAG) PO atomowej podmianie —
@@ -1026,6 +1040,21 @@ def create_app(
         w magazynie osierocony sekret za każdym razem, gdy nazwa jest zajęta.
         """
         store = _require_secret_store()
+        svc_wstepny = _require_git()
+        # Trwałość obu magazynów MUSI być zgodna. Sekret idzie zawsze na dysk, więc przy
+        # ULOTNYM magazynie połączeń każdy restart zostawiałby sekret osierocony: połączenie
+        # znika, token zostaje. Odmawiamy z instrukcją, zamiast po cichu produkować śmieci,
+        # o których operator dowie się dopiero po restarcie.
+        if not svc_wstepny.store.persistent:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Magazyn połączeń jest ulotny (git.connections_path: null), a sekret "
+                    "zapisujemy na dysk — po restarcie zostałby token bez połączenia. "
+                    "Ustaw git.connections_path (np. ./data/git-connections.json) albo dodaj "
+                    "połączenie przez referencję do sekretu, którym zarządzasz sam."
+                ),
+            )
         # PRZED zapisem sekretu: błędna ścieżka CA po zapisie zostawiłaby sekret osierocony.
         _sprawdz_ca(request.ca_bundle)
         token = request.token.strip()
@@ -1107,10 +1136,15 @@ def create_app(
             # Referencję odczytujemy PRZED usunięciem — potem połączenia już nie ma.
             istniejace = svc.store.get(name)
             svc.remove(name)
-            # Sekret kasujemy TYLKO wtedy, gdy należał do tego połączenia i pochodził
-            # z naszego magazynu. Referencji zewnętrznej (env:/vault:) nie ruszamy — nie jest
-            # nasza, a operator mógł jej użyć także gdzie indziej.
-            nasz_sekret = istniejace is not None and istniejace.token_ref == oczekiwana
+            # Sekret kasujemy, gdy należy do NASZEJ przestrzeni nazw (`husarz:git/<nazwa>`).
+            # Dwa przypadki, oba zamierzone:
+            #   1. połączenie istniało i wskazywało tę referencję — zwykłe sprzątanie,
+            #   2. połączenia JUŻ NIE MA, a sekret został — to sierota, np. po restarcie
+            #      z ulotnym magazynem połączeń. Bez tej gałęzi taki token był NIE DO
+            #      USUNIĘCIA przez API, a `DELETE` zwracał `ok: true`, niczego nie kasując.
+            # Referencji ZEWNĘTRZNEJ (env:/vault:) nie ruszamy nigdy — nie jest nasza,
+            # a operator mógł jej użyć także w innym miejscu.
+            nasz_sekret = istniejace is None or istniejace.token_ref == oczekiwana
             if secret_store is not None and nasz_sekret:
                 sekret_usuniety = secret_store.delete(f"git/{name}")
         audit_log.record(
@@ -1119,7 +1153,15 @@ def create_app(
             {"name": name[:64], "secret_removed": sekret_usuniety},
             principal=_principal_ref(principal),
         )
-        return {"ok": True}
+        # Odpowiedź niesie SKUTEK, nie samo „przyjęto": operator musi wiedzieć, czy
+        # połączenie w ogóle istniało i czy sekret faktycznie zniknął. Wcześniej
+        # `DELETE` zwracał `ok: true` także wtedy, gdy nie usunął niczego — a osierocony
+        # token zostawał na dysku.
+        return {
+            "ok": True,
+            "removed": istniejace is not None,
+            "secret_removed": sekret_usuniety,
+        }
 
     @app.get(
         "/api/git/connections/{name}/repos",

@@ -5,6 +5,36 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (Etap 17e — trzy wady z drugiego przeglądu adwersaryjnego)
+
+Przegląd objął commity 1bb2191 i 5277d49. Szesnaście zgłoszeń; trzy o największej wadze
+sprawdzono osobno i **wszystkie trzy potwierdzono uruchomieniem**. Dwie przetrwały poprzednie
+przeglądy, bo dotyczyły magazynu POŁĄCZEŃ, a uwagę skupiał magazyn SEKRETÓW.
+
+- **Przebudowa serwisu Git kasowała połączenia dodane przez API.** Fabryka w launcherze
+  domykała na `git_service` z chwili STARTU; gdy Git był wtedy wyłączony (domyślnie jest),
+  domknięta wartość zostawała `None`, więc każde nadpisanie runtime budowało PUSTY magazyn.
+  Token zostawał wtedy na dysku jako sierota, a `DELETE` zwracał `ok: true`, nie usuwając
+  niczego. Komentarz w kodzie twierdził, że magazyn jest przekazywany dalej — było to prawdą
+  tylko dla ścieżki, w której Git działał od startu. **Zmiana kontraktu:**
+  `git_service_factory` przyjmuje teraz drugi argument (bieżący magazyn połączeń).
+- **`FileGitConnectionStore` miał tę samą wadę, którą domknięto w magazynie sekretów** —
+  mutację pamięci przed zapisem — plus wypuszczał surowy `OSError`. Kreator łapie
+  `GitConnectionError`, więc awaria zapisu dawała 500 i POMIJAŁA sprzątanie świeżo zapisanego
+  sekretu. Wniosek: gdy poprawka dotyczy WZORCA, trzeba przeszukać repo pod jego kątem,
+  a nie poprzestać na module, w którym wadę zgłoszono.
+- **Sekret trwały przy ulotnym magazynie połączeń = gwarantowana sierota.** Przy domyślnym
+  `git.connections_path: null` kreator produkował przy każdym restarcie token bez połączenia,
+  nie do usunięcia przez API. Kreator odmawia teraz (409) z instrukcją, a `DELETE` sprząta
+  sierotę, gdy nazwa należy do przestrzeni `husarz:git/`. Referencji zewnętrznej nie rusza.
+- Odpowiedź `DELETE /api/git/connections/{name}` niesie teraz SKUTEK (`removed`,
+  `secret_removed`), a nie samo `ok: true`, które przy sierocie było nieprawdziwe.
+- `GitConnectionStore.persistent` — trwałość deklarowana jawnie, nie zgadywana po typie.
+- `tmp.unlink(missing_ok=True)` w blokach sprzątających obu magazynów sam potrafił rzucić
+  `NotADirectoryError` i przesłonić właściwą przyczynę awarii.
+- Testy: +10. Nośność: 5 mutacji, z czego **jedna ujawniła wadę w moim teście** (awaryjne
+  przejście na ten sam plik maskowało utratę połączeń) — przepisany na magazyn ulotny.
+
 ### Poprawione (Etap 17d — domknięcia odcięte przez limit weryfikacji przeglądu)
 
 Sześć zgłoszeń, których przegląd nie zweryfikował z powodu capu. Każde sprawdzono osobno —

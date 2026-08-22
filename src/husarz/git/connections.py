@@ -7,6 +7,7 @@ zamkiem — bezpieczny przy współbieżności (endpointy FastAPI w puli wątkó
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
@@ -38,6 +39,18 @@ class GitConnectionStore(Protocol):
         """Zwraca wszystkie połączenia (kopia)."""
         ...
 
+    @property
+    def persistent(self) -> bool:
+        """Czy połączenia przeżywają restart procesu.
+
+        Pole istnieje, bo trwałość magazynu połączeń MUSI być zgodna z trwałością
+        magazynu sekretów. Sekret jest zawsze zapisywany na dysk, więc kreator przy
+        ULOTNYM magazynie połączeń tworzyłby przy każdym restarcie sekret osierocony:
+        połączenie znika, token zostaje. Wołający sprawdza to jawnie zamiast zgadywać
+        po typie obiektu.
+        """
+        ...
+
 
 class InMemoryGitConnectionStore:
     """Magazyn połączeń w pamięci (domyślny; dev/testy)."""
@@ -61,6 +74,10 @@ class InMemoryGitConnectionStore:
 
     def list_connections(self) -> list[GitConnection]:  # noqa: D102
         return list(self._by_name.values())
+
+    @property
+    def persistent(self) -> bool:  # noqa: D102 - patrz Protocol
+        return False
 
 
 class FileGitConnectionStore(InMemoryGitConnectionStore):
@@ -94,20 +111,57 @@ class FileGitConnectionStore(InMemoryGitConnectionStore):
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
             raise GitConnectionError(f"Nie można wczytać połączeń z {self._path}: {exc}") from exc
 
-    def _persist(self) -> None:
-        # Migawka pod zamkiem + zapis atomowy do unikatowego pliku tymczasowego.
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"connections": [asdict(c) for c in self._by_name.values()]}
+    @property
+    def persistent(self) -> bool:  # noqa: D102 - patrz Protocol
+        return True
+
+    def _persist(self, connections: dict[str, GitConnection]) -> None:
+        """Zapisuje PODANY zestaw połączeń atomowo.
+
+        Świadomie parametr, a nie ``self._by_name``: stan w pamięci podmieniamy dopiero PO
+        udanym zapisie. Odwrotna kolejność (mutacja → zapis) zostawiała magazyn rozjechany —
+        proces widział połączenie, którego w pliku nie było, więc znikało po restarcie.
+        To ta sama wada, którą domknięto w magazynie sekretów; tutaj została przeoczona.
+
+        ``OSError`` tłumaczymy na :class:`GitConnectionError`, bo wołający (kreator w API)
+        łapie właśnie ten typ. Surowy ``OSError`` wymykał się jego obsłudze, więc awaria
+        zapisu dawała 500 i — co gorsza — POMIJAŁA sprzątanie świeżo zapisanego sekretu,
+        zostawiając go osieroconym.
+
+        Args:
+            connections: Zestaw do utrwalenia.
+
+        Raises:
+            GitConnectionError: Gdy zapis się nie powiedzie.
+        """
+        payload = {"connections": [asdict(c) for c in connections.values()]}
         tmp = self._path.with_name(f"{self._path.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self._path)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, self._path)
+        except OSError as exc:
+            # Sprzątanie nie może SAMO rzucić: `unlink(missing_ok=True)` tłumi wyłącznie
+            # FileNotFoundError, a gdy katalog nadrzędny nie istnieje (albo jest plikiem),
+            # leci NotADirectoryError — i wymykał się tej obsłudze, przesłaniając
+            # właściwą przyczynę awarii.
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+            raise GitConnectionError(f"Nie można zapisać połączeń do {self._path}: {exc}") from exc
 
     def add(self, conn: GitConnection) -> None:  # noqa: D102
-        with self._file_lock:  # cała para mutacja+zapis atomowa (inny zamek niż bazowy)
-            super().add(conn)
-            self._persist()
+        with self._file_lock:  # cała para zapis+podmiana atomowa (inny zamek niż bazowy)
+            if conn.name in self._by_name:
+                raise GitConnectionError(f"Połączenie '{conn.name}' już istnieje.")
+            kandydat = dict(self._by_name)
+            kandydat[conn.name] = conn
+            self._persist(kandydat)
+            self._by_name = kandydat
 
     def remove(self, name: str) -> None:  # noqa: D102
         with self._file_lock:
-            super().remove(name)
-            self._persist()
+            if name not in self._by_name:
+                return
+            kandydat = {k: v for k, v in self._by_name.items() if k != name}
+            self._persist(kandydat)
+            self._by_name = kandydat

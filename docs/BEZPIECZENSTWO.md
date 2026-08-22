@@ -1608,3 +1608,91 @@ kreator działa natychmiast; nazwa z ukośnikiem → 422 zamiast nieusuwalnego p
 zapisane w ROADMAP: brak limitu liczby wpisów w magazynie, brak rotacji i sygnalizacji
 wygasania tokenów, oraz nieprzetestowane zachowanie na systemach plików bez atomowego
 `rename` (część udziałów sieciowych).
+
+### Etap 17e — trzy wady z drugiego przeglądu (data: 2026-08-23)
+
+Drugi adwersaryjny przegląd objął commity 1bb2191 (własne CA, sprostowania) i 5277d49
+(domknięcia). Faza szukania dała szesnaście zgłoszeń; trzy o największej wadze sprawdzono
+osobno i **wszystkie trzy potwierdzono uruchomieniem**. Dwie z nich to wady, które przetrwały
+poprzednie dwa przeglądy — bo dotyczyły magazynu POŁĄCZEŃ, podczas gdy uwagę skupiał magazyn
+SEKRETÓW.
+
+#### 1. Przebudowa serwisu Git kasowała połączenia, a token zostawał na dysku
+
+Fabryka serwisu Git w launcherze domykała na `git_service` **z chwili startu**. Gdy Git był
+wtedy wyłączony — a domyślnie jest — domknięta wartość zostawała `None`, więc każda kolejna
+przebudowa po `POST /api/config/runtime` budowała PUSTY magazyn i kasowała połączenia dodane
+przez API. Przy włączonym magazynie sekretów token zostawał wtedy na dysku jako sierota,
+a `DELETE` zwracał `ok: true`, nie usuwając niczego.
+
+Komentarz w `_active_git` twierdził przy tym, że „magazyn połączeń jest przekazywany dalej,
+więc przebudowa nie gubi połączeń". Było to prawdą tylko dla ścieżki, w której Git działał od
+startu — kolejna rozbieżność kod↔dokumentacja.
+
+**Naprawa.** Fabryka przyjmuje magazyn JAWNIE, a API podaje jej magazyn serwisu AKTUALNEGO
+(uchwyt aktualizowany po każdej udanej budowie stosu). Kontrakt `git_service_factory` zmienił
+się z jednoargumentowego na dwuargumentowy.
+
+#### 2. Magazyn połączeń miał tę samą wadę, którą domknięto w magazynie sekretów
+
+`FileGitConnectionStore` mutował słownik w pamięci PRZED zapisem pliku i wypuszczał surowy
+`OSError`. Skutek był podwójny: stan w pamięci rozjeżdżał się z dyskiem (połączenie znikało
+po restarcie), a kreator — który łapie `GitConnectionError` — nie łapał `OSError`, więc awaria
+zapisu dawała 500 i **pomijała sprzątanie świeżo zapisanego sekretu**, zostawiając go
+osieroconym.
+
+To ta sama poprawka, którą wykonano w Etapie 17d dla sekretów. Wniosek na przyszłość: gdy
+poprawka dotyczy wzorca, a nie pojedynczego miejsca, trzeba przeszukać repozytorium pod kątem
+tego wzorca — nie poprzestawać na module, w którym wadę zgłoszono.
+
+Przy okazji domknięto pomniejszą wadę w OBU magazynach: `tmp.unlink(missing_ok=True)` w bloku
+sprzątającym sam potrafił rzucić `NotADirectoryError` (gdy katalog nadrzędny nie istnieje albo
+jest plikiem) i przesłaniał wtedy właściwą przyczynę awarii.
+
+#### 3. Sekret trwały przy ulotnym magazynie połączeń = gwarantowana sierota
+
+Sekret jest zawsze zapisywany na dysk, a magazyn połączeń przy domyślnym
+`git.connections_path: null` jest ULOTNY. Kreator produkował więc przy każdym restarcie stan,
+w którym połączenie znika, a token zostaje — i był on **nie do usunięcia przez API**, bo
+`DELETE` kasował sekret wyłącznie wtedy, gdy połączenie jeszcze istniało.
+
+**Naprawa, dwutorowa.**
+
+Zapobieganie: kreator odmawia (409) przy ulotnym magazynie połączeń, z komunikatem wskazującym
+`git.connections_path`. Zgodność trwałości obu magazynów jest warunkiem sensowności kreatora,
+a nie szczegółem — milczące produkowanie śmieci, o których operator dowie się po restarcie,
+byłoby dokładnie tą klasą błędu, którą ten dokument opisuje od Etapu 17c.
+
+Sprzątanie: `DELETE` usuwa sekret także wtedy, gdy połączenia JUŻ NIE MA — o ile nazwa należy
+do naszej przestrzeni (`husarz:git/<nazwa>`). Referencji zewnętrznej (`env:`/`vault:`) nie
+ruszamy nigdy. Odpowiedź niesie teraz SKUTEK (`removed`, `secret_removed`), a nie samo
+`ok: true`, które przy sierocie było odpowiedzią nieprawdziwą.
+
+Trwałość magazynu połączeń jest deklarowana jawnie (`GitConnectionStore.persistent`), a nie
+zgadywana po typie obiektu.
+
+| Niezmiennik | Test |
+|---|---|
+| Przebudowa nie gubi połączeń, gdy Git był przy starcie wyłączony | `test_przebudowa_nie_gubi_polaczen_gdy_git_byl_wylaczony_przy_starcie` |
+| Nieudany zapis połączeń nie rozjeżdża pamięci z dyskiem | `test_nieudany_zapis_polaczen_nie_rozjezdza_pamieci_z_dyskiem` |
+| Awaria zapisu daje błąd domenowy, nie surowy `OSError` | `test_awaria_zapisu_daje_blad_domenowy_a_nie_surowy_oserror` |
+| Kreator odmawia przy ulotnym magazynie połączeń | `test_kreator_odmawia_przy_ulotnym_magazynie_polaczen` |
+| Kreator działa przy trwałym (nośność) | `test_kreator_dziala_przy_trwalym_magazynie` |
+| Osierocony sekret da się usunąć przez API | `test_osierocony_sekret_da_sie_usunac_przez_api` |
+| Odpowiedź `DELETE` niesie skutek, nie samo „przyjęto" | `test_odpowiedz_delete_niesie_skutek_a_nie_samo_przyjeto` |
+| Referencja zewnętrzna nadal nietknięta | `test_referencja_zewnetrzna_nadal_nietkniete` |
+| Trwałość deklarowana jawnie | `test_trwalosc_magazynow_jest_deklarowana_jawnie` |
+
+**Nośność — i znów wada w moim własnym teście.** Z pięciu mutacji jedna nie zaczerwieniła
+zestawu: test przebudowy miał awaryjne przejście na ten sam PLIK, gdy fabryka dostawała
+`None`, więc połączenia wracały z dysku i test przechodził także BEZ poprawki. Przepisany na
+magazyn ULOTNY, gdzie utrata jest widoczna wprost. To trzeci raz w tym etapie, gdy kontrola
+nośności znalazła wadę nie w kodzie, lecz w teście, który miał go chronić.
+
+**Czego ten przegląd NIE objął.** Faza weryfikacji nie zdążyła się wykonać przed zakończeniem
+poprzedniej sesji; z szesnastu zgłoszeń sprawdzono trzy o największej wadze. Pozostałe
+trzynaście zapisano w ROADMAP — wśród nich: wyłączenie magazynu zamyka tylko ZAPIS (istniejące
+tokeny nadal się rozwiązują i uwierzytelniają Gita), bramka czyta wyłącznie `enabled`
+(zmiana `key_ref`/`path` w runtime jest cicho ignorowana), `ca_bundle` wraca dosłownie
+w odpowiedzi 400, panel wyświetla błędy 422 jako `[object Object]`, oraz brak blokady pliku
+przy dwóch procesach na tym samym magazynie.

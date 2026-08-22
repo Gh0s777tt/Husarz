@@ -62,15 +62,20 @@ def test_git_service_rebuilt_on_runtime_override(repo_config_dir: Path) -> None:
     )
     built: list[Any] = []
 
-    def factory(cfg: Any) -> Any:
+    przekazane_magazyny: list[Any] = []
+
+    def factory(cfg: Any, store: Any) -> Any:
+        # Magazyn przychodzi OD API (serwis AKTUALNY), a nie z domknięcia fabryki na
+        # serwis z chwili startu. To domknięcie gubiło połączenia, gdy Git był przy
+        # starcie wyłączony i włączono go dopiero nadpisaniem runtime.
+        przekazane_magazyny.append(store)
         service = build_git_service(
             cfg.git,
             cfg.security,
             secrets=FakeSecrets(),
             transport=FakeGitTransport(),
             resolve=_fake_resolve,
-            # Magazyn z POPRZEDNIEJ instancji — przebudowa nie może gubić połączeń.
-            store=built[-1].store if built else None,
+            store=store,
         )
         built.append(service)
         return service

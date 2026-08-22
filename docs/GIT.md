@@ -64,6 +64,20 @@ referencja, nigdy materiał.
 Wymaga włączonego magazynu sekretów. Husarz zapisuje token **zaszyfrowany** i sam tworzy
 referencję `husarz:git/<nazwa-połączenia>`.
 
+!!! warning "Kreator wymaga TRWAŁEGO magazynu połączeń"
+    Sekret zapisujemy zawsze na dysk, a magazyn połączeń przy domyślnym
+    `git.connections_path: null` jest **ulotny**. Po restarcie zostałby token bez połączenia —
+    sierota, o której dowiedziałbyś się dopiero wtedy. Kreator odmawia w takiej konfiguracji
+    (HTTP 409) i wskazuje, co ustawić:
+
+    ```yaml
+    # config/git.yaml
+    connections_path: ./data/git-connections.json
+    ```
+
+    Droga B (referencja do sekretu, którym zarządzasz sam) nie ma tego wymogu — tam nic nie
+    zapisujemy.
+
 ```yaml
 # config/security.yaml
 secret_store:
@@ -103,9 +117,21 @@ Co się dzieje z tokenem — i czego NIE robi Husarz:
 | odpowiedź HTTP | referencja; pola z tokenem nie ma w modelu odpowiedzi |
 | plik konfiguracji | nic |
 
-Usunięcie połączenia kasuje też jego sekret — ale **tylko wtedy**, gdy połączenie faktycznie
-używało referencji `husarz:git/<ta-sama-nazwa>`. Sekret wskazany przez `env:` czy `vault:` nie
-jest własnością Husarza i nie jest ruszany.
+Usunięcie połączenia kasuje też jego sekret — o ile nazwa należy do przestrzeni
+`husarz:git/<nazwa>`. Sekret wskazany przez `env:` czy `vault:` nie jest własnością Husarza
+i nie jest ruszany nigdy.
+
+Dotyczy to **także sierot**: jeżeli połączenia już nie ma (np. przetrwało restart tylko po
+stronie sekretów), `DELETE /api/git/connections/<nazwa>` i tak usunie odpowiadający mu wpis
+z magazynu. Bez tego osierocony token byłby nie do usunięcia przez API.
+
+Odpowiedź niesie SKUTEK, a nie samo potwierdzenie przyjęcia:
+
+```json
+{"ok": true, "removed": true, "secret_removed": true}
+```
+
+`removed` mówi, czy połączenie istniało; `secret_removed` — czy sekret faktycznie zniknął.
 
 ### B. Podaj referencję do sekretu, którym już zarządzasz
 
@@ -190,7 +216,8 @@ certyfikatów; katalog (`capath`) to inny mechanizm i nie jest obsługiwany.
 
 Błędy: nieznane połączenie → `404`; egress zablokowany → `403`; token/dostawca
 odrzucił → `502`; kolizja nazwy połączenia → `409`; kreator przy wyłączonym magazynie
-→ `409` z instrukcją, co włączyć; nieczytelny albo nieistniejący plik `ca_bundle` → `400`.
+→ `409` z instrukcją, co włączyć; kreator przy ULOTNYM magazynie połączeń → `409`;
+nieczytelny albo nieistniejący plik `ca_bundle` → `400`.
 
 ## Konsola
 
