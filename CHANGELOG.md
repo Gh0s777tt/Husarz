@@ -5,6 +5,33 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (Etap 17f — dokończona weryfikacja drugiego przeglądu)
+
+Faza weryfikacji potwierdziła pięć zgłoszeń; dwa dotyczyły wad naprawionych już w `cab4d12`.
+Bilans: z czternastu zgłoszeń sprawdzonych osobno **czternaście okazało się realnych**.
+
+- **SPROSTOWANIE — regresja z `cab4d12`: sprzątanie sierot niszczyło DZIAŁAJĄCE poświadczenie.**
+  Rozszerzając warunek usuwania sekretu o „połączenia nie ma, więc to sierota", pominąłem
+  przypadek, w którym referencję współdzieli INNE połączenie (np. po zmianie nazwy).
+  `DELETE /api/git/connections/gh` kasowało wtedy wpis używany przez połączenie `produkcja`
+  i raportowało sukces. Sekret kasujemy teraz tylko wtedy, gdy po usunięciu połączenia żadne
+  inne nie wskazuje tej referencji.
+- **Nadpisania runtime, których nie da się zastosować, odpowiadały `ok: true`.** Bramka
+  z Etapu 17d czytała wyłącznie `enabled`; ścieżka magazynu i klucz główny pozostawały
+  domknięciem z chwili startu. Operator „przenosił" magazyn na inny wolumen i rotował klucz,
+  dostawał 200, a token szedł do STAREJ ścieżki starym kluczem. Sceptyk wykazał, że to własność
+  CAŁEGO endpointu — identycznie milczało nadpisanie `security.audit.path`. Bramka odmawia
+  teraz zmian pól niezmiennych w runtime, porównując WARTOŚCI wobec konfiguracji startowej
+  (powtórzenie dotychczasowej wartości i wyłączenie magazynu nadal przechodzą).
+- **Token wklejony w pole `name` był PRZYJMOWANY i trwale zapisywany.** Wzorzec nazwy
+  z Etapu 17d przepuszczał dokładnie kształt obsługiwanych tokenów, więc omyłkowa wartość
+  lądowała w NIEMODYFIKOWALNYM dzienniku audytu, w pliku połączeń oraz jako JAWNY klucz
+  w magazynie sekretów — jedynym wyjściem byłoby unieważnienie tokenu u dostawcy. Odrzucamy
+  nazwy zaczynające się prefiksem poświadczenia, na obu endpointach.
+- **Awaria zapisu przy `DELETE` nie zostawiała śladu** — surowe 500 i zero wpisów w dzienniku,
+  mimo że żądanie dotyczyło poświadczenia. Teraz 503 i wpis `git.connection.remove.failed`.
+- Testy: +20. Nośność: 5 mutacji, wszystkie czerwienią zestaw.
+
 ### Poprawione (Etap 17e — trzy wady z drugiego przeglądu adwersaryjnego)
 
 Przegląd objął commity 1bb2191 i 5277d49. Szesnaście zgłoszeń; trzy o największej wadze

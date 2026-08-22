@@ -191,6 +191,64 @@ _PERM_GIT_PR = "git:pr"
 _PERM_PLUGIN_READ = "plugin:read"
 
 
+# Pola, których nadpisanie w runtime NIE MOŻE odnieść skutku, bo odpowiadający im obiekt
+# powstaje RAZ przy starcie i nie podlega przebudowie. Endpoint musi je ODRZUCIĆ, a nie
+# odpowiadać `ok: true` na zmianę, której nie zastosował.
+#
+# Dlaczego nie „po prostu przebudować": magazyn sekretów i dziennik audytu wymagają zasobów
+# rozwiązywalnych zwykle wyłącznie w procesie launchera (klucz główny ze środowiska, prawa
+# do katalogu). Nieudana odbudowa w trakcie obsługi żądania zostawiłaby aplikację bez
+# działającego audytu albo bez magazynu — czyli gorzej niż przed zmianą. Odmowa z czytelnym
+# komunikatem jest tu uczciwsza niż cicha zmiana, która nie działa, ORAZ bezpieczniejsza niż
+# odbudowa, która może zawieść w połowie.
+#
+# Sprawdzone empirycznie: przed tą bramką nadpisanie `secret_store.path`, `secret_store.key_ref`
+# oraz `audit.path` kończyło się `ok: true`, po czym token trafiał do STAREJ ścieżki starym
+# kluczem, a dziennik pisał do starego pliku. Nowe pliki nie powstawały nigdy.
+_NIEZMIENNE_W_RUNTIME: tuple[tuple[str, ...], ...] = (
+    ("security", "secret_store", "path"),
+    ("security", "secret_store", "key_ref"),
+    ("security", "audit"),
+)
+
+
+def _pobierz(config: HusarzConfig, sciezka: tuple[str, ...]) -> Any:
+    """Odczytuje zagnieżdżone pole konfiguracji po ścieżce atrybutów."""
+    wartosc: Any = config
+    for czlon in sciezka:
+        wartosc = getattr(wartosc, czlon, None)
+    return wartosc
+
+
+def _martwe_zmiany(startowa: HusarzConfig, nowa: HusarzConfig) -> list[str]:
+    """Zwraca pola, których nadpisanie ZMIENIA, a które nie mogą odnieść skutku.
+
+    Punktem odniesienia jest konfiguracja **z chwili startu**, a nie bieżąca — to z niej
+    zbudowano magazyn sekretów i dziennik audytu, więc to jej wartości opisują stan, w którym
+    te obiekty faktycznie działają.
+
+    Porównujemy WARTOŚCI, nie obecność klucza w żądaniu: nadpisanie powtarzające dotychczasową
+    wartość jest nieszkodliwe i musi przejść. Pola magazynu sekretów sprawdzamy WYŁĄCZNIE gdy
+    magazyn ma pozostać włączony — przy wyłączaniu ścieżka i klucz przestają mieć znaczenie,
+    a wymaganie ich powtórzenia byłoby uciążliwe bez żadnego zysku.
+
+    Args:
+        startowa: Konfiguracja, z której zbudowano obiekty przy starcie.
+        nowa: Konfiguracja po scaleniu nadpisań.
+
+    Returns:
+        Posortowana lista ścieżek w zapisie kropkowym; pusta, gdy wszystko da się zastosować.
+    """
+    magazyn_pozostaje_wlaczony = bool(nowa.security.secret_store.enabled)
+    znalezione: list[str] = []
+    for sciezka in _NIEZMIENNE_W_RUNTIME:
+        if sciezka[:2] == ("security", "secret_store") and not magazyn_pozostaje_wlaczony:
+            continue
+        if _pobierz(startowa, sciezka) != _pobierz(nowa, sciezka):
+            znalezione.append(".".join(sciezka))
+    return sorted(znalezione)
+
+
 def _principal_ref(principal: Principal | None) -> str:
     """Stabilna referencja wywołującego do audytu — ID konta, NIE nazwa użytkownika.
 
@@ -757,6 +815,26 @@ def create_app(
             merged = load_config(cdir, runtime_overrides=request.overrides)
         except ConfigError as exc:
             return ValidateResponse(ok=False, error=str(exc))
+        # Odmawiamy ZMIAN, których nie da się zastosować — zamiast odpowiadać `ok: true`
+        # na zmianę, która nie zaszła. Bez tej bramki operator „przenosił" magazyn sekretów
+        # na inny wolumen i rotował klucz główny, dostawał 200, a token szedł dalej do starej
+        # ścieżki, zaszyfrowany starym kluczem; to samo dotyczyło ścieżki dziennika audytu.
+        # Punkt odniesienia to konfiguracja STARTOWA (`config`), bo to z niej zbudowano
+        # magazyn sekretów i dziennik audytu. Bieżąca konfiguracja mogła już przejść
+        # przez wyłączenie magazynu, które gubi `key_ref` — porównanie z nią kazałoby
+        # potem odmawiać ponownego włączenia z tym samym, poprawnym kluczem.
+        martwe = _martwe_zmiany(config, merged)
+        if martwe:
+            return ValidateResponse(
+                ok=False,
+                error=(
+                    "Nadpisanie w runtime nie może zmienić: "
+                    + ", ".join(martwe)
+                    + ". Te ustawienia są stosowane RAZ przy starcie (magazyn sekretów, "
+                    "dziennik audytu), więc zmiana byłaby cicho nieskuteczna. Zmień je "
+                    "w konfiguracji startowej i uruchom ponownie."
+                ),
+            )
         # Przebuduj router+orkiestrator, by /api/orchestrate i /api/chat używały
         # NOWEJ konfiguracji (a nie starej sprzed nadpisania). Budowa poza zamkiem,
         # atomowa podmiana pod zamkiem — spójna para (config, router) dla /api/chat.
@@ -1135,17 +1213,44 @@ def create_app(
         with _mutex_polaczen:
             # Referencję odczytujemy PRZED usunięciem — potem połączenia już nie ma.
             istniejace = svc.store.get(name)
-            svc.remove(name)
-            # Sekret kasujemy, gdy należy do NASZEJ przestrzeni nazw (`husarz:git/<nazwa>`).
-            # Dwa przypadki, oba zamierzone:
-            #   1. połączenie istniało i wskazywało tę referencję — zwykłe sprzątanie,
-            #   2. połączenia JUŻ NIE MA, a sekret został — to sierota, np. po restarcie
-            #      z ulotnym magazynem połączeń. Bez tej gałęzi taki token był NIE DO
-            #      USUNIĘCIA przez API, a `DELETE` zwracał `ok: true`, niczego nie kasując.
-            # Referencji ZEWNĘTRZNEJ (env:/vault:) nie ruszamy nigdy — nie jest nasza,
-            # a operator mógł jej użyć także w innym miejscu.
+            try:
+                svc.remove(name)
+            except GitConnectionError as exc:
+                # Awaria zapisu magazynu połączeń (np. pełny dysk, brak praw). Bez tej
+                # obsługi leciało surowe 500 i — co gorsza — operacja nie zostawiała
+                # ŻADNEGO wpisu w audycie, mimo że dotyczy usuwania poświadczenia.
+                # Stan pozostaje spójny: `FileGitConnectionStore` utrwala PRZED podmianą
+                # stanu w pamięci, więc nieudany zapis nie usuwa niczego.
+                audit_log.record(
+                    "api",
+                    "git.connection.remove.failed",
+                    {"name": name[:64]},
+                    principal=_principal_ref(principal),
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Nie udało się zapisać magazynu połączeń — połączenie NIE zostało "
+                        "usunięte, a sekret pozostaje nietknięty. Sprawdź miejsce na dysku "
+                        "i prawa do katalogu."
+                    ),
+                ) from exc
+            # Sekret kasujemy, gdy należy do NASZEJ przestrzeni nazw (`husarz:git/<nazwa>`)
+            # i gdy NIKT go już nie używa. Trzy warunki, każdy z osobnego powodu:
+            #
+            #   1. Referencji ZEWNĘTRZNEJ (env:/vault:) nie ruszamy nigdy — nie jest nasza,
+            #      a operator mógł jej użyć także poza Husarzem.
+            #   2. Usuwamy także wtedy, gdy połączenia JUŻ NIE MA — to sierota (np. po
+            #      restarcie z ulotnym magazynem połączeń). Bez tej gałęzi taki token był
+            #      NIE DO USUNIĘCIA przez API, a `DELETE` zwracał `ok: true`, nie kasując nic.
+            #   3. ...ale TYLKO jeżeli żadne INNE połączenie nie wskazuje tej referencji.
+            #      Bez tego warunku (regresja wprowadzona wraz z punktem 2) usunięcie
+            #      nieistniejącej nazwy niszczyło DZIAŁAJĄCE poświadczenie innego połączenia,
+            #      które współdzieliło ten sam wpis — np. po zmianie nazwy połączenia.
+            #      Sprawdzamy PO `remove`, więc usuwane połączenie nie liczy się do siebie.
+            uzywa_ktos_inny = any(c.token_ref == oczekiwana for c in svc.list_connections())
             nasz_sekret = istniejace is None or istniejace.token_ref == oczekiwana
-            if secret_store is not None and nasz_sekret:
+            if secret_store is not None and nasz_sekret and not uzywa_ktos_inny:
                 sekret_usuniety = secret_store.delete(f"git/{name}")
         audit_log.record(
             "api",

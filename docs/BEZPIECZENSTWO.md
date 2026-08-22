@@ -1696,3 +1696,120 @@ tokeny nadal się rozwiązują i uwierzytelniają Gita), bramka czyta wyłączni
 (zmiana `key_ref`/`path` w runtime jest cicho ignorowana), `ca_bundle` wraca dosłownie
 w odpowiedzi 400, panel wyświetla błędy 422 jako `[object Object]`, oraz brak blokady pliku
 przy dwóch procesach na tym samym magazynie.
+
+### Etap 17f — dokończona weryfikacja drugiego przeglądu (data: 2026-08-23)
+
+Faza weryfikacji przeglądu commitów 1bb2191 i 5277d49 dokończyła się i potwierdziła pięć
+zgłoszeń. Dwa dotyczyły wad naprawionych już w `cab4d12` (Etap 17e). Cztery pozostałe opisano
+niżej — w tym **regresję, którą wprowadziłem właśnie w `cab4d12`**.
+
+Bilans dotychczasowy: z czternastu zgłoszeń sprawdzonych osobno **czternaście okazało się
+realnych**. To zmienia sposób, w jaki traktuję resztę listy: zgłoszenie odcięte przez limit
+weryfikacji jest domyślnie prawdopodobne, nie hipotetyczne.
+
+#### 1. Regresja: sprzątanie sierot niszczyło DZIAŁAJĄCE poświadczenie
+
+Etap 17e dodał usuwanie osieroconego sekretu, rozszerzając warunek o „połączenia nie ma, więc
+to sierota". Pominąłem przypadek, w którym referencję **współdzieli inne połączenie** — np. po
+zmianie nazwy, gdy operator dodał nowe połączenie wskazujące dotychczasowy wpis.
+
+Odtworzone: przy istniejącym połączeniu `produkcja` o referencji `husarz:git/gh` żądanie
+`DELETE /api/git/connections/gh` (nazwy `gh` już nie ma) kasowało wpis `git/gh`, unieważniając
+poświadczenie działającego połączenia — i raportowało `secret_removed: true`, czyli sukces.
+
+**Naprawa.** Sekret kasujemy tylko wtedy, gdy po usunięciu połączenia **żadne inne** nie
+wskazuje tej referencji. Warunek sprawdzamy PO `remove`, więc usuwane połączenie nie liczy się
+do siebie samego.
+
+Wniosek metodologiczny: rozszerzenie warunku usuwania danych wymaga wypisania WSZYSTKICH
+przypadków, w których dane mogą być jeszcze używane. Poprzednia wersja warunku była zawężona
+i bezpieczna; rozszerzając ją, sprawdziłem, że działa dla sieroty, ale nie sprawdziłem, komu
+jeszcze może zaszkodzić.
+
+#### 2. Nadpisania runtime, których nie da się zastosować, odpowiadały `ok: true`
+
+`_magazyn_wlaczony()` z Etapu 17d czyta z bieżącej konfiguracji WYŁĄCZNIE `enabled`. Sama
+instancja magazynu — ścieżka pliku i klucz główny — pozostaje domknięciem z chwili startu.
+Operator, który przez panel „przenosił" magazyn na wolumen szyfrowany i rotował klucz główny,
+dostawał `ok: true`, po czym kolejny token trafiał do STAREJ ścieżki, zaszyfrowany STARYM
+kluczem. Nowy plik nie powstawał nigdy.
+
+Sceptyk weryfikujący zgłoszenie wykazał, że **nie jest to własność magazynu sekretów, lecz
+całego endpointu**: identycznie zachowywało się nadpisanie `security.audit.path`. Ta uwaga
+była trafna i poszerzyła zakres poprawki — sprawdzone niezależnie, oba pola faktycznie
+milczały.
+
+**Naprawa.** Lista pól niezmiennych w runtime (`security.secret_store.path`,
+`security.secret_store.key_ref`, `security.audit`) i odmowa, gdy nadpisanie faktycznie je
+ZMIENIA. Porównujemy WARTOŚCI wobec konfiguracji STARTOWEJ, nie obecność klucza w żądaniu:
+
+- powtórzenie dotychczasowej wartości musi przejść (inaczej ponowne włączenie magazynu tym
+  samym kluczem byłoby zablokowane),
+- przy wyłączaniu magazynu ścieżka i klucz przestają mieć znaczenie, więc ich zniknięcie ze
+  scalonej konfiguracji nie jest „zmianą",
+- punktem odniesienia jest konfiguracja startowa, bo to z niej zbudowano żywe obiekty.
+
+Obie te subtelności wyszły dopiero na czerwonych testach — pierwsza wersja bramki blokowała
+wyłączenie magazynu, czyli psuła kontrolę naprawioną w Etapie 17d.
+
+Świadomie NIE przebudowujemy magazynu ani dziennika: wymagają zasobów rozwiązywalnych zwykle
+tylko w procesie launchera (klucz główny ze środowiska, prawa do katalogu), a nieudana
+odbudowa w trakcie żądania zostawiłaby aplikację bez działającego audytu — gorzej niż przed
+zmianą.
+
+#### 3. Token wklejony w pole nazwy był trwale zapisywany
+
+Wzorzec nazwy dodany w Etapie 17d (`^[A-Za-z0-9][A-Za-z0-9._-]*$`, do 64 znaków) przepuszcza
+DOKŁADNIE kształt obsługiwanych tokenów: `ghp_` + 36 znaków i `glpat-` + 20. Nazwa wklejona
+omyłkowo trafiała wtedy jednocześnie do:
+
+- **niemodyfikowalnego dziennika audytu** (`detail.name` oraz `detail.token_ref`),
+- pliku połączeń jawnym tekstem,
+- magazynu sekretów jako **jawny klucz wpisu** — w pliku, którego cała racja bytu polega na
+  tym, że bez klucza głównego jest bezużyteczny,
+- odpowiedzi API i tabeli w panelu.
+
+Odtworzone: `name="ghp_16C7e42F292c6912E7710c838347Ae17"` → HTTP 200 i token we wszystkich
+czterech miejscach. Ponieważ dziennika audytu z definicji nie da się wyczyścić, jedynym
+wyjściem byłoby unieważnienie tokenu u dostawcy.
+
+**Naprawa.** Odrzucenie nazw zaczynających się prefiksem poświadczenia (`ghp_`, `gho_`,
+`ghu_`, `ghs_`, `ghr_`, `github_pat_`, `glpat-`), na OBU endpointach dodających. Sprawdzenie
+po prefiksie, a nie heurystyka entropii, która myliłaby się na sensownych nazwach w rodzaju
+`gh-prod-2026`. Komunikat błędu celowo nie powtarza wartości.
+
+**Uczciwie o wadze.** Sceptyk słusznie zakwestionował uzasadnienie prawdopodobieństwa
+podane w zgłoszeniu: pola `name` i `token` w konsoli **nie sąsiadują** (dzielą je cztery
+kontrolki — sam zmieniłem ten układ w Etapie 17). Historia „pomyłkowe wklejenie jest
+niewidoczne" jest więc słabsza, niż ją przedstawiono. Skutek pozostaje jednak nieodwracalny,
+a obrona kosztuje siedem prefiksów — dlatego poprawka wchodzi mimo skorygowanej wagi.
+
+#### 4. Awaria zapisu przy `DELETE` nie zostawiała śladu
+
+`GitConnectionError` z magazynu połączeń leciał niezłapany: surowe 500 i **zero wpisów
+w dzienniku**, mimo że żądanie dotyczyło usunięcia poświadczenia. Naprawione: 503 z czytelnym
+komunikatem oraz wpis `git.connection.remove.failed`.
+
+Stan po awarii jest przy tym SPÓJNY — dzięki poprawce z Etapu 17e magazyn utrwala przed
+podmianą stanu w pamięci, więc nieudany zapis nie usuwa niczego. Opis w zgłoszeniu mówił
+o „połączeniu zniknietym i sekrecie osieroconym"; ta część była prawdziwa PRZED Etapem 17e
+i przestała być prawdziwa po nim.
+
+| Niezmiennik | Test |
+|---|---|
+| `DELETE` nie kasuje sekretu używanego przez inne połączenie | `test_delete_nie_kasuje_sekretu_uzywanego_przez_inne_polaczenie` |
+| Prawdziwa sierota nadal da się usunąć (nośność) | `test_prawdziwa_sierota_nadal_da_sie_usunac` |
+| Zmiana klucza głównego w runtime odrzucona | `test_zmiana_klucza_glownego_w_runtime_jest_odrzucana` |
+| Zmiana ścieżki magazynu odrzucona | `test_zmiana_sciezki_magazynu_w_runtime_jest_odrzucana` |
+| Zmiana ścieżki audytu odrzucona | `test_zmiana_sciezki_audytu_w_runtime_jest_odrzucana` |
+| Wyłączenie magazynu nadal przechodzi (nośność) | `test_wylaczenie_magazynu_nadal_przechodzi` |
+| Ponowne włączenie tym samym kluczem przechodzi (nośność) | `test_ponowne_wlaczenie_tym_samym_kluczem_przechodzi` |
+| Zwykłe nadpisanie nadal działa (nośność) | `test_zwykle_nadpisanie_nadal_dziala` |
+| Nazwa wyglądająca na token odrzucona (5 wariantów) | `test_nazwa_wygladajaca_na_token_jest_odrzucana` |
+| Ten sam kontrakt na obu endpointach | `test_ta_sama_ochrona_na_endpoincie_z_referencja` |
+| Sensowne nazwy nadal przechodzą (nośność) | `test_sensowne_nazwy_nadal_przechodza` |
+| Awaria zapisu przy `DELETE` daje 503 i ślad w audycie | `test_awaria_zapisu_przy_delete_daje_503_i_slad_w_audycie` |
+
+**Nośność.** Pięć mutacji, wszystkie czerwienią testy. Jedna wymagała powtórzenia, bo mój
+wzorzec mutacji trafił w niewłaściwe wystąpienie `except GitConnectionError` (jest ich dwa) —
+wada narzędzia sprawdzającego, nie testu.

@@ -179,6 +179,49 @@ class MeResponse(BaseModel):
     tokens_remaining: int | None
 
 
+# Prefiksy poświadczeń dostawców Git. Nazwa połączenia trafia do NIEMODYFIKOWALNEGO dziennika
+# audytu, do pliku połączeń i — jako JAWNY klucz — do magazynu sekretów. Token wklejony
+# omyłkowo w pole nazwy jest więc zapisywany na stałe w miejscu, którego z definicji nie da
+# się wyczyścić, a jedynym wyjściem pozostaje unieważnienie tokenu u dostawcy.
+#
+# Wzorzec nazwy (`[A-Za-z0-9._-]`, do 64 znaków) przepuszcza DOKŁADNIE kształt tokenów, które
+# ten kreator obsługuje: `ghp_` + 36 znaków alfanumerycznych oraz `glpat-` + 20. Odrzucamy je
+# po prefiksie — sprawdzeniu precyzyjnym, nie heurystyce na entropii, która myliłaby się na
+# sensownych nazwach typu `gh-prod-2026`.
+_PREFIKSY_POSWIADCZEN: tuple[str, ...] = (
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "github_pat_",
+    "glpat-",
+)
+
+
+def _odrzuc_nazwe_wygladajaca_na_token(value: str) -> str:
+    """Odrzuca nazwę połączenia zaczynającą się prefiksem poświadczenia.
+
+    Args:
+        value: Proponowana nazwa połączenia.
+
+    Returns:
+        Nazwę bez zmian, gdy jest bezpieczna.
+
+    Raises:
+        ValueError: Gdy nazwa wygląda na token. Komunikat CELOWO nie powtarza wartości —
+            trafiłby do treści odpowiedzi, czyli tam, skąd token właśnie wypychamy.
+    """
+    if value.lower().startswith(_PREFIKSY_POSWIADCZEN):
+        raise ValueError(
+            "Nazwa połączenia wygląda na token dostępu. Nazwa trafia do dziennika audytu "
+            "(niemodyfikowalnego), pliku połączeń i jako jawny klucz do magazynu sekretów — "
+            "token byłby tam zapisany na stałe. Podaj nazwę opisową (np. 'moj-github'), "
+            "a token wklej w polu tokenu."
+        )
+    return value
+
+
 class GitConnectionIn(BaseModel):
     """Żądanie dodania połączenia Git. ``token_ref`` to REFERENCJA do sekretu (nie token)."""
 
@@ -196,6 +239,12 @@ class GitConnectionIn(BaseModel):
     # dla samodzielnie hostowanego GitLaba z PRYWATNYM CA. Zaufanie jest zawężone do
     # tego jednego połączenia (patrz husarz.git.client.build_ssl_context).
     ca_bundle: str | None = Field(default=None, max_length=1024)
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_not_a_token(cls, value: str) -> str:
+        """Nazwa nie może być omyłkowo wklejonym tokenem — patrz uzasadnienie przy funkcji."""
+        return _odrzuc_nazwe_wygladajaca_na_token(value)
 
     @field_validator("token_ref")
     @classmethod
@@ -263,6 +312,12 @@ class GitConnectionWizardIn(BaseModel):
     # dla samodzielnie hostowanego GitLaba z PRYWATNYM CA. Zaufanie jest zawężone do
     # tego jednego połączenia (patrz husarz.git.client.build_ssl_context).
     ca_bundle: str | None = Field(default=None, max_length=1024)
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_not_a_token(cls, value: str) -> str:
+        """Ten sam kontrakt co w :class:`GitConnectionIn` — nazwa to nie token."""
+        return _odrzuc_nazwe_wygladajaca_na_token(value)
 
     @field_validator("api_base")
     @classmethod
