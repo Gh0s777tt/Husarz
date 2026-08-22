@@ -46,6 +46,26 @@ Windows, `.venv/bin/python` na Linuksie i macOS. **Zanim uruchomisz bramki, upew
 venv pasuje do TEGO systemu** — venv zbudowany gdzie indziej nie zadziała, a objawi się to
 mylącymi błędami importu, nie czytelnym komunikatem.
 
+Sprawdzenie zajmuje sekundę i oszczędza kwadrans zgadywania:
+
+```bash
+ls .venv                 # Windows: Scripts/ Lib/ ;  Linux/macOS: bin/ lib/
+cat .venv/pyvenv.cfg     # pole `home` pokazuje, na jakim systemie powstał
+```
+
+**Repozytorium bywa współdzielone między systemami** (u operatora: dysk przenoszony między
+Windowsem a macOS), więc `.venv` w repo może pochodzić z tego drugiego. Wtedy NIE nadpisuj go
+w miejscu — zbuduj osobny venv POZA repo i używaj go jawnie:
+
+```bash
+python3 -m venv ~/.husarz-venv
+~/.husarz-venv/bin/python -m pip install -e ".[dev]"
+~/.husarz-venv/bin/python -m pytest        # i tak samo pozostałe bramki
+```
+
+Powód, dla którego venv stoi poza repo: nadpisanie `.venv` zepsułoby środowisko na drugim
+systemie, a katalog i tak jest ignorowany przez gita, więc nic się nie „gubi".
+
 ```bash
 python -m ruff check .
 python -m black --check src tests scripts
@@ -66,9 +86,101 @@ ewaluacyjna zielona, dokumentacja buduje się w trybie `--strict`, brak sekretó
 dokumentacja zaktualizowana** (README/CHANGELOG/ROADMAP/`docs/`/wiki/PDF), repozytorium
 spójne, zmiany zacommitowane i **wypchnięte na oba zdalne**, stan zaraportowany operatorowi.
 
+Zielone bramki to warunek KONIECZNY, nie wystarczający. Do „ukończone" należy jeszcze:
+**nowy test na zmienione zachowanie**, **sprawdzona nośność tego testu** oraz **audyt
+zmiany** — szczegóły w sekcji „Testowanie, audyt i dokumentacja KAŻDEJ zmiany". Zmiana
+z zielonymi bramkami, ale bez własnego testu, jest NIEUKOŃCZONA — choćby cały zestaw
+świecił się na zielono. Zielony zestaw mówi tylko, że nikt nie napisał asercji, która by
+ją złapała.
+
+## Testowanie, audyt i dokumentacja KAŻDEJ zmiany (wymóg użytkownika)
+
+Nie „każdej istotnej" — **każdej**. Trzy rzeczy dzieją się w TYM SAMYM kroku co zmiana kodu,
+a krok bez nich nie jest ukończony:
+
+| Co | Znaczy konkretnie |
+|---|---|
+| **Test** | Nowa albo zmieniona zdolność ma test SKUTKU, o sprawdzonej nośności |
+| **Audyt** | Zmiana zostaje przejrzana adwersaryjnie, a nie tylko „przeczytana jeszcze raz". Głębokość stopniowana — patrz tabela niżej |
+| **Dokumentacja** | `docs/` + CHANGELOG + ROADMAP + docstringi — szczegóły w sekcjach niżej |
+
+### Test — co to znaczy w tym projekcie
+
+1. **Każda zmiana zachowania ma test.** Poprawka bez testu to poprawka, którą ktoś cofnie za
+   trzy tygodnie, nie wiedząc, że coś psuje. Poprawka bezpieczeństwa bez testu jest gorsza:
+   wygląda na domkniętą.
+2. **Test sprawdza SKUTEK, nie deklarację** — patrz osobna sekcja niżej. To najdroższa lekcja
+   tego projektu i nie ma od niej wyjątków dla warstwy bezpieczeństwa.
+3. **Nośność sprawdzona zawsze** — patrz „Nośność testów". Test, którego nie próbowano złamać,
+   jest hipotezą, nie zabezpieczeniem.
+4. **Gdy testu SKUTKU napisać się nie da — powiedz to wprost.** Bywają własności (wzajemne
+   wykluczanie w oknie dwóch instrukcji, zachowanie przy awarii zasilania), których nie da się
+   odtworzyć bez wstrzyknięcia pauzy w kod produkcyjny, czyli bez testu zmieniającego to, co
+   bada. Wtedy: zostaw kontrolę słabszą (np. strukturalną), **opisz w docstringu, że jest
+   słabsza i czego NIE dowodzi**, i zapisz lukę w notatce weryfikacyjnej. Zapisana luka jest
+   uczciwa; pozorne pokrycie jest szkodliwe.
+
+### Audyt — przegląd adwersaryjny, nie ponowne przeczytanie
+
+Audytowi podlega **każda** zmiana, ale jego GŁĘBOKOŚĆ jest stopniowana. Stopniowanie jest
+jawne po to, żeby nie stało się furtką („to była drobna zmiana, więc pominąłem"):
+
+| Rodzaj zmiany | Minimalny audyt |
+|---|---|
+| Refaktor bez zmiany zachowania, poprawka literówki, docstring | **Samokontrola z listy niżej** |
+| Zmiana zachowania, nowy endpoint, nowa opcja konfiguracji | Samokontrola + **próba obalenia własnego testu** (mutacja) |
+| Warstwa bezpieczeństwa, sekrety, egress, sandbox, ROE, audyt | **Pełny przegląd adwersaryjny**: kilka niezależnych perspektyw + próba OBALENIA każdego zgłoszenia przez uruchomienie kodu |
+
+Uzasadnienie jest empiryczne, nie teoretyczne. W Etapie 17 trzy takie przeglądy dały bilans:
+**z 19 zgłoszeń sprawdzonych osobno 18 okazało się realnych** — w tym trzy wady w kodzie, który
+sam przed chwilą napisałem i uznałem za sprawdzony, oraz dwa moje twierdzenia w dokumentacji,
+które były po prostu nieprawdziwe. Zielony zestaw testów tego nie wychwycił, bo testy sprawdzały
+to, co autor pomyślał, że sprawdza.
+
+Zasady, które z tego wynikają:
+
+- **Zgłoszenie odcięte przez limit weryfikacji jest PRAWDOPODOBNE, nie hipotetyczne.** Przy
+  bilansie 18/19 traktowanie reszty listy jak szumu byłoby zwykłym samooszukiwaniem. Zapisz je
+  w ROADMAP i wracaj do nich.
+- **Ale nie każde zgłoszenie jest trafne.** Jedno z dziewiętnastu się nie potwierdziło. Sprawdź
+  je sam, uruchamiając kod — nie przyjmuj na wiarę ANI zgłoszenia, ANI jego obalenia.
+- **Sceptyk bywa cenniejszy niż zgłaszający.** W tym projekcie agent mający obalić zgłoszenie
+  poszerzył jego zakres, wykazując, że wada nie dotyczy jednego modułu, lecz całego endpointu.
+  Czytaj uzasadnienia obu stron, nie tylko werdykt.
+- **Wynik audytu zapisz** — także zgłoszenia obalone, żeby nie wracały.
+
+**Samokontrola — pięć pytań, na które trzeba odpowiedzieć sobie wprost:**
+
+1. Co ta zmiana psuje, jeśli jestem w błędzie? Kto jeszcze używa tego, co ruszyłem?
+2. Czy mój test sprawdza SKUTEK, czy tylko to, że kod został wywołany?
+3. Czy istnieje wejście, którego nie przewidziałem — puste, za długie, współbieżne, w innym
+   porządku, po awarii w połowie?
+4. Czy komunikat błędu nie odsyła tego, co dostałem na wejściu?
+5. Czy dokumentacja, którą właśnie napisałem, jest PRAWDZIWA — czy tylko brzmi dobrze?
+
+Pytanie piąte nie jest ozdobnikiem: dwa razy w tym projekcie zapisałem w dokumentacji
+twierdzenie o bezpieczeństwie, które było nieprawdziwe, i wykrył je dopiero przegląd.
+
+### Dwa wzorce, które w tym projekcie kosztowały najwięcej
+
+**Poprawka wzorca wymaga przeszukania repozytorium.** Gdy wada nie jest pomyłką w jednym
+miejscu, lecz WZORCEM (kolejność „zmutuj pamięć, potem zapisz plik"; brak `fsync`; echo wejścia
+w komunikacie błędu) — po naprawie przeszukaj repozytorium pod kątem tego wzorca. U nas magazyn
+połączeń miał dokładnie tę samą wadę co magazyn sekretów i przetrwał DWA przeglądy, bo uwaga
+była skupiona na module, w którym wadę zgłoszono.
+
+**Rozszerzenie warunku usuwania danych wymaga wypisania wszystkich użytkowników tych danych.**
+Warunek zawężony jest bezpieczny; rozszerzając go, łatwo sprawdzić, że działa dla nowego
+przypadku, i nie sprawdzić, komu jeszcze może zaszkodzić. U nas dodanie „połączenia nie ma, więc
+sekret jest sierotą" zaczęło kasować token, którego używało INNE połączenie — i raportowało
+sukces.
+
 ## Dokumentacja — utrzymywana na bieżąco i WERYFIKOWANA (wymóg użytkownika)
 
-Po KAŻDEJ istotnej zmianie kodu, w tym samym kroku:
+Po KAŻDEJ zmianie kodu, w tym samym kroku. „Istotna" nie jest tu kryterium: zmiana czysto
+wewnętrzna (refaktor bez zmiany zachowania) nie potrzebuje wpisu w CHANGELOG-u, ale KAŻDA
+zmiana zachowania potrzebuje go zawsze — choćby wydawała się drobna. Wątpliwość
+rozstrzygaj na korzyść wpisu:
 
 1. **README.md** — musi odzwierciedlać aktualny stan (instalacja, uruchomienie,
    przykłady). Jeśli zmiana wpływa na użycie — zaktualizuj.
@@ -166,6 +278,27 @@ szeroko, więc awaria objawiała się jako „niezdany przypadek", a nie jako cz
 W teście porównującym dwie wartości dopisz asercję, że **są różne** (`assert przed != po`) —
 inaczej test przechodzi także wtedy, gdy mechanizm w ogóle nie zadziałał.
 
+### Trzy pułapki samej kontroli nośności
+
+Kontrola nośności to też narzędzie pomiarowe i też potrafi kłamać. W Etapie 17 wykryła cztery
+wady w testach, ale przy okazji dwa razy skłamała sama:
+
+1. **Sprawdź, że mutacja trafiła tam, gdzie chciałeś.** Podmiana „pierwszego wystąpienia"
+   wzorca, który występuje dwa razy (dwa modele Pydantica, dwa bloki `except` tego samego typu),
+   psuje NIE TEN mechanizm — test zostaje zielony i wygląda to jak brak nośności, choć jest
+   błędem narzędzia. Po mutacji upewnij się, że zmiana dotknęła właściwego miejsca; przy
+   wzorcach powtarzalnych podmieniaj WSZYSTKIE wystąpienia albo użyj wzorca jednoznacznego.
+2. **Asercja „pole istnieje" to nie asercja „pole ma wartość".** Test sprawdzający
+   `"principal" in wpis` przechodził po usunięciu poprawki, bo dziennik audytu serializuje to
+   pole ZAWSZE — także puste. Sprawdzaj WARTOŚĆ, a jeśli wymaga to uwierzytelnienia albo
+   innego kontekstu, zbuduj ten kontekst w teście.
+3. **Uważaj na awaryjne przejścia w samym teście.** Test przebudowy serwisu przechodził bez
+   poprawki, bo jego fabryka miała fallback na ten sam PLIK — dane wracały z dysku i maskowały
+   utratę. Jeśli test ma wykryć utratę stanu, użyj stanu ULOTNEGO.
+
+Reguła nadrzędna: **mutacja, która nie zaczerwieniła testu, jest sygnałem do zbadania — nie do
+przyjęcia.** Może nie działać test, ale równie dobrze może nie działać mutacja.
+
 ## Sprostowania — obowiązek, nie uprzejmość
 
 Gdy wcześniejsze twierdzenie okaże się nieprawdziwe (w commicie, CHANGELOG-u albo notatce),
@@ -206,6 +339,8 @@ zmianę, która ich wymaga. Jeżeli którakolwiek pozycja zostaje w tyle, krok n
 | Wydania i tagi | tag `vX.Y.Z` spójny z CHANGELOG-iem; nigdy na czerwonych bramkach |
 | Gałąź | świadomie wybrana i zaraportowana; brak wiszących gałęzi tematycznych |
 | Dokumentacja kodu | docstring po polsku dla każdego modułu, klasy i funkcji publicznej |
+| Testy | KAŻDA zmiana zachowania ma test skutku; nośność sprawdzona; luki w pokryciu zapisane wprost |
+| Audyt zmiany | KAŻDA zmiana audytowana; głębokość stopniowana (samokontrola → mutacja → pełny przegląd adwersaryjny); wynik zapisany, także zgłoszenia obalone |
 | Audyty i security checki | przy każdej zmianie dotykającej bezpieczeństwa |
 | Spójność wersji | numer wersji = tag = CHANGELOG = obrazy w plikach wdrożeniowych |
 | PR, CI, jakość | stan pipeline'ów sprawdzony i zaraportowany |

@@ -91,8 +91,19 @@ Przy KAŻDEJ zmianie dotykającej bezpieczeństwa, a nie raz na etap:
 | Przegląd zrzutów ekranu (ścieżki, tokeny, e-maile, treść rozmów) | przed dołączeniem do docs |
 | `pip-audit` (znane podatności zależności) | przy zmianie zależności i w CI |
 | Notatka weryfikacyjna w `docs/BEZPIECZENSTWO.md` | przy każdej zmianie powierzchni ataku |
-| Przegląd adwersaryjny (niezależne soczewki) | przed zamknięciem etapu bezpieczeństwa |
+| Przegląd adwersaryjny (niezależne soczewki + próba OBALENIA każdego zgłoszenia) | przy KAŻDEJ zmianie w warstwie bezpieczeństwa, nie tylko przed zamknięciem etapu |
 | Weryfikacja spójności wersji (tag = CHANGELOG = obrazy wdrożeniowe) | przy każdym wydaniu |
+
+**Dlaczego przegląd adwersaryjny, a nie ponowne przeczytanie.** Powód jest empiryczny.
+W Etapie 17 trzy takie przeglądy dały bilans: **z 19 zgłoszeń sprawdzonych osobno 18 okazało
+się realnych** — w tym trzy wady w kodzie napisanym chwilę wcześniej i uznanym za sprawdzony
+oraz dwa twierdzenia w tym samym dokumencie, które były nieprawdziwe. Wszystko przy zielonym
+zestawie testów. Testy sprawdzały to, co autor MYŚLAŁ, że sprawdzają.
+
+Dwie konsekwencje, obie zapisane w [CLAUDE.md](CLAUDE.md), sekcja „Testowanie, audyt
+i dokumentacja KAŻDEJ zmiany": zgłoszenie odcięte przez limit weryfikacji traktujemy jako
+prawdopodobne (nie hipotetyczne), ale sprawdzamy je sami uruchomieniem — bo jedno
+z dziewiętnastu jednak się nie potwierdziło.
 
 Nowa powierzchnia ataku = nowe niezmienniki w `tests/security/`. Bez nich zmiana nie jest
 ukończona.
