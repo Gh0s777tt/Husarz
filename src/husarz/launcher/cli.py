@@ -13,7 +13,7 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from husarz import __version__
 from husarz.config import HusarzConfig, load_config
@@ -21,6 +21,9 @@ from husarz.config.errors import ConfigError
 from husarz.config.loader import resolve_config_dir
 from husarz.config.schema import Profile
 from husarz.launcher.diagnostics import format_port_conflicts, port_conflicts
+
+if TYPE_CHECKING:  # import tylko dla adnotacji — start CLI nie wciąga warstwy security
+    from husarz.security.secret_store import EncryptedFileSecretStore
 
 
 def _roe_signature_status(config: HusarzConfig) -> str:
@@ -241,16 +244,62 @@ def _build_plugins(config: HusarzConfig) -> Any:
     )
 
 
+# Jedyna instancja zapisywalnego magazynu sekretów w procesie. Zmienna modułowa jest tu
+# świadomym wyborem, a nie skrótem: magazyn trzyma stan w pamięci (wczytane wpisy), więc
+# DWIE instancje wskazujące ten sam plik rozjechałyby się przy pierwszym zapisie —
+# instancja API zapisałaby wpis, którego instancja serwisu Gita by nie widziała, a kolejny
+# zapis tej drugiej skasowałby go z pliku. `_SchemeSecrets` jest konstruowany bezargumentowo
+# w kilku miejscach (serwis Gita, wtyczki, konta, pamięć) i częściowo w fabrykach wołanych
+# później przez API, więc przewleczenie parametru oznaczałoby przekazywanie go przez pięć
+# warstw. Ustawiane raz, w `_cmd_up` (korzeń kompozycji launchera).
+_SEKRETY: EncryptedFileSecretStore | None = None
+
+
+def _zbuduj_magazyn_sekretow(config: HusarzConfig) -> EncryptedFileSecretStore | None:
+    """Buduje magazyn sekretów wg konfiguracji; ``None``, gdy wyłączony.
+
+    Args:
+        config: Wczytana konfiguracja.
+
+    Returns:
+        Magazyn albo ``None``, gdy ``security.secret_store.enabled`` jest wyłączone.
+
+    Raises:
+        ConfigError: Gdy magazyn jest włączony, ale klucza głównego nie da się rozwiązać.
+            Fail-closed: wolimy nie wystartować, niż wystartować z kreatorem, który przy
+            pierwszym użyciu odmówiłby zapisu tokenu.
+    """
+    ustawienia = config.security.secret_store
+    if not ustawienia.enabled:
+        return None
+    from husarz.security.secret_store import (  # noqa: PLC0415
+        SecretStoreError,
+        build_secret_store,
+    )
+
+    sciezka = ustawienia.path or (config.platform.data_dir / "secrets" / "store.json")
+    try:
+        return build_secret_store(
+            path=sciezka, key_ref=ustawienia.key_ref, secrets=_SchemeSecrets()
+        )
+    except SecretStoreError as exc:
+        raise ConfigError(f"Magazyn sekretów: {exc}") from exc
+
+
 class _SchemeSecrets:
-    """Dostawca sekretów rozwiązujący referencje po schemacie (env:/file:)."""
+    """Dostawca sekretów rozwiązujący referencje po schemacie (env:/file:/husarz:)."""
 
     def resolve(self, ref: str) -> str | None:
-        """Zwraca wartość sekretu dla referencji ``env:``/``file:`` albo ``None``."""
+        """Zwraca wartość sekretu dla referencji ``env:``/``file:``/``husarz:`` albo ``None``."""
         from husarz.config.secrets import (  # noqa: PLC0415
             EnvSecretsProvider,
             FileSecretsProvider,
         )
 
+        if ref.startswith("husarz:"):
+            # Magazyn zapisywalny bywa wyłączony — wtedy referencja jest nierozwiązywalna
+            # i wołający dostaje None, dokładnie jak przy braku zmiennej środowiskowej.
+            return _SEKRETY.resolve(ref) if _SEKRETY is not None else None
         if ref.startswith("file:"):
             return FileSecretsProvider("./secrets").resolve(ref)
         return EnvSecretsProvider().resolve(ref)
@@ -269,6 +318,10 @@ def _cmd_up(args: argparse.Namespace) -> int:
         # w konsoli był martwy, mimo że konfiguracja wczytała się z tego samego katalogu.
         config_dir = resolve_config_dir(args.config, os.environ)
         config = load_config(config_dir, runtime_overrides=overrides)
+        # Magazyn sekretów PRZED serwisami: to on rozwiązuje referencje `husarz:`,
+        # którymi posługują się połączenia Git dodane przez kreator w konsoli.
+        global _SEKRETY  # noqa: PLW0603 - korzeń kompozycji, uzasadnienie przy deklaracji
+        _SEKRETY = _zbuduj_magazyn_sekretow(config)
         api_token = _resolve_api_token(config)
         accounts = _build_accounts(config)
         git_service = _build_git(config)
@@ -334,6 +387,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
         trusted_hosts=trusted,
         prompts_dir=prompts,
         secrets=_SchemeSecrets(),  # przewleczenie sekretów: trwała pamięć RAG (klucz at-rest)
+        secret_store=_SEKRETY,  # kreator połączeń: zapis tokenu pod referencją `husarz:`
     )
     if api_token and accounts is not None:
         auth_note = "auth: token + konta"

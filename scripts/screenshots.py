@@ -78,6 +78,12 @@ class Shot:
 SHOTS: tuple[Shot, ...] = (
     Shot("chat", "console.png", "czat z lokalnym modelem (ekran główny)"),
     Shot("agents", "console-agenci.png", "lista agentów Chorągwi", ready_id="agents-out"),
+    Shot(
+        "git",
+        "console-polaczenia.png",
+        "kreator połączeń Git (token zapisywany zaszyfrowany)",
+        ready_id="git-conns",
+    ),
     Shot("audit", "console-audyt.png", "audyt z weryfikacją łańcucha", ready_id="audit-out"),
     Shot("usage", "console-monitor.png", "monitor zużycia tokenów", ready_id="usage-out"),
 )
@@ -128,24 +134,30 @@ def _run_chat(page: Page) -> None:
         }""")
 
 
-def capture(base_url: str, out_dir: Path) -> int:
-    """Robi komplet zrzutów konsoli.
+def capture(base_url: str, out_dir: Path, only: tuple[str, ...] | None = None) -> int:
+    """Robi zrzuty konsoli.
 
     Args:
         base_url: adres uruchomionej konsoli (np. ``http://127.0.0.1:8000``).
         out_dir: katalog docelowy na pliki PNG.
+        only: nazwy zakładek do odświeżenia; ``None`` = wszystkie. Podzbiór jest
+            istotny praktycznie: zrzut czatu wymaga DZIAŁAJĄCEGO modelu, więc przy
+            zmianie w innej zakładce komplet zmuszałby do podnoszenia Ollamy bez powodu.
 
     Returns:
         Liczba zapisanych zrzutów.
     """
+    wybrane = tuple(s for s in SHOTS if only is None or s.tab in only)
     out_dir.mkdir(parents=True, exist_ok=True)
     saved = 0
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel="chrome")
         page = browser.new_page(viewport=VIEWPORT)
         page.goto(base_url, wait_until="networkidle")
-        _run_chat(page)
-        for shot in SHOTS:
+        # Rozmowę prowadzimy TYLKO dla zrzutu czatu — jedynego, który jej potrzebuje.
+        if any(s.tab == "chat" for s in wybrane):
+            _run_chat(page)
+        for shot in wybrane:
             _open_tab(page, shot)
             target = out_dir / shot.filename
             page.screenshot(path=str(target))
@@ -172,10 +184,17 @@ def main(argv: list[str] | None = None) -> int:
         default=repo_root / "docs" / "assets" / "screenshots",
         help="katalog docelowy (domyślnie: docs/assets/screenshots)",
     )
+    parser.add_argument(
+        "--only",
+        nargs="+",
+        metavar="ZAKŁADKA",
+        choices=[s.tab for s in SHOTS],
+        help="odśwież tylko wskazane zakładki (domyślnie: wszystkie)",
+    )
     args = parser.parse_args(argv)
 
     print(f"Zrzuty z {args.base_url} → {args.out}")
-    saved = capture(args.base_url, args.out)
+    saved = capture(args.base_url, args.out, tuple(args.only) if args.only else None)
     print(
         f"Zapisano {saved} zrzut(y/ów). PRZEJRZYJ je przed commitem — repozytorium jest publiczne."
     )

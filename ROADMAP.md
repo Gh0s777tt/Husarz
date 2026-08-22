@@ -67,11 +67,22 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   pod zleceniem ze zgodą, ważnym podpisem i w oknie czasowym — inaczej odmowa ze śladem
   w audycie. Bez nowych zdolności ofensywnych: Puszkarz nadal nie ma narzędzi (L0), działa
   w dry-run i dostaje notatkę kontekstową o tym trybie. Testy: +11.
-- ⬜ **Kreator połączeń Git + zapisywalny magazyn sekretów** — dziś operator wkleja
-  `token_ref` do surowego pola. Kierunek: `SecretsProvider` zostaje read-only, dochodzi wąski
-  interfejs zapisu i schemat referencji `husarz:git/<nazwa>`; wartość szyfrowana
-  `AesGcmCipher`. Device flow (jedyna droga bez `client_secret`) dopiero na tym fundamencie,
-  jako osobny ADR i tryb włączany w configu. Patrz ograniczenia w `docs/GIT.md`.
+- ✅ **Kreator połączeń Git + zapisywalny magazyn sekretów** (Etap 17):
+  `husarz.security.secret_store` — szyfrowany magazyn pod schematem `husarz:<nazwa>`,
+  implementujący `SecretsProvider`, więc wpięty w istniejący łańcuch. Dotychczasowi
+  dostawcy pozostają read-only. Kreator (`POST /api/git/connections/wizard`) przyjmuje
+  token i zwraca połączenie z referencją; do pliku połączeń nie trafia materiał.
+  Domyślnie WYŁĄCZONY (deny-by-default), klucz główny wyłącznie ze schematu zewnętrznego.
+  Prymityw szyfrujący przeniesiony do `husarz.core.crypto` (warstwa 0), bo dzielą go
+  pamięć i magazyn sekretów. Testy: +36, nośność sprawdzona 13 mutacjami. Docs: ADR-0023,
+  GIT.md, BEZPIECZENSTWO.md (notatka weryfikacyjna z uruchomionej aplikacji).
+- ⬜ **Device flow OAuth** — połączenie bez ręcznego generowania tokenu u dostawcy.
+  Magazyn sekretów jest jego warunkiem koniecznym i już istnieje; brakuje samego przepływu.
+  Na GitHubie „kod autoryzacyjny + PKCE" NIE zwalnia z `client_secret`, więc device flow
+  (z kodem do przepisania) jest jedyną drogą bez sekretu aplikacji. Osobny ADR, tryb
+  włączany w configu, nie domyślny.
+- ⬜ **Rotacja i wygasanie sekretów w magazynie** — dziś ponowny zapis pod tą samą nazwą
+  zastępuje wartość i to cała „rotacja"; nic nie przypomina, że token dostawcy wygasa.
 - ⬜ **Pole na bundle CA dla ruchu wychodzącego** — bez niego samodzielnie hostowany GitLab
   z prywatnym CA jest nieosiągalny (`verify=True`/`trust_env=False` na sztywno).
 - ⬜ Pozostaje: autoryzacja NA CEL w przepływie (dziś `RoeGate.evaluate` gotowe, ale Puszkarz
@@ -287,8 +298,10 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ Bramka egress (deny-all) na hoście dostawcy; RBAC `git:read`/`git:write`/`git:pr`.
 - ✅ API `/api/git/*`; sekcja configu `git` (`config/git.yaml`); zakładka Połączenia.
 - ✅ Testy: klienci (mock transport), egress, magazyn, GitService, API. Docs: GIT.md, ADR-0011.
-- ⬜ Pełny OAuth (rejestracja aplikacji + callback; tokeny szyfrowane at-rest dla
-  trybu hostowanego); commit plików+push przez API (agent Kopijnik); przegląd PR.
+- ✅ Kreator połączeń: token wklejany w konsoli, zapisywany zaszyfrowany, w pliku połączeń
+  wyłącznie referencja `husarz:git/<nazwa>` (Etap 17, ADR-0023).
+- ⬜ Pełny OAuth (rejestracja aplikacji + callback / device flow); commit plików+push
+  przez API (agent Kopijnik); przegląd PR.
 
 ## ✅ Etap 8 — Załączniki do czatu
 - ✅ `husarz.attachments`: pliki/foldery jako kontekst; limity (liczba/rozmiar),

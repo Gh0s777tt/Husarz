@@ -163,7 +163,7 @@
     <section class="tab" id="tab-git">
       <div class="card">
         <h3>Połączenia Git</h3>
-        <p class="muted">Token podaj jako <b>referencję do sekretu</b> (np. <code>env:GITHUB_TOKEN</code>), nie jako wartość. Host dostawcy musi być na <code>security.egress.allowlist</code>.</p>
+        <p class="muted">Dwie drogi: <b>wklej token</b> — Husarz zapisze go zaszyfrowany i sam utworzy referencję <code>husarz:git/&lt;nazwa&gt;</code>; albo <b>podaj referencję</b> do sekretu, którym już zarządzasz (<code>env:</code>, <code>file:</code>, <code>vault:</code>, <code>sops:</code>). Token nigdy nie trafia do pliku konfiguracji. Host dostawcy musi być na <code>security.egress.allowlist</code>.</p>
         <div id="git-conns">…</div>
       </div>
       <div class="card">
@@ -172,9 +172,17 @@
           <input id="g-name" placeholder="nazwa (np. moj-github)" />
           <select id="g-provider"><option value="github">GitHub</option><option value="gitlab">GitLab</option></select>
           <input id="g-base" placeholder="api_base (np. https://api.github.com)" />
-          <input id="g-token" placeholder="token_ref (np. env:GITHUB_TOKEN)" />
           <input id="g-user" placeholder="użytkownik (opcjonalnie)" />
+          <select id="g-mode">
+            <option value="token">Wklej token (zapiszemy zaszyfrowany)</option>
+            <option value="ref">Podaj referencję do sekretu</option>
+          </select>
+          <!-- type=password: token nie jest widoczny przy wklejaniu ani na zrzutach
+               ekranu do dokumentacji, a przeglądarka nie proponuje go w autouzupełnianiu. -->
+          <input id="g-token" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="token dostępu (np. ghp_… albo glpat-…)" />
         </div>
+        <p id="g-store-note" class="muted" style="margin:6px 0 0"></p>
         <button class="primary" id="g-add">Dodaj</button>
         <pre id="g-add-out" hidden></pre>
       </div>
@@ -368,14 +376,55 @@
       });
       $("g-conn-sel").innerHTML = gitConns.map((c) => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join("");
     }
+    // Czy zapisywalny magazyn sekretów jest włączony. Bez niego kreator nie ma gdzie
+    // bezpiecznie zapisać tokenu, więc zostaje wyłącznie droga przez referencję.
+    let secretStoreEnabled = false;
+    async function loadSecretStore() {
+      try {
+        const r = await fetch("/api/secrets/store", { headers: authHeaders() });
+        secretStoreEnabled = r.ok ? (await r.json()).enabled === true : false;
+      } catch (e) { secretStoreEnabled = false; }
+      applyGitMode();
+    }
+    function applyGitMode() {
+      const sel = $("g-mode"), inp = $("g-token"), note = $("g-store-note");
+      if (!secretStoreEnabled) {
+        // Nie udajemy, że da się wkleić token — mówimy wprost, czego brakuje.
+        sel.value = "ref";
+        [...sel.options].forEach((o) => { if (o.value === "token") o.disabled = true; });
+        note.innerHTML = "Wklejanie tokenu wymaga włączonego magazynu sekretów " +
+          "(<code>security.secret_store.enabled</code> + <code>key_ref</code>). " +
+          "Na razie podaj referencję do sekretu, którym zarządzasz sam.";
+      } else if (sel.value === "token") {
+        note.textContent = "Token zostanie zaszyfrowany i zapisany lokalnie; w konfiguracji zostanie sama referencja.";
+      } else {
+        note.textContent = "";
+      }
+      const tryb = sel.value === "token";
+      inp.type = tryb ? "password" : "text";
+      inp.placeholder = tryb ? "token dostępu (np. ghp_… albo glpat-…)" : "token_ref (np. env:GITHUB_TOKEN)";
+    }
     function wireGit() {
+      $("g-mode").onchange = applyGitMode;
       $("g-add").onclick = async () => {
         $("g-add-out").hidden = false; $("g-add-out").textContent = "…";
-        const body = { name: $("g-name").value.trim(), provider: $("g-provider").value,
-          api_base: $("g-base").value.trim(), token_ref: $("g-token").value.trim(),
-          username: $("g-user").value.trim() || null };
-        const d = await api("git/connections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        $("g-add-out").textContent = d.name ? "Dodano: " + d.name : "Błąd: " + (d.detail || JSON.stringify(d));
+        const tryb = $("g-mode").value;
+        const wspolne = { name: $("g-name").value.trim(), provider: $("g-provider").value,
+          api_base: $("g-base").value.trim(), username: $("g-user").value.trim() || null };
+        // Token NIE jest przycinany po stronie klienta poza białymi znakami brzegowymi
+        // i nigdy nie trafia do `g-add-out` — komunikat pokazuje tylko nazwę połączenia.
+        const sciezka = tryb === "token" ? "git/connections/wizard" : "git/connections";
+        const body = tryb === "token"
+          ? { ...wspolne, token: $("g-token").value.trim() }
+          : { ...wspolne, token_ref: $("g-token").value.trim() };
+        const d = await api(sciezka, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (d.name) {
+          // Czyścimy pole natychmiast po sukcesie — token nie ma powodu dłużej wisieć w DOM.
+          $("g-token").value = "";
+          $("g-add-out").textContent = "Dodano: " + d.name + " (referencja: " + (d.token_ref || "—") + ")";
+        } else {
+          $("g-add-out").textContent = "Błąd: " + (d.detail || JSON.stringify(d));
+        }
         loadGit();
       };
       $("g-repos-btn").onclick = async () => {
@@ -442,7 +491,7 @@
     async function load(tab) {
       if (tab === "config") $("config-out").textContent = JSON.stringify(await api("config/summary"), null, 2);
       if (tab === "usage") $("usage-out").textContent = JSON.stringify(await api("usage"), null, 2);
-      if (tab === "git") loadGit();
+      if (tab === "git") { loadGit(); loadSecretStore(); }
       if (tab === "plugins") loadPlugins();
       if (tab === "agents") {
         const a = await api("agents");

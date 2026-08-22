@@ -420,7 +420,7 @@ class RoeSignatureConfig(_StrictModel):
         if not cleaned.startswith(_SECRET_REF_SCHEMES):
             raise ValueError(
                 "security.roe.key_ref musi być referencją do sekretu "
-                "(env:/file:/vault:/sops:), a nie samym materiałem klucza."
+                "(env:/file:/vault:/sops:/husarz:), a nie samym materiałem klucza."
             )
         return cleaned
 
@@ -445,6 +445,54 @@ class ToolLoopConfig(_StrictModel):
     max_plan_steps: int = Field(default=20, ge=1)
 
 
+class SecretStoreConfig(_StrictModel):
+    """Zapisywalny magazyn sekretów — dla materiału, który Husarz DOSTAJE w czasie działania.
+
+    Dotychczasowi dostawcy sekretów są wyłącznie do odczytu: operator sam umieszcza token
+    w ENV, pliku, Vaulcie albo SOPS-ie. Nie obsługują przypadku, w którym token powstaje
+    podczas pracy — wklejony w kreatorze połączeń albo zwrócony przez OAuth. Bez tego
+    magazynu taki token musiałby wylądować w pliku konfiguracji (złamanie zasady „config
+    nie zawiera materiału") albo tylko w pamięci procesu (utrata po restarcie).
+
+    Magazyn zapisuje materiał ZASZYFROWANY (AES-256-GCM) w osobnym pliku i zwraca referencję
+    ``husarz:<nazwa>``. Do konfiguracji trafia wyłącznie ta referencja — niezmiennik zostaje
+    nienaruszony. Szczegóły i model zagrożeń: :mod:`husarz.security.secret_store`.
+
+    Domyślnie **wyłączony** (deny-by-default): instalacja, która nie potrzebuje zapisywania
+    sekretów, nie ma powierzchni zapisu. Włączenie WYMAGA ``key_ref`` — nie istnieje tryb
+    „zapisz jawnie", bo plik z tokenami wyglądałby wtedy identycznie niezależnie od tego,
+    czy cokolwiek chroni jego zawartość.
+
+    Attributes:
+        enabled: czy magazyn działa. Wymaga ``key_ref``.
+        path: plik magazynu; ``None`` → ``data_dir/secrets/store.json``.
+        key_ref: referencja do klucza głównego. Wyłącznie schemat ZEWNĘTRZNY
+            (``env:``/``file:``/``vault:``/``sops:``) — klucz z samego magazynu byłby
+            zamkniętym kręgiem, w którym nic nie da się odszyfrować.
+    """
+
+    enabled: bool = False
+    path: Path | None = None
+    key_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> SecretStoreConfig:
+        if self.key_ref is not None:
+            cleaned = self.key_ref.strip()
+            if not cleaned.startswith(_EXTERNAL_REF_SCHEMES):
+                raise ValueError(
+                    "security.secret_store.key_ref musi być referencją do sekretu "
+                    "ZEWNĘTRZNEGO (env:/file:/vault:/sops:). Schemat 'husarz:' jest tu "
+                    "zabroniony — magazyn nie może odblokowywać się własnym sekretem."
+                )
+        if self.enabled and not self.key_ref:
+            raise ValueError(
+                "security.secret_store.enabled=true wymaga key_ref (klucza głównego). "
+                "Bez klucza magazyn nie powstanie — nie ma trybu zapisu jawnym tekstem."
+            )
+        return self
+
+
 class SecurityConfig(_StrictModel):
     """Zbiorcza konfiguracja bezpieczeństwa."""
 
@@ -456,6 +504,7 @@ class SecurityConfig(_StrictModel):
     encryption: EncryptionConfig = Field(default_factory=EncryptionConfig)
     tool_loop: ToolLoopConfig = Field(default_factory=ToolLoopConfig)
     roe: RoeSignatureConfig = Field(default_factory=RoeSignatureConfig)
+    secret_store: SecretStoreConfig = Field(default_factory=SecretStoreConfig)
     prompt_injection_filters: bool = True
 
 
@@ -621,7 +670,13 @@ class ToolConfig(_StrictModel):
 # plugins (config/plugins/*.yaml) — konektory wtyczek (MCP)
 # ---------------------------------------------------------------------------
 
-_SECRET_REF_SCHEMES = ("env:", "file:", "vault:", "sops:")
+# Schematy referencji do sekretów akceptowane w konfiguracji. `husarz:` wskazuje
+# ZAPISYWALNY magazyn (husarz.security.secret_store) — jedyny schemat, pod który materiał
+# trafia przez samego Husarza (kreator połączeń, OAuth), a nie ręką operatora.
+_SECRET_REF_SCHEMES = ("env:", "file:", "vault:", "sops:", "husarz:")
+# Klucz GŁÓWNY magazynu nie może pochodzić z magazynu — to zamknięty krąg, w którym
+# nic nie da się odszyfrować. Dopuszczamy więc dla niego wyłącznie schematy zewnętrzne.
+_EXTERNAL_REF_SCHEMES = ("env:", "file:", "vault:", "sops:")
 
 
 class EmbedderConfig(_StrictModel):
@@ -644,7 +699,7 @@ class EmbedderConfig(_StrictModel):
         if self.api_key_ref is not None and not self.api_key_ref.startswith(_SECRET_REF_SCHEMES):
             raise ValueError(
                 "embedder.api_key_ref musi być referencją do sekretu "
-                "(env:/file:/vault:/sops:), a nie samą wartością."
+                "(env:/file:/vault:/sops:/husarz:), a nie samą wartością."
             )
         return self
 
@@ -675,7 +730,8 @@ class RagBackendConfig(_StrictModel):
             _SECRET_REF_SCHEMES
         ):
             raise ValueError(
-                "encryption_key_ref musi być referencją do sekretu (env:/file:/vault:/sops:)."
+                "encryption_key_ref musi być referencją do sekretu "
+                "(env:/file:/vault:/sops:/husarz:)."
             )
         # Walidacja krzyżowa: pola trwałości/at-rest mają sens WYŁĄCZNIE dla trwałego magazynu
         # sqlite — inaczej byłyby po cichu ignorowane (fałszywe poczucie włączonego szyfrowania).
@@ -741,7 +797,7 @@ class PluginConfig(_StrictModel):
         if self.token_ref is not None and not self.token_ref.startswith(_SECRET_REF_SCHEMES):
             raise ValueError(
                 f"Wtyczka '{self.name}': token_ref musi być referencją do sekretu "
-                f"(env:/file:/vault:/sops:), a nie samą wartością tokenu."
+                f"(env:/file:/vault:/sops:/husarz:), a nie samą wartością tokenu."
             )
         # Fail-closed: nie da się wystartować z 'otwartym' wywoływaniem. allow_call wymaga
         # jawnej enumeracji dozwolonych narzędzi (pusta lista + allow_call=false = kill-switch OK).

@@ -1207,3 +1207,101 @@ i pokryte regresją (`test_api_audit_view_exposes_principal`,
 **Ograniczenia:** korelacja obejmuje ścieżki przechodzące przez API (czat, orkiestracja,
 config, Git, wtyczki). Wywołania biblioteczne (np. `Orchestrator.run` wprost z kodu) mają
 `principal=""` — to poprawne, bo nie ma wtedy uwierzytelnionego wywołującego.
+
+### Etap 17 — zapisywalny magazyn sekretów i kreator połączeń (data: 2026-08-22)
+
+**Co doszło.** `husarz.security.secret_store` — pierwsze miejsce w projekcie, w którym Husarz
+**przyjmuje** materiał sekretu, zamiast wyłącznie rozwiązywać referencje do materiału
+umieszczonego gdzie indziej przez operatora. Powierzchnia jest nowa i wymaga jawnego opisu.
+
+**Po co ten kod istnieje.** Bez niego token wklejony w konsoli nie miał gdzie trafić: albo
+do pliku konfiguracji (złamanie niezmiennika „config nie zawiera materiału"), albo tylko do
+pamięci procesu (utrata po restarcie, a w praktyce obejście — operator i tak wpisze token
+gdzieś na stałe). Uzasadnienie i odrzucone alternatywy:
+[ADR-0023](adr/0023-zapisywalny-magazyn-sekretow.md).
+
+**Czy da się go usunąć.** Nie bez usunięcia funkcji. Da się natomiast **nie włączać** —
+magazyn jest domyślnie wyłączony, a instalacja korzystająca z Vaulta czy SOPS-a nie ma
+powodu go włączać. To zalecana konfiguracja tam, gdzie zarządzanie sekretami już istnieje.
+
+**Co go chroni (defense-in-depth).**
+
+| Warstwa | Mechanizm |
+|---|---|
+| Poufność na dysku | AES-256-GCM, DEK z klucza głównego spoza magazynu |
+| Integralność i anti-swap | `AAD` = nazwa wpisu; przeniesienie szyfrogramu pod inną nazwę unieważnia tag |
+| Nierozróżnialność | losowy nonce per zapis — dwa równe sekrety dają różne szyfrogramy |
+| Prawa systemu plików | plik `0600` w katalogu `0700`, nadane przez `os.open` **przy tworzeniu** |
+| Atomowość | zapis do pliku tymczasowego + `os.replace`; brak stanu połowicznego |
+| Fail-closed przy starcie | brak/nierozwiązywalny `key_ref` = magazyn NIE powstaje; nie ma trybu zapisu jawnego |
+| Fail-closed przy odczycie | uszkodzony plik to błąd, nie „pusty magazyn" (inaczej awaria wyglądałaby jak wygaśnięcie tokenu) |
+| Ograniczenie kręgu zaufania | `secret_store.key_ref` nie przyjmuje schematu `husarz:` — magazyn nie odblokuje się własnym sekretem |
+| Higiena wyjścia | token nie występuje w modelu odpowiedzi, w audycie ani w komunikatach błędów |
+
+**Osobne ryzyko: echo wartości w błędzie walidacji.** Domyślna obsługa
+`RequestValidationError` w FastAPI zwraca odrzuconą wartość w polu `input`. Gdyby pole
+`token` miało ograniczenie `max_length` Pydantica, przekroczenie limitu odesłałoby token
+w treści odpowiedzi 422 — a stamtąd trafiłby do dziennika dostępu serwera. Dlatego pole jest
+**celowo bez ograniczeń Pydantica**, a długość i pustkę sprawdza endpoint, zgłaszając
+komunikat, który wartości nie powtarza. Pokryte regresją.
+
+**Kolejność operacji jako kontrola bezpieczeństwa.** Kreator sprawdza kolizję nazwy
+**przed** zapisem sekretu. Naiwna kolejność (zapisz → dodaj połączenie → posprzątaj po
+błędzie) przy zajętej nazwie nadpisałaby token istniejącego połączenia, a sprzątanie
+skasowałoby go zupełnie — cicha utrata działającego poświadczenia. Wykryte i domknięte
+w trakcie implementacji, pokryte regresją.
+
+**Usuwanie sekretu przy usuwaniu połączenia** dotyczy wyłącznie referencji `husarz:git/<ta
+sama nazwa>`. Sekret wskazany przez `env:`/`vault:` nie jest własnością Husarza — operator
+mógł go użyć także gdzie indziej — i nie jest ruszany.
+
+| Niezmiennik | Test |
+|---|---|
+| Materiał NIE występuje jawnie w pliku magazynu | `test_zapisany_token_nie_wystepuje_jawnie_w_pliku` |
+| Materiał NIE występuje w pliku połączeń | `test_token_nie_trafia_do_pliku_polaczen` |
+| Materiał NIE występuje w dzienniku audytu | `test_token_nie_trafia_do_dziennika_audytu` |
+| Materiał NIE występuje w ŻADNYM pliku powstałym podczas operacji | `test_token_nie_wycieka_do_zadnego_artefaktu_na_dysku` |
+| Odpowiedź HTTP niesie referencję, nie token | `test_odpowiedz_zawiera_referencje_a_nie_token` |
+| Komunikat o za długim tokenie nie powtarza wartości | `test_za_dlugi_token_nie_wraca_w_komunikacie_bledu` |
+| Zły klucz główny → `None`, nie śmieci i nie wyjątek | `test_zly_klucz_glowny_nie_odszyfrowuje` |
+| Podmiana szyfrogramu pod inną nazwę jest wykrywana (AAD) | `test_podmiana_wpisu_pod_inna_nazwe_jest_wykrywana` |
+| Prawa `0600` / `0700` po realnym zapisie | `test_prawa_pliku_i_katalogu_sa_wlasciwe` |
+| Zapis nie zostawia pliku tymczasowego z szyfrogramem | `test_po_zapisie_nie_zostaje_plik_tymczasowy` |
+| Uszkodzony plik nie udaje pustego magazynu | `test_uszkodzony_plik_nie_udaje_pustego_magazynu` |
+| Bez klucza głównego magazyn nie powstaje | `test_brak_klucza_glownego_blokuje_budowe` |
+| Ten sam sekret dwa razy → różne szyfrogramy (losowy nonce) | `test_ten_sam_sekret_dwa_razy_daje_rozne_szyfrogramy` |
+| Wyłączony magazyn = odmowa, nie cichy zapis | `test_bez_magazynu_kreator_odmawia_zamiast_zapisac_gdziekolwiek` |
+| Kolizja nazwy nie niszczy istniejącego sekretu | `test_kolizja_nazwy_nie_niszczy_istniejacego_sekretu` |
+| Usunięcie połączenia nie rusza referencji zewnętrznej | `test_usuniecie_polaczenia_nie_rusza_referencji_zewnetrznej` |
+
+**Nośność testów sprawdzona.** Trzynaście mutacji kodu (stałe `AAD`, prawa `0644`/`0755`,
+zapis jawny zamiast szyfrowania, uszkodzony plik traktowany jak pusty, przepuszczony brak
+klucza, audyt zapisujący token, komunikat echujący token, usunięty pre-check kolizji,
+kasowanie sekretu bez sprawdzenia właściciela) — **każda** czerwieni odpowiedni test.
+Testy chronią mechanizm, a nie tylko go opisują.
+
+**Weryfikacja na uruchomionej aplikacji.** Kreator przeszedł pełny obieg na realnej instancji
+(`husarz up`, profil dev): dodanie połączenia, odczyt stanu magazynu, restart procesu,
+usunięcie połączenia. Sprawdzone na artefaktach z dysku, nie na deklaracjach:
+
+- token nie występuje jawnie w `data/`, `audit/` ani w logu serwera (przeszukanie całego drzewa),
+- plik magazynu zawiera szyfrogram base64, prawa `-rw-------`, katalog `drwx------`,
+- plik połączeń zawiera wyłącznie `husarz:git/<nazwa>`,
+- ten sam plik odszyfrowany właściwym kluczem zwraca token bajt w bajt; **innym kluczem — `None`**,
+- po restarcie procesu wpis i połączenie są nadal obecne i rozwiązywalne,
+- druga instancja z wyłączonym magazynem odmawia (HTTP 409) i **nie tworzy żadnego pliku**.
+
+**Ograniczenia — wprost.**
+
+1. **Siła magazynu = ochrona klucza głównego.** Klucz w ENV obok pliku magazynu chroni kopie
+   zapasowe i wyniesiony dysk, ale nie napastnika działającego już na koncie operatora.
+   Vault daje realną separację. Sekret jest z definicji odszyfrowywalny przez sam proces
+   Husarza — żadna konstrukcja tego nie zmieni.
+2. **DEK wyprowadzany przez SHA-256, nie przez KDF z solą i rozciąganiem.** Poprawne dla
+   materiału z dostawcy sekretów (klucz losowy). Gdyby kiedykolwiek dopuścić **hasło
+   operatora** jako źródło, `derive_key` MUSI zostać zastąpione przez scrypt/Argon2.
+3. **Brak rotacji i wygasania.** Ponowny zapis pod tą samą nazwą zastępuje wartość i to cała
+   dostępna dziś „rotacja"; nic nie przypomina, że token dostawcy wygasa.
+4. **Nie weryfikowano** zachowania na systemie plików bez atomowego `rename` (niektóre udziały
+   sieciowe) ani współbieżnego zapisu z dwóch procesów Husarza wskazujących ten sam plik.
+   Drugi przypadek jest z założenia niewspierany — magazyn ma być jedną instancją na proces.

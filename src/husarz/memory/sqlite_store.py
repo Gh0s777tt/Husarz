@@ -20,6 +20,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from husarz.core.errors import CryptoError
 from husarz.memory.crypto import Cipher, IdentityCipher
 from husarz.memory.errors import RagBackendError
 from husarz.memory.store import Hit, cosine
@@ -92,7 +93,14 @@ class SqliteVectorStore:
         aad = namespace.encode("utf-8")
         hits: list[Hit] = []
         for (sealed,) in rows:
-            record = json.loads(self._cipher.unseal(sealed, aad=aad))
+            try:
+                record = json.loads(self._cipher.unseal(sealed, aad=aad))
+            except CryptoError as exc:
+                # Prymityw z `core` zgłasza CryptoError; pamięć ma własny, ustalony
+                # kontrakt błędu — tłumaczymy, żeby wołający nie musiał znać obu.
+                raise RagBackendError(
+                    f"Nie można odszyfrować rekordu pamięci w kolekcji '{namespace}': {exc}"
+                ) from exc
             stored_vec = record["vector"]
             if len(stored_vec) != len(vector):
                 # Fail-closed anty-korupcja: zmieniono model/wymiar embeddera pod istniejącym

@@ -49,6 +49,39 @@ def _navigate(data: Any, dotted_key: str) -> str | None:
     return current if isinstance(current, str) else None
 
 
+class ChainedSecretsProvider:
+    """Pyta dostawców po kolei; wygrywa PIERWSZY, który zwróci wartość.
+
+    Po co: od Etapu 17 referencje mogą wskazywać zarówno źródła zewnętrzne (``env:``,
+    ``file:``, ``vault:``, ``sops:``), jak i zapisywalny magazyn Husarza (``husarz:``).
+    Wołający nie powinien wiedzieć, który dostawca obsłuży daną referencję — łańcuch
+    ukrywa to za jednym interfejsem.
+
+    Kolejność ma znaczenie tylko przy nakładających się schematach; dostawcy w tym projekcie
+    rozpoznają rozłączne prefiksy, więc w praktyce jest obojętna. Dostawca, który zgłosi
+    wyjątek, NIE przerywa łańcucha — awaria jednego źródła nie może unieruchomić pozostałych.
+
+    Args:
+        providers: Dostawcy w kolejności odpytywania.
+    """
+
+    def __init__(self, providers: list[SecretsProvider]) -> None:
+        self._providers = list(providers)
+
+    def resolve(self, ref: str) -> str | None:
+        """Zwraca pierwszą znalezioną wartość albo ``None``, gdy żaden dostawca jej nie ma."""
+        for provider in self._providers:
+            try:
+                value = provider.resolve(ref)
+            # noqa S112: świadomie NIE logujemy wyjątku — komunikat dostawcy sekretów może
+            # nieść materiał (tak samo postępują SopsSecretsProvider i VaultSecretsProvider).
+            except Exception:  # noqa: BLE001, S112 - fail-soft, bez logowania treści
+                continue
+            if value is not None:
+                return value
+        return None
+
+
 class NullSecretsProvider:
     """Dostawca, który nic nie zwraca. Bezpieczny domyślny wybór."""
 

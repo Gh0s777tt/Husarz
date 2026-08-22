@@ -191,12 +191,13 @@ class GitConnectionIn(BaseModel):
     @field_validator("token_ref")
     @classmethod
     def _token_ref_is_reference(cls, value: str) -> str:
-        # Wymuszamy REFERENCJĘ (env:/file:/vault:/sops:) — surowy token nie może trafić
-        # do magazynu na dysku (spójnie z „sekrety poza repo/magazynem").
-        if not value.startswith(("env:", "file:", "vault:", "sops:")):
+        # Wymuszamy REFERENCJĘ — surowy token nie może trafić do magazynu połączeń na
+        # dysku (spójnie z „sekrety poza repo/magazynem"). `husarz:` wskazuje zapisywalny
+        # magazyn sekretów; wpisy powstają tam przez kreator, nie przez to pole.
+        if not value.startswith(("env:", "file:", "vault:", "sops:", "husarz:")):
             raise ValueError(
-                "token_ref musi być referencją do sekretu (env:/file:/vault:/sops:), "
-                "a nie samą wartością tokenu."
+                "token_ref musi być referencją do sekretu "
+                "(env:/file:/vault:/sops:/husarz:), a nie samą wartością tokenu."
             )
         return value
 
@@ -211,6 +212,58 @@ class GitConnectionIn(BaseModel):
         if not parsed.hostname:
             raise ValueError("api_base nie zawiera hosta.")
         return value
+
+
+class GitConnectionWizardIn(BaseModel):
+    """Żądanie kreatora połączeń: przyjmuje SAM TOKEN, nie referencję.
+
+    To jedyne miejsce w API, przez które materiał sekretu wchodzi do Husarza. Token jest
+    natychmiast zapisywany w szyfrowanym magazynie (:mod:`husarz.security.secret_store`),
+    a w magazynie połączeń ląduje wyłącznie wygenerowana referencja ``husarz:git/<nazwa>``.
+
+    **Pole ``token`` celowo NIE ma ograniczeń Pydantic** (``min_length``/``max_length``).
+    Powód jest konkretny: domyślna obsługa ``RequestValidationError`` w FastAPI zwraca
+    w ciele odpowiedzi pole ``input`` z ODRZUCONĄ WARTOŚCIĄ. Ograniczenie długości na
+    ``token`` sprawiłoby, że przy naruszeniu limitu token wróciłby w treści błędu 422 —
+    a stamtąd trafiłby do dziennika dostępu serwera. Długość i pustkę sprawdza więc
+    endpoint, zgłaszając komunikat, który wartości nie powtarza.
+
+    Ten model NIE jest używany jako model odpowiedzi nigdzie w API — odpowiedzią jest
+    :class:`GitConnectionView`, w którym pola ``token`` po prostu nie ma.
+    """
+
+    name: str = Field(min_length=1, max_length=64)
+    provider: Literal["github", "gitlab"]
+    api_base: str = Field(min_length=1, max_length=256)
+    token: str
+    username: str | None = Field(default=None, max_length=128)
+
+    @field_validator("api_base")
+    @classmethod
+    def _api_base_is_https(cls, value: str) -> str:
+        """Ten sam kontrakt co w :class:`GitConnectionIn` — https i bez poświadczeń w URL."""
+        parsed = urlparse(value)
+        if parsed.scheme != "https":
+            raise ValueError("api_base musi być adresem https://.")
+        if parsed.username or parsed.password or "@" in parsed.netloc:
+            raise ValueError("api_base nie może zawierać poświadczeń w URL.")
+        if not parsed.hostname:
+            raise ValueError("api_base nie zawiera hosta.")
+        return value
+
+
+class SecretEntryView(BaseModel):
+    """Widok wpisu magazynu sekretów — nazwa i data, NIGDY wartość ani szyfrogram."""
+
+    name: str
+    created_at: str
+
+
+class SecretStoreStatusView(BaseModel):
+    """Stan magazynu sekretów dla panelu (czy kreator jest dostępny)."""
+
+    enabled: bool
+    entries: list[SecretEntryView]
 
 
 class GitConnectionView(BaseModel):

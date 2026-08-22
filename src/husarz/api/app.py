@@ -47,6 +47,7 @@ from husarz.api.schemas import (
     ConfigSummary,
     GitConnectionIn,
     GitConnectionView,
+    GitConnectionWizardIn,
     HealthResponse,
     LoginRequest,
     MeResponse,
@@ -60,6 +61,8 @@ from husarz.api.schemas import (
     RegisterRequest,
     RemoteToolView,
     RepoView,
+    SecretEntryView,
+    SecretStoreStatusView,
     ToolInfo,
     UsageResponse,
     ValidateRequest,
@@ -99,6 +102,7 @@ from husarz.security.audit import AuditLog, build_audit_log
 from husarz.security.errors import AuditError, SecurityError
 from husarz.security.rbac import Rbac
 from husarz.security.roe_runtime import build_roe_runtime
+from husarz.security.secret_store import EncryptedFileSecretStore, SecretStoreError
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -232,6 +236,7 @@ def create_app(
     chat_model: str | None = None,
     trusted_hosts: list[str] | None = None,
     secrets: SecretsProvider | None = None,
+    secret_store: EncryptedFileSecretStore | None = None,
 ) -> FastAPI:
     """Buduje aplikację FastAPI dla podanej konfiguracji.
 
@@ -859,15 +864,130 @@ def create_app(
             token_ref=conn.token_ref,
         )
 
+    # Maksymalna długość przyjmowanego tokenu. Nie jest to ograniczenie Pydantic (patrz
+    # GitConnectionWizardIn) — sprawdzamy tu, żeby komunikat błędu NIE powtórzył wartości.
+    _MAX_TOKEN_LEN = 4096
+
+    def _require_secret_store() -> EncryptedFileSecretStore:
+        # Kreator wymaga ZAPISYWALNEGO magazynu. Bez niego jedyną drogą jest referencja do
+        # źródła zewnętrznego — mówimy to wprost, zamiast po cichu zapisać token gdziekolwiek.
+        if secret_store is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Magazyn sekretów jest wyłączony — kreator nie ma gdzie bezpiecznie "
+                    "zapisać tokenu. Włącz security.secret_store (enabled + key_ref) albo "
+                    "dodaj połączenie przez referencję (env:/file:/vault:/sops:)."
+                ),
+            )
+        return secret_store
+
+    @app.get(
+        "/api/secrets/store",
+        response_model=SecretStoreStatusView,
+        dependencies=[dep_git_read],
+    )
+    def secret_store_status() -> SecretStoreStatusView:
+        """Stan magazynu dla panelu: czy kreator jest dostępny i jakie wpisy istnieją.
+
+        Zwraca WYŁĄCZNIE nazwy i znaczniki czasu. Wartości i szyfrogramy nie opuszczają
+        procesu — panel nigdy nie ma powodu ich zobaczyć.
+        """
+        if secret_store is None:
+            return SecretStoreStatusView(enabled=False, entries=[])
+        wpisy = [secret_store.describe(n) for n in secret_store.names()]
+        return SecretStoreStatusView(
+            enabled=True,
+            entries=[SecretEntryView(**o) for o in wpisy if o is not None],
+        )
+
+    @app.post(
+        "/api/git/connections/wizard",
+        response_model=GitConnectionView,
+        dependencies=[dep_git_write],
+    )
+    def git_add_connection_with_token(request: GitConnectionWizardIn) -> GitConnectionView:
+        """Kreator: przyjmuje token, zapisuje go zaszyfrowany, tworzy połączenie z referencją.
+
+        Kolejność operacji jest ISTOTNA. Najpierw sprawdzamy kolizję nazwy połączenia, potem
+        zapisujemy sekret, na końcu tworzymy połączenie. Odwrotna kolejność zostawiałaby
+        w magazynie osierocony sekret za każdym razem, gdy nazwa jest zajęta.
+        """
+        store = _require_secret_store()
+        token = request.token.strip()
+        if not token:
+            raise HTTPException(status_code=400, detail="Token jest pusty.")
+        if len(request.token) > _MAX_TOKEN_LEN:
+            # Komunikat celowo nie powtarza wartości ani jej fragmentu.
+            raise HTTPException(
+                status_code=400,
+                detail=f"Token jest dłuższy niż {_MAX_TOKEN_LEN} znaków — to nie wygląda na token.",
+            )
+        svc = _require_git()
+        # Kolizję sprawdzamy PRZED zapisem sekretu i przez magazyn (svc.get rzuca wyjątek
+        # dla nieistniejącej nazwy, więc nie nadaje się do sprawdzania istnienia).
+        # To nie optymalizacja, tylko ochrona danych: bez tego `put` nadpisałby token
+        # istniejącego połączenia, a sprzątanie po nieudanym `add` skasowałoby go zupełnie.
+        if svc.store.get(request.name) is not None:
+            raise HTTPException(
+                status_code=409, detail=f"Połączenie '{request.name}' już istnieje."
+            )
+
+        nazwa_sekretu = f"git/{request.name}"
+        try:
+            token_ref = store.put(nazwa_sekretu, token)
+        except SecretStoreError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        conn = GitConnection(
+            name=request.name,
+            provider=GitProviderKind(request.provider),
+            api_base=request.api_base,
+            token_ref=token_ref,
+            username=request.username,
+        )
+        try:
+            svc.add(conn)
+        except GitConnectionError as exc:
+            # Sprzątamy zapisany przed chwilą sekret — inaczej zostałby osierocony.
+            store.delete(nazwa_sekretu)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        # W audycie: nazwa, dostawca i REFERENCJA. Nigdy token — dziennik audytu jest
+        # niemodyfikowalny, więc sekret raz w nim zapisany zostałby tam na zawsze.
+        audit_log.record(
+            "api",
+            "git.connection.add",
+            {"name": conn.name, "provider": conn.provider, "token_ref": token_ref, "wizard": True},
+        )
+        return GitConnectionView(
+            name=conn.name,
+            provider=conn.provider.value,
+            api_base=conn.api_base,
+            username=conn.username,
+            token_ref=conn.token_ref,
+        )
+
     @app.delete("/api/git/connections/{name}")
     def git_remove_connection(
         name: str, principal: Principal | None = dep_git_write
     ) -> dict[str, bool]:
-        _require_git().remove(name)
+        svc = _require_git()
+        # Referencję odczytujemy PRZED usunięciem — potem połączenia już nie ma.
+        istniejace = svc.store.get(name)
+        svc.remove(name)
+        # Sekret kasujemy TYLKO wtedy, gdy należał do tego połączenia i pochodził
+        # z naszego magazynu. Referencji zewnętrznej (env:/vault:) nie ruszamy — nie jest
+        # nasza, a operator mógł jej użyć także gdzie indziej.
+        sekret_usuniety = False
+        oczekiwana = f"husarz:git/{name}"
+        nasz_sekret = istniejace is not None and istniejace.token_ref == oczekiwana
+        if secret_store is not None and nasz_sekret:
+            sekret_usuniety = secret_store.delete(f"git/{name}")
         audit_log.record(
             "api",
             "git.connection.remove",
-            {"name": name[:64]},
+            {"name": name[:64], "secret_removed": sekret_usuniety},
             principal=_principal_ref(principal),
         )
         return {"ok": True}

@@ -7,8 +7,10 @@ nie modeli — spójna z zasadą „nie używamy cudzych API modeli".
 ## Zasady bezpieczeństwa
 
 - **Token jako referencja do sekretu** — połączenie przechowuje `token_ref`
-  (`env:GITHUB_TOKEN`, `file:gh`, `vault:…`), NIGDY samej wartości. Token rozwiązywany
-  jest dopiero przy operacji, przez dostawcę sekretów.
+  (`env:GITHUB_TOKEN`, `file:gh`, `vault:…`, `husarz:git/…`), NIGDY samej wartości. Token
+  rozwiązywany jest dopiero przy operacji, przez dostawcę sekretów. Dotyczy to także
+  tokenu wklejonego w kreatorze: trafia on do szyfrowanego magazynu, a w pliku połączeń
+  ląduje wyłącznie wygenerowana referencja (patrz „Dodanie połączenia" niżej).
 - **Bramka egress (deny-all)** — host dostawcy (`api.github.com`, `gitlab.com`) musi
   być na `security.egress.allowlist`, inaczej połączenie jest blokowane (`EgressError`
   → HTTP 403). Suwerenność: bez jawnej zgody nie łączymy się z WAN. Git **świadomie nie
@@ -48,23 +50,116 @@ connections_path: ./data/git-connections.json   # null = w pamięci
 Sekret z tokenem (PAT) dostarcz przez ENV/Vault/SOPS, np. `HUSARZ...`/`GITHUB_TOKEN`
 i wskaż go w `token_ref` połączenia.
 
+## Dodanie połączenia — dwie drogi
+
+Token (PAT) generujesz u dostawcy: GitHub → *Settings → Developer settings → Personal access
+tokens*; GitLab → *Preferences → Access tokens*. Zakresy: patrz „Ograniczenia" na końcu — nie
+są równoważne między dostawcami. Husarz nie generuje tokenów za Ciebie.
+
+Dalej masz do wyboru dwie drogi. **Obie kończą się tak samo**: w pliku połączeń leży
+referencja, nigdy materiał.
+
+### A. Wklej token w konsoli (kreator)
+
+Wymaga włączonego magazynu sekretów. Husarz zapisuje token **zaszyfrowany** i sam tworzy
+referencję `husarz:git/<nazwa-połączenia>`.
+
+```yaml
+# config/security.yaml
+secret_store:
+  enabled: true
+  key_ref: env:HUSARZ_SECRET_STORE_KEY   # klucz GŁÓWNY — schemat zewnętrzny, nie `husarz:`
+  path: ./data/secrets/store.json        # null → <data_dir>/secrets/store.json
+```
+
+Klucz główny dostarczasz tak, jak każdy inny sekret:
+
+```bash
+export HUSARZ_SECRET_STORE_KEY="$(openssl rand -base64 32)"
+```
+
+W konsoli: zakładka **Połączenia** → *Dodaj połączenie* → tryb **„Wklej token"**. Pole tokenu
+jest hasłowe, a po udanym zapisie jest czyszczone.
+
+![Zakładka Połączenia — kreator zapisujący token zaszyfrowany](assets/screenshots/console-polaczenia.png){ .shadow loading=lazy }
+
+Przez API to samo robi `POST /api/git/connections/wizard`:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/git/connections/wizard \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"moj-github","provider":"github",
+       "api_base":"https://api.github.com","token":"ghp_..."}'
+# → {"name":"moj-github", ..., "token_ref":"husarz:git/moj-github"}
+```
+
+Co się dzieje z tokenem — i czego NIE robi Husarz:
+
+| Miejsce | Co tam trafia |
+|---|---|
+| `data/secrets/store.json` | szyfrogram AES-256-GCM (plik `0600` w katalogu `0700`) |
+| `data/git-connections.json` | wyłącznie `husarz:git/<nazwa>` |
+| dziennik audytu | nazwa, dostawca i referencja — **nigdy token** |
+| odpowiedź HTTP | referencja; pola z tokenem nie ma w modelu odpowiedzi |
+| plik konfiguracji | nic |
+
+Usunięcie połączenia kasuje też jego sekret — ale **tylko wtedy**, gdy połączenie faktycznie
+używało referencji `husarz:git/<ta-sama-nazwa>`. Sekret wskazany przez `env:` czy `vault:` nie
+jest własnością Husarza i nie jest ruszany.
+
+### B. Podaj referencję do sekretu, którym już zarządzasz
+
+Nie wymaga magazynu i pozostaje **zalecana tam, gdzie masz Vaulta albo SOPS-a**: klucz
+i materiał zostają w systemie, który już audytujesz.
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+curl -X POST http://127.0.0.1:8000/api/git/connections \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"moj-github","provider":"github",
+       "api_base":"https://api.github.com","token_ref":"env:GITHUB_TOKEN"}'
+```
+
+W konsoli: ten sam formularz, tryb **„Podaj referencję do sekretu"**. Gdy magazyn jest
+wyłączony, konsola sama przełącza się w ten tryb i wyjaśnia, czego brakuje — kreator nie
+udaje, że działa.
+
+### Którą wybrać
+
+| Sytuacja | Droga |
+|---|---|
+| Pojedyncza instalacja na własnej maszynie | **A** — jeden krok, bez dotykania powłoki |
+| Masz Vaulta / SOPS-a i procedurę rotacji | **B** — nie dubluj zarządzania sekretami |
+| Wdrożenie w kontenerze, sekrety wstrzykiwane przez orkiestrator | **B** |
+| Chcesz, żeby token przeżył restart bez wpisywania do `.env` | **A** |
+
+!!! warning "Magazyn jest tak mocny, jak ochrona klucza głównego"
+    Klucz w Vaulcie daje realną separację. Klucz w zmiennej środowiskowej **obok** pliku
+    magazynu chroni przede wszystkim kopie zapasowe i wyniesiony dysk — nie kogoś, kto
+    już działa na koncie operatora. Pełny model zagrożeń:
+    [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md) i [ADR-0023](adr/0023-zapisywalny-magazyn-sekretow.md).
+
 ## Endpointy
 
 | Metoda i ścieżka | Opis | Uprawnienie |
 |------------------|------|-------------|
 | `GET /api/git/connections` | lista połączeń (bez sekretu; tylko `token_ref`) | `git:read` |
 | `POST /api/git/connections` | `{name, provider, api_base, token_ref, username?}` | `git:write` |
+| `POST /api/git/connections/wizard` | `{name, provider, api_base, token, username?}` — token zapisywany zaszyfrowany | `git:write` |
+| `GET /api/secrets/store` | stan magazynu: `enabled` + nazwy wpisów (bez wartości) | `git:read` |
 | `DELETE /api/git/connections/{name}` | usuń połączenie | `git:write` |
 | `GET /api/git/connections/{name}/repos` | lista repozytoriów | `git:read` |
 | `POST /api/git/connections/{name}/pull-request` | `{repo, title, head, base, body?}` → PR/MR | `git:pr` |
 
 Błędy: nieznane połączenie → `404`; egress zablokowany → `403`; token/dostawca
-odrzucił → `502`; kolizja nazwy połączenia → `409`.
+odrzucił → `502`; kolizja nazwy połączenia → `409`; kreator przy wyłączonym magazynie
+→ `409` z instrukcją, co włączyć.
 
 ## Konsola
 
-Zakładka **Połączenia**: lista/dodawanie/usuwanie połączeń (token jako referencja),
-podgląd repozytoriów i formularz utworzenia PR/MR dla wybranego połączenia.
+Zakładka **Połączenia**: lista/dodawanie/usuwanie połączeń, podgląd repozytoriów
+i formularz utworzenia PR/MR dla wybranego połączenia. Formularz dodawania ma
+przełącznik trybu — wklejenie tokenu albo podanie referencji (patrz wyżej).
 
 ## Ograniczenia
 
@@ -100,6 +195,11 @@ podgląd repozytoriów i formularz utworzenia PR/MR dla wybranego połączenia.
     Do samego listowania projektów wystarcza `read_api` — nadawaj `api` dopiero wtedy,
     gdy faktycznie tworzysz MR-y.
 
+- Kreator **nie generuje tokenu za Ciebie** — token nadal tworzysz u dostawcy i wklejasz.
+  Magazyn sekretów jest warunkiem koniecznym pełnego OAuth (token musi mieć gdzie wylądować),
+  ale sam z siebie go nie wprowadza.
+- Magazyn nie przypomina o **wygasaniu** tokenu ani go nie rotuje. Ponowny zapis pod tą
+  samą nazwą zastępuje wartość — to cała dostępna dziś „rotacja".
 - Uwierzytelnianie: **PAT** (token) przez referencję do sekretu. Pełny **OAuth**
   (rejestracja aplikacji + callback) — kolejny krok (lepszy dla trybu hostowanego,
   wielu użytkowników z własnymi tokenami szyfrowanymi at-rest). Uwaga: na GitHubie
@@ -109,4 +209,5 @@ podgląd repozytoriów i formularz utworzenia PR/MR dla wybranego połączenia.
 - PR opiera się na istniejących gałęziach po stronie dostawcy; automatyczny commit
   plików + push przez API dostawcy (agent „Kopijnik") — do rozbudowy.
 
-Decyzje: [ADR-0011](adr/0011-integracje-git.md).
+Decyzje: [ADR-0011](adr/0011-integracje-git.md),
+[ADR-0023](adr/0023-zapisywalny-magazyn-sekretow.md).

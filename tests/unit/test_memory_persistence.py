@@ -12,6 +12,7 @@ from husarz.config.schema import (
     RagBackendConfig,
     SecurityConfig,
 )
+from husarz.core.errors import CryptoError
 from husarz.memory import (
     AesGcmCipher,
     IdentityCipher,
@@ -48,14 +49,14 @@ def test_aesgcm_wrong_aad_rejected() -> None:
     # AAD=namespace: rekordu z kolekcji A nie da się odszyfrować jako kolekcji B (anti-swap).
     cipher = AesGcmCipher(_KEY32)
     sealed = cipher.seal(b"x", aad=b"agentA")
-    with pytest.raises(RagBackendError):
+    with pytest.raises(CryptoError):
         cipher.unseal(sealed, aad=b"agentB")
 
 
 def test_aesgcm_bad_key_rejected() -> None:
     cipher = AesGcmCipher(_KEY32)
     sealed = cipher.seal(b"x", aad=b"ns")
-    with pytest.raises(RagBackendError):
+    with pytest.raises(CryptoError):
         AesGcmCipher(b"z" * 32).unseal(sealed, aad=b"ns")
 
 

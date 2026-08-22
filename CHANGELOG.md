@@ -5,6 +5,65 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 17 — zapisywalny magazyn sekretów i kreator połączeń Git)
+- Nowy moduł `husarz.security.secret_store` — szyfrowany, ZAPISYWALNY magazyn sekretów.
+  Pierwsze miejsce, w którym Husarz PRZYJMUJE materiał sekretu, zamiast wyłącznie rozwiązywać
+  referencje do materiału umieszczonego gdzie indziej ręką operatora. Nowy schemat referencji
+  `husarz:<nazwa>`; magazyn implementuje `SecretsProvider`, więc wpina się w istniejący łańcuch
+  jako kolejne źródło, a nie obok niego. Docs: ADR-0023.
+- **Niezmiennik „config nie zawiera materiału" zachowany**: token wklejony w kreatorze trafia
+  zaszyfrowany do osobnego pliku, a do magazynu połączeń idzie WYŁĄCZNIE wygenerowana
+  referencja `husarz:git/<nazwa>` — dokładnie tak, jak wcześniej szła tam `env:`/`vault:`.
+- `POST /api/git/connections/wizard` — kreator: przyjmuje token, zwraca połączenie z referencją.
+  `GET /api/secrets/store` — stan magazynu dla panelu (nazwy wpisów i daty, NIGDY wartości).
+- Konsola WWW, zakładka **Połączenia**: przełącznik trybu „wklej token" / „podaj referencję".
+  Pole tokenu jest hasłowe (`type=password`, bez autouzupełniania) i czyszczone po zapisie —
+  także po to, by nie trafiło na zrzuty ekranu do dokumentacji. Przy wyłączonym magazynie
+  konsola sama przełącza się na referencję i wyjaśnia, czego brakuje, zamiast udawać, że działa.
+- `security.secret_store` w konfiguracji (`enabled`, `path`, `key_ref`). Domyślnie **wyłączony**
+  (deny-by-default). Włączenie WYMAGA `key_ref`; walidacja odrzuca dla niego schemat `husarz:` —
+  magazyn odblokowywany własnym sekretem byłby zamkniętym kręgiem.
+- Usunięcie połączenia kasuje jego sekret, ale WYŁĄCZNIE gdy używało referencji
+  `husarz:git/<ta sama nazwa>`. Referencji zewnętrznej (`env:`/`vault:`) nie ruszamy — nie jest
+  własnością Husarza, a operator mógł jej użyć także gdzie indziej.
+- `ChainedSecretsProvider` (`husarz.config.secrets`) — pyta dostawców po kolei; wyjątek jednego
+  nie przerywa łańcucha (awaria jednego źródła nie może unieruchomić pozostałych).
+- Testy: +36 (`tests/security/test_secret_store.py`, `tests/security/test_git_wizard_secrets.py`),
+  w tym niezmiennik zbiorczy przeszukujący WSZYSTKIE pliki powstałe podczas operacji.
+  **Nośność sprawdzona**: 13 mutacji kodu, każda czerwieni odpowiedni test.
+- `scripts/screenshots.py --only <zakładka>` — odświeżanie podzbioru zrzutów. Zrzut czatu
+  wymaga działającego modelu, więc komplet zmuszał do podnoszenia Ollamy przy zmianie w innej
+  zakładce. Nowy zrzut `console-polaczenia.png`.
+
+### Zmienione (Etap 17 — warstwowanie)
+- Prymityw szyfrowania at-rest przeniesiony z `husarz.memory.crypto` do **`husarz.core.crypto`**
+  (warstwa 0): `Cipher`, `IdentityCipher`, `AesGcmCipher` oraz nowe `derive_key`. Powód: tego
+  samego szyfru potrzebują DWA niezależne podsystemy warstwy 3 — pamięć długoterminowa
+  i magazyn sekretów — a żaden nie może być zależnością drugiego. `husarz.memory.crypto`
+  re-eksportuje klasy, więc **wszystkie dotychczasowe importy działają bez zmian**; w pakiecie
+  pamięci zostaje sama POLITYKA (`build_cipher`).
+- **Zmiana kontraktu (drobna)**: metody `AesGcmCipher` zgłaszają teraz `CryptoError`
+  (`husarz.core.errors`) zamiast `RagBackendError`. Kontrakt PAMIĘCI jest nienaruszony —
+  `build_cipher` nadal zgłasza `RagBackendError`, a `SqliteVectorStore` tłumaczy błąd
+  deszyfrowania na własny typ. Dotyczy wyłącznie kodu wołającego prymityw bezpośrednio.
+
+### Bezpieczeństwo (Etap 17)
+- Pole `token` w żądaniu kreatora **celowo bez ograniczeń Pydantica**: domyślna obsługa
+  `RequestValidationError` w FastAPI zwraca odrzuconą wartość w polu `input`, więc
+  `max_length` sprawiłoby, że przekroczenie limitu odsyła token w treści odpowiedzi 422 —
+  a stamtąd trafia on do dziennika dostępu serwera. Długość sprawdza endpoint, komunikatem,
+  który wartości nie powtarza.
+- **Kolejność operacji jako kontrola bezpieczeństwa**: kolizja nazwy połączenia sprawdzana
+  PRZED zapisem sekretu. Naiwna kolejność (zapisz → dodaj → posprzątaj po błędzie) przy
+  zajętej nazwie nadpisywała token istniejącego połączenia, a sprzątanie kasowało go
+  zupełnie — cicha utrata działającego poświadczenia. Wykryte w trakcie implementacji.
+- Plik magazynu tworzony przez `os.open` z trybem `0600` (nie `write_text`), w katalogu
+  `0700`; zapis atomowy przez plik tymczasowy + `os.replace`. `AAD` = nazwa wpisu (anti-swap).
+  Uszkodzony plik to BŁĄD, nie „pusty magazyn" — inaczej awaria wyglądałaby jak wygaśnięcie
+  tokenu. Notatka weryfikacyjna z przebiegiem na uruchomionej aplikacji i lista ograniczeń:
+  `docs/BEZPIECZENSTWO.md`, sekcja „Etap 17".
+
+
 ### Dodane (Etap 15 — pinowanie IP / domknięcie TOCTOU DNS-rebindingu)
 - Nowy moduł `husarz.ssrf` — WSPÓLNA warstwa anty-SSRF dla ścieżek wychodzących (`web`,
   wtyczki MCP): klasyfikacja hostów (literał/loopback/nazwa), `resolve_and_pin`, `pin_fields`

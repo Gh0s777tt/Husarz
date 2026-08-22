@@ -28,6 +28,7 @@ from husarz.config.schema import (
     ToolConfig,
 )
 from husarz.config.secrets import (
+    ChainedSecretsProvider,
     EnvSecretsProvider,
     FileSecretsProvider,
     NullSecretsProvider,
@@ -58,6 +59,7 @@ __all__ = [
     "SopsSecretsProvider",
     "ToolConfig",
     "VaultSecretsProvider",
+    "ChainedSecretsProvider",
     "get_secrets_provider",
     "load_config",
     "resolve_config_dir",

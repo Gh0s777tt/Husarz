@@ -1,4 +1,4 @@
-"""Szyfrowanie at-rest pamięci (RAG) — wstrzykiwalny ``Cipher`` (seal/unseal).
+"""Szyfrowanie at-rest pamięci (RAG) — polityka budowy szyfru na bazie prymitywu z ``core``.
 
 Szyfrujemy CAŁY rekord (tekst + metadane + WEKTOR): inwersja embeddingu rekonstruuje
 treść/PII, więc jawny wektor obok zaszyfrowanego tekstu byłby luką. ``AAD = namespace``
@@ -9,88 +9,28 @@ wiąże szyfrogram z kolekcją (anti-swap — rekordu nie da się przenieść mi
   klucz z referencji do sekretu (DEK = SHA-256 sekretu → 32 B), losowy nonce 96-bit per rekord.
 
 Fail-closed: ``encrypt_at_rest=true`` bez rozwiązywalnego klucza → błąd (NIGDY cichy plaintext).
+
+**Gdzie mieszka co.** Same klasy szyfrów są prymitywem współdzielonym z magazynem sekretów
+(:mod:`husarz.security.secret_store`), więc żyją w :mod:`husarz.core.crypto` — warstwie
+niższej niż oba podsystemy. Tutaj zostaje wyłącznie POLITYKA pamięci: kiedy szyfrowanie jest
+wymagane, skąd bierze się klucz i jak brzmi błąd, gdy go brak.
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import os
-from typing import Protocol, runtime_checkable
-
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
+from husarz.core.crypto import AesGcmCipher, Cipher, IdentityCipher, derive_key
+from husarz.core.errors import CryptoError
 from husarz.memory.errors import RagBackendError
 
-_NONCE_BYTES = 12
-
-
-@runtime_checkable
-class Cipher(Protocol):
-    """Koperta at-rest: ``seal`` szyfruje, ``unseal`` deszyfruje; ``aad`` wiąże z namespace.
-
-    ``blind_id`` wyprowadza NIEODWRACALNY (bez klucza) identyfikator wiersza z ``item_id`` —
-    dzięki temu jawna kolumna klucza w magazynie nie zdradza odcisku treści (patrz ADR-0018).
-    """
-
-    def seal(self, plaintext: bytes, *, aad: bytes) -> bytes: ...
-
-    def unseal(self, sealed: bytes, *, aad: bytes) -> bytes: ...
-
-    def blind_id(self, item_id: str, *, namespace: str) -> str: ...
-
-
-class IdentityCipher:
-    """Brak szyfrowania (dev). Dozwolony tylko gdy ``encrypt_at_rest=false``."""
-
-    def seal(self, plaintext: bytes, *, aad: bytes) -> bytes:
-        return plaintext
-
-    def unseal(self, sealed: bytes, *, aad: bytes) -> bytes:
-        return sealed
-
-    def blind_id(self, item_id: str, *, namespace: str) -> str:
-        # Dev bez szyfrowania — brak sekretu do zaślepienia; zwracamy surowy id (parytet z RAM-em).
-        return item_id
-
-
-class AesGcmCipher:
-    """AES-256-GCM. Sealed = ``nonce(12B) || ciphertext+tag``. ``aad`` uwierzytelnia namespace."""
-
-    def __init__(self, key: bytes) -> None:
-        if len(key) != 32:
-            raise RagBackendError("Klucz AES-256 musi mieć 32 bajty.")
-        self._key = key
-
-    def blind_id(self, item_id: str, *, namespace: str) -> str:
-        """Zaślepiony klucz wiersza = HMAC-SHA256(DEK, namespace || 0x00 || item_id) w hex.
-
-        Deterministyczny (zachowuje dedup i ``UNIQUE(namespace,id)``), namespace'owany
-        (ten sam tekst w różnych kolekcjach → różny klucz — brak korelacji między kolekcjami),
-        a bez DEK nieodwracalny — jawna kolumna ``id`` nie jest odciskiem treści.
-        """
-        msg = namespace.encode("utf-8") + b"\x00" + item_id.encode("utf-8")
-        return hmac.new(self._key, msg, hashlib.sha256).hexdigest()
-
-    def seal(self, plaintext: bytes, *, aad: bytes) -> bytes:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: PLC0415
-
-        nonce = os.urandom(_NONCE_BYTES)
-        return nonce + AESGCM(self._key).encrypt(nonce, plaintext, aad)
-
-    def unseal(self, sealed: bytes, *, aad: bytes) -> bytes:
-        from cryptography.exceptions import InvalidTag  # noqa: PLC0415
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: PLC0415
-
-        if len(sealed) < _NONCE_BYTES:
-            raise RagBackendError("Uszkodzony rekord pamięci (za krótki szyfrogram).")
-        nonce, blob = sealed[:_NONCE_BYTES], sealed[_NONCE_BYTES:]
-        try:
-            return AESGCM(self._key).decrypt(nonce, blob, aad)
-        except InvalidTag as exc:
-            # Zły klucz albo AAD (np. rekord z innej kolekcji) — nie ujawniamy nic więcej.
-            raise RagBackendError(
-                "Nie udało się odszyfrować rekordu pamięci (klucz/kolekcja)."
-            ) from exc
+__all__ = [
+    "AesGcmCipher",
+    "Cipher",
+    "CryptoError",
+    "IdentityCipher",
+    "build_cipher",
+    "derive_key",
+]
 
 
 def build_cipher(
@@ -100,6 +40,18 @@ def build_cipher(
 
     DEK wyprowadzany z sekretu przez SHA-256 (dowolny sekret → 32 B). Sekret WYŁĄCZNIE jako
     referencja rozwiązywana przez ``SecretsProvider`` — nigdy w configu, nigdy w logach.
+
+    Args:
+        encrypt_at_rest: Czy pamięć ma być szyfrowana na dysku.
+        key_ref: Referencja do sekretu z kluczem (``env:``/``file:``/``vault:``/``sops:``).
+        secrets: Dostawca sekretów; brak = :class:`NullSecretsProvider` (nic nie rozwiąże).
+
+    Returns:
+        :class:`IdentityCipher` przy wyłączonym szyfrowaniu, inaczej :class:`AesGcmCipher`.
+
+    Raises:
+        RagBackendError: Gdy szyfrowanie włączone, a klucza brak, jest nierozwiązywalny albo
+            brakuje biblioteki ``cryptography``.
     """
     if not encrypt_at_rest:
         return IdentityCipher()
@@ -115,12 +67,8 @@ def build_cipher(
             "pamięć at-rest fail-closed."
         )
     # Fail-closed PRZY BUDOWIE: sprawdź, że backend kryptograficzny jest dostępny, zanim
-    # magazyn stanie się używalny (inaczej ImportError wyszedłby dopiero przy pierwszym add).
+    # magazyn stanie się używalny (inaczej błąd wyszedłby dopiero przy pierwszym add).
     try:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401, PLC0415
-    except ImportError as exc:
-        raise RagBackendError(
-            "Szyfrowanie at-rest wymaga biblioteki 'cryptography' — zainstaluj extra "
-            "husarz[memory] (pip install -e '.[dev,memory]')."
-        ) from exc
-    return AesGcmCipher(hashlib.sha256(material.strip().encode("utf-8")).digest())
+        return AesGcmCipher(derive_key(material))
+    except CryptoError as exc:
+        raise RagBackendError(f"Nie można zbudować szyfru pamięci at-rest: {exc}") from exc

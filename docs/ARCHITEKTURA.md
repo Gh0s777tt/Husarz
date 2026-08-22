@@ -37,9 +37,14 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
 
 ## Zaimplementowane
 
-- **Pakiet `husarz.core`** — definicje NAJNIŻSZEJ warstwy, zależne wyłącznie od stdlib.
-  Dziś mieszkają tu wyjątki `RouterError` i `EgressError` (`husarz.core.errors`),
-  re-eksportowane przez `husarz.router`. Powód jest architektoniczny — patrz
+- **Pakiet `husarz.core`** — definicje NAJNIŻSZEJ warstwy, zależne wyłącznie od stdlib
+  (plus opcjonalna `cryptography`, importowana leniwie wewnątrz funkcji). Mieszkają tu
+  wyjątki `RouterError`, `EgressError` i `CryptoError` (`husarz.core.errors`) oraz
+  prymityw szyfrowania at-rest `husarz.core.crypto` (`Cipher`, `AesGcmCipher`,
+  `derive_key`). Prymityw wylądował tu, bo potrzebują go DWA niezależne podsystemy
+  warstwy 3 — pamięć długoterminowa i magazyn sekretów — a żaden nie może być
+  zależnością drugiego. `husarz.memory.crypto` re-eksportuje te klasy, więc
+  dotychczasowe importy działają bez zmian. Powód jest architektoniczny — patrz
   „Warstwy importów" niżej.
 - **Pakiet `husarz.config`** (Etap 0) — schematy, loader, dostawcy sekretów.
 - **Launcher CLI** (`husarz.launcher.cli`) — `validate`, `version`.
@@ -63,8 +68,12 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   [ADR-0005](adr/0005-narzedzia-sandbox.md).
 - **Pakiet `husarz.security`** (Etap 4) — niemodyfikowalny audit log (łańcuch
   skrótów), ROE-gate (twarda bramka Puszkarza, dry-run domyślnie), agent Puszkarz
-  (odmowa ofensywy), RBAC oraz dostawcy sekretów File/SOPS/Vault. Szczegóły:
-  [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md), [ADR-0006](adr/0006-bezpieczenstwo-roe.md).
+  (odmowa ofensywy), RBAC oraz dostawcy sekretów File/SOPS/Vault. Od Etapu 17 także
+  **zapisywalny** magazyn sekretów (`husarz.security.secret_store`) — jedyne miejsce,
+  w którym Husarz PRZYJMUJE materiał sekretu (token z kreatora połączeń) i zapisuje go
+  zaszyfrowany, oddając na zewnątrz wyłącznie referencję `husarz:<nazwa>`. Szczegóły:
+  [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md), [ADR-0006](adr/0006-bezpieczenstwo-roe.md),
+  [ADR-0023](adr/0023-zapisywalny-magazyn-sekretow.md).
 - **Pakiet `husarz.api`** (Etap 5) — REST API (FastAPI) + serwowana konsola WWW,
   launcher `husarz up`. Szczegóły: [API.md](API.md), [ADR-0007](adr/0007-api-launcher-web.md).
 - **Pakiet `husarz.plugins`** (Etap 12b/13b) — konektor MCP nad wstrzykiwalnym transportem:
@@ -108,7 +117,7 @@ Kolejność warstw, od najniższej:
 
 | Warstwa | Zawartość | Może importować |
 |---|---|---|
-| `husarz.core` | wyjątki wspólne | wyłącznie stdlib |
+| `husarz.core` | wyjątki wspólne, prymityw szyfrowania (`crypto`) | wyłącznie stdlib |
 | `husarz.config` | schematy, loader, `net`, `evals` | `core` + stdlib |
 | `husarz.ssrf`, `husarz.fencing`, `husarz.textjson`, `husarz.attachments` | prymitywy współdzielone | `core`, `config` |
 | `husarz.router`, `husarz.tools`, `husarz.security` | usługi domenowe | powyższe |

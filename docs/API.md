@@ -50,7 +50,8 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 | `POST /api/config/validate` | `{overrides}` → walidacja nadpisań runtime (tylko odczyt) | `config:read` |
 | `POST /api/config/runtime`  | `{overrides}` → walidacja + zastosowanie w pamięci; **przebudowuje orkiestrator** (audytowane) | `config:write` |
 | `POST /api/auth/register` · `login` · `logout` · `GET /api/auth/me` | konta i sesje — patrz [KONTA.md](KONTA.md) | mieszane |
-| `GET/POST/DELETE /api/git/connections` · `…/{name}/repos` · `…/{name}/pull-request` | integracje Git — patrz [GIT.md](GIT.md) | `git:*` |
+| `GET/POST/DELETE /api/git/connections` · `…/wizard` · `…/{name}/repos` · `…/{name}/pull-request` | integracje Git — patrz [GIT.md](GIT.md) | `git:*` |
+| `GET /api/secrets/store` | stan zapisywalnego magazynu sekretów: `enabled` + nazwy wpisów i daty (NIGDY wartości ani szyfrogramów) | `git:read` |
 | `GET /`                   | konsola WWW (HTML) | — (otwarte) |
 
 Błędy backendu routera są mapowane na kody HTTP: przekroczony limit → `429`,

@@ -168,7 +168,12 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 - **Anty-SSRF z pinowaniem IP** na WSZYSTKICH pięciu ścieżkach wychodzących (`web`, wtyczki
   MCP, Git, embedder RAG, router modeli): nazwa rozwiązywana raz, adres przypinany, `Host`/SNI
   po nazwie — okno DNS-rebindingu zamknięte ([ADR-0020](docs/adr/0020-pinowanie-ip-anty-ssrf.md)).
-- **Sekrety** wyłącznie w Vault/SOPS — nigdy w repo, obrazach ani logach (hook gitleaks).
+- **Sekrety** wyłącznie jako REFERENCJE (`env:`/`file:`/`vault:`/`sops:`/`husarz:`) —
+  nigdy materiał w repo, obrazach ani logach (hook gitleaks). Token, który Husarz
+  **dostaje** w czasie działania (kreator połączeń Git), trafia zaszyfrowany do
+  zapisywalnego magazynu, a w konfiguracji zostaje sama referencja — niezmiennik „config
+  nie zawiera materiału" obowiązuje bez wyjątku
+  ([ADR-0023](docs/adr/0023-zapisywalny-magazyn-sekretow.md)).
 - **Sandbox** narzędzi bez sieci, limity CPU/RAM/czasu, allowlisty komend i ścieżek.
 - **Szyfrowanie at-rest** i mTLS; **OIDC + RBAC**; **niemodyfikowalny audit log**.
 - **Zero telemetrii**; filtry anty-prompt-injection; izolacja treści niezaufanych.

@@ -39,3 +39,13 @@ class EgressError(RouterError):
     i mapuje go na odpowiedź HTTP, więc blokada egress musi się w to łapać. Zmiana bazy
     zmieniłaby kod odpowiedzi API.
     """
+
+
+class CryptoError(Exception):
+    """Błąd operacji kryptograficznej (zły klucz, uszkodzony szyfrogram, brak backendu).
+
+    Mieszka w warstwie ``core``, bo prymityw :mod:`husarz.core.crypto` jest wspólny dla
+    pamięci długoterminowej (RAG) i magazynu sekretów — żadna z tych warstw nie może być
+    zależnością drugiej. Warstwy wyższe tłumaczą go na własne typy błędów, gdy mają
+    ustalony kontrakt (tak robi :mod:`husarz.memory.sqlite_store`).
+    """
