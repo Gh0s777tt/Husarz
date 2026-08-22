@@ -67,6 +67,13 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   pod zleceniem ze zgodą, ważnym podpisem i w oknie czasowym — inaczej odmowa ze śladem
   w audycie. Bez nowych zdolności ofensywnych: Puszkarz nadal nie ma narzędzi (L0), działa
   w dry-run i dostaje notatkę kontekstową o tym trybie. Testy: +11.
+- ⬜ **Kreator połączeń Git + zapisywalny magazyn sekretów** — dziś operator wkleja
+  `token_ref` do surowego pola. Kierunek: `SecretsProvider` zostaje read-only, dochodzi wąski
+  interfejs zapisu i schemat referencji `husarz:git/<nazwa>`; wartość szyfrowana
+  `AesGcmCipher`. Device flow (jedyna droga bez `client_secret`) dopiero na tym fundamencie,
+  jako osobny ADR i tryb włączany w configu. Patrz ograniczenia w `docs/GIT.md`.
+- ⬜ **Pole na bundle CA dla ruchu wychodzącego** — bez niego samodzielnie hostowany GitLab
+  z prywatnym CA jest nieosiągalny (`verify=True`/`trust_env=False` na sztywno).
 - ⬜ Pozostaje: autoryzacja NA CEL w przepływie (dziś `RoeGate.evaluate` gotowe, ale Puszkarz
   nie wykonuje akcji); klucze prywatne z hasłem; rotacja/wersjonowanie kluczy.
 - 🚧 Uwierzytelnienie + przypisanie ról: **token Bearer + RBAC wpięte w API (Etap 5)**;

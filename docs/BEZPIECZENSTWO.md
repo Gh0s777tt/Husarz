@@ -57,6 +57,40 @@ globalnej allowlisty. W profilu `airgap` globalna allowlista musi być pusta
 
 ## Notatki weryfikacyjne
 
+### Granice integracji Git — trzy ustalenia (data: 2026-08-22)
+
+Ustalone przy projektowaniu logowania OAuth; wszystkie trzy dotyczą stanu OBECNEGO i były
+dotąd nieudokumentowane, więc ujawniłyby się dopiero przy nieudanym połączeniu.
+
+**1. W profilu `airgap` integracja Git nie działa wcale — także w sieci lokalnej.**
+`husarz.git.client` sprawdza allowlistę egress dla **każdego** hosta; świadomie nie stosuje
+skrótu „adres lokalny = zawsze dozwolony", mimo że warstwa SSRF dopuszcza dla Gita
+`allow_lan=True`. Walidacja krzyżowa profilu `airgap` wymusza **pustą** allowlistę, więc
+żaden host nie przejdzie. To zamierzone, ale nieoczywiste: operator z własnym GitLabem
+w LAN-ie spodziewa się, że „lokalne" zadziała.
+
+**2. Brak możliwości wskazania własnego CA.** `HttpxGitTransport` ma `verify=True`
+i `trust_env=False` na sztywno. Drugie jest celowe i wartościowe — zmienne `HTTP(S)_PROXY`
+nie mogą przekierować przypiętego połączenia wraz z tokenem przez cudzy serwer — ale
+powoduje, że `SSL_CERT_FILE`/`REQUESTS_CA_BUNDLE` są ignorowane, a pola na bundle CA nie ma.
+Instancja z certyfikatem prywatnego CA jest nieosiągalna. **To blokuje samodzielnie
+hostowanego GitLaba mocniej niż wymóg `https`**: HTTPS operator sobie postawi, CA nie wstrzyknie.
+
+**3. `security.mtls` jest sekcją czysto deklaratywną.** Grep po `src/husarz/` daje **zero**
+odczytów pól `mtls` poza schematem — `enabled`, `ca_cert_ref`, `cert_ref`, `key_ref` są
+walidowane i nieużywane (mTLS to Etap 6). Samo w sobie jest to ujawnione w ROADMAP-ie
+i ARCHITEKTURZE, ale w połączeniu z punktem 2 tworzy **fałszywy trop**: `ca_cert_ref` wygląda
+na rozwiązanie problemu CA i nim nie jest. Ustawienie go nie zmienia niczego.
+
+**Konsekwencja dla przyszłego OAuth.** Zweryfikowano w dokumentacji GitHuba, że przepływ
+„kod autoryzacyjny + PKCE" **nie zwalnia z `client_secret`** — jest on oznaczony jako
+wymagany także z PKCE, a wyjątkiem jest wyłącznie device flow („The `client_secret` is not
+needed for the device flow"). Wariant „przycisk → przeglądarka → gotowe" wymagałby więc
+zarządzania drugim sekretem po stronie operatora i jest ślepą uliczką dla klienta publicznego.
+
+Zmian w kodzie nie wprowadzono — to notatka o granicach stanu obecnego.
+
+
 ### Manifesty k8s — weryfikacja po ZBUDOWANIU, nie po parsowaniu (data: 2026-08-21)
 
 **Ograniczenie dotychczasowej weryfikacji.** `test_deploy_invariants.py` parsuje surowe

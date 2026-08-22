@@ -61,6 +61,26 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   `config_dir` wprost, a widok audytu nie był asertowany — znalazło je dopiero uruchomienie
   serwera i odpytanie endpointów.
 
+### Dodane (udokumentowane granice integracji Git — trzy nieudokumentowane ograniczenia)
+- **W profilu `airgap` integracja Git nie działa wcale**, także z GitLabem w sieci lokalnej:
+  klient sprawdza allowlistę egress dla KAŻDEGO hosta (świadomie bez skrótu „lokalne = wolno"),
+  a walidacja profilu `airgap` wymusza allowlistę PUSTĄ. Zamierzone, ale nieoczywiste —
+  operator z własnym GitLabem w LAN-ie spodziewa się, że lokalne zadziała.
+- **Nie da się wskazać własnego CA.** `HttpxGitTransport` ma `verify=True` i `trust_env=False`
+  na sztywno; drugie jest celowe (zmienne PROXY nie mogą przekierować przypiętego połączenia
+  z tokenem), ale powoduje ignorowanie `SSL_CERT_FILE`/`REQUESTS_CA_BUNDLE`, a pola na bundle
+  CA nie ma. Blokuje to samodzielnie hostowanego GitLaba mocniej niż wymóg `https`.
+- **`security.mtls` to sekcja czysto deklaratywna** — zero odczytów w kodzie poza schematem
+  (mTLS to Etap 6). W połączeniu z powyższym tworzy fałszywy trop: `ca_cert_ref` wygląda na
+  rozwiązanie problemu CA i nim nie jest.
+- **Zakresy nie są równoważne**: MR na GitLabie wymaga zakresu `api`, czyli pełnego odczytu
+  i zapisu całego API użytkownika; GitHub ma węższy `pull_requests:write`. Do listowania
+  wystarcza `read_api`.
+- Ustalone przy projektowaniu logowania OAuth. Przy okazji zweryfikowano w dokumentacji
+  GitHuba, że **PKCE nie zwalnia z `client_secret`** (wymagany także z PKCE; wyjątkiem jest
+  wyłącznie device flow), więc wariant „przycisk → przeglądarka → gotowe" jest dla klienta
+  publicznego ślepą uliczką. Docs: `docs/GIT.md`, notatka w `docs/BEZPIECZENSTWO.md`.
+
 ### Zmienione (standard prowadzenia projektu — CLAUDE.md, SECURITY.md, CONTRIBUTING.md)
 - **Push wykonuje się na bieżąco**, a nie wyłącznie ręką operatora — po spełnieniu czterech
   warunków (zielone bramki, czysty gitleaks, zaktualizowana dokumentacja, czysty `git status`).

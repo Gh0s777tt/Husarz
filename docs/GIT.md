@@ -68,9 +68,44 @@ podgląd repozytoriów i formularz utworzenia PR/MR dla wybranego połączenia.
 
 ## Ograniczenia
 
+!!! danger "W profilu `airgap` integracja Git nie działa WCALE"
+    Także z GitLabem w Twojej sieci lokalnej. Klient sprawdza allowlistę egress dla
+    **każdego** hosta — świadomie nie stosuje skrótu „adres lokalny = zawsze dozwolony" —
+    a walidacja profilu `airgap` wymusza **pustą** allowlistę (`husarz.config.schema`,
+    walidacja krzyżowa). Żaden host nie przejdzie, więc integracja jest w tym profilu
+    wyłączona całkowicie, nie tylko wobec internetu.
+
+    To jest zamierzone (airgap = brak wyjścia), ale bywa zaskoczeniem: operator z własnym
+    GitLabem w LAN-ie spodziewa się, że „lokalne" zadziała. Nie zadziała.
+
+!!! warning "Własne CA nie zadziała — blokuje samodzielnie hostowanego GitLaba"
+    `HttpxGitTransport` ustawia `verify=True` i `trust_env=False` **na sztywno**
+    (`husarz/git/client.py`). `trust_env=False` jest celowe — zmienne `HTTP(S)_PROXY`
+    nie mogą przekierować przypiętego połączenia wraz z tokenem przez cudzy serwer — ale
+    powoduje też, że `SSL_CERT_FILE` i `REQUESTS_CA_BUNDLE` są **ignorowane**, a pola
+    konfiguracyjnego na własny bundle CA **nie ma**.
+
+    Instancja GitLaba z certyfikatem podpisanym przez prywatne CA jest więc nieosiągalna.
+    Wymóg `https` w `api_base` operator sobie spełni; prywatnego CA nie wstrzyknie.
+
+    **Uwaga na fałszywy trop:** `security.mtls.ca_cert_ref` wygląda na rozwiązanie, ale
+    dotyczy mTLS **między usługami** i — jak cała sekcja `security.mtls` — nie jest dziś
+    przez żaden kod odczytywane (mTLS to Etap 6). Ustawienie go nie zmieni niczego.
+
+!!! note "Zakresy nie są równoważne między dostawcami"
+    Utworzenie merge requesta na GitLabie wymaga zakresu `api`, czyli **pełnego odczytu
+    i zapisu całego API użytkownika** — wszystkich grup, projektów, rejestru kontenerów
+    i pakietów. GitHub ma węższy odpowiednik (`pull_requests:write`); GitLabowy
+    `write_repository` dotyczy wyłącznie Git-over-HTTP i do MR-ów nie wystarcza.
+    Do samego listowania projektów wystarcza `read_api` — nadawaj `api` dopiero wtedy,
+    gdy faktycznie tworzysz MR-y.
+
 - Uwierzytelnianie: **PAT** (token) przez referencję do sekretu. Pełny **OAuth**
   (rejestracja aplikacji + callback) — kolejny krok (lepszy dla trybu hostowanego,
-  wielu użytkowników z własnymi tokenami szyfrowanymi at-rest).
+  wielu użytkowników z własnymi tokenami szyfrowanymi at-rest). Uwaga: na GitHubie
+  przepływ „kod autoryzacyjny + PKCE" **nie zwalnia z `client_secret`** (dokumentacja
+  GitHuba oznacza go jako wymagany także z PKCE), więc jedyną drogą bez sekretu jest
+  **device flow** — z widocznym kodem do przepisania, a nie „jednym kliknięciem".
 - PR opiera się na istniejących gałęziach po stronie dostawcy; automatyczny commit
   plików + push przez API dostawcy (agent „Kopijnik") — do rozbudowy.
 
