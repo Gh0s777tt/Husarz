@@ -254,6 +254,21 @@ def create_app(
     # mógłby się zrównać z pustym api_token (compare_digest(b"", b"")==True).
     api_token = api_token.strip() if api_token and api_token.strip() else None
 
+    # Sprzeczność wykrywana przy KONSTRUKCJI, nie po cichu tolerowana. Wstrzyknięty magazyn
+    # przy wyłączonym `security.secret_store` byłby parametrem martwym: kreator i tak
+    # odmawiałby, bo bramka czyta konfigurację. Cicho ignorowany parametr to dokładnie ta
+    # klasa pułapki, która w tym projekcie już raz kosztowała — `internal: true` w compose
+    # bezgłośnie wyłączało publikowanie portów, a testy utrwalały sprzeczność zamiast ją
+    # wykryć. Zmiana konfiguracji W RUNTIME jest czym innym i pozostaje dozwolona: wtedy
+    # operator ŚWIADOMIE wyłącza zapis, a instancja zostaje, by ponowne włączenie działało
+    # bez restartu.
+    if secret_store is not None and not config.security.secret_store.enabled:
+        raise ValueError(
+            "Przekazano magazyn sekretów, ale konfiguracja ma security.secret_store.enabled=false "
+            "— parametr byłby martwy (kreator i tak odmówi). Włącz go w konfiguracji albo nie "
+            "przekazuj magazynu."
+        )
+
     app = FastAPI(title="Husarz API", version=__version__)
     if trusted_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
@@ -875,12 +890,10 @@ def create_app(
             for c in svc.list_connections()
         ]
 
-    @app.post(
-        "/api/git/connections",
-        response_model=GitConnectionView,
-        dependencies=[dep_git_write],
-    )
-    def git_add_connection(request: GitConnectionIn) -> GitConnectionView:
+    @app.post("/api/git/connections", response_model=GitConnectionView)
+    def git_add_connection(
+        request: GitConnectionIn, principal: Principal | None = dep_git_write
+    ) -> GitConnectionView:
         svc = _require_git()
         _sprawdz_ca(request.ca_bundle)
         conn = GitConnection(
@@ -895,8 +908,15 @@ def create_app(
             svc.add(conn)
         except GitConnectionError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # `principal` jest OBOWIĄZKOWY dla wejścia poświadczenia: dziennik audytu jest
+        # niemodyfikowalny, a wpis bez wywołującego nie odpowiada na pytanie „kto
+        # wprowadził ten token" — czyli na jedyne pytanie, które przy incydencie ma
+        # znaczenie. To ID konta, nie nazwa (brak PII w dzienniku).
         audit_log.record(
-            "api", "git.connection.add", {"name": conn.name, "provider": conn.provider}
+            "api",
+            "git.connection.add",
+            {"name": conn.name, "provider": conn.provider, "token_ref": conn.token_ref},
+            principal=_principal_ref(principal),
         )
         return GitConnectionView(
             name=conn.name,
@@ -936,10 +956,34 @@ def create_app(
         except GitError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    def _magazyn_wlaczony() -> bool:
+        """Czy zapis sekretów jest DZIŚ dozwolony — wg BIEŻĄCEJ konfiguracji.
+
+        Dwa warunki, oba konieczne. Instancja magazynu musi istnieć (launcher zbudował ją
+        przy starcie, bo tylko tam da się rozwiązać klucz główny) ORAZ bieżąca konfiguracja
+        musi mieć go włączonego.
+
+        Drugi warunek to poprawka fail-open: `POST /api/config/runtime` przebudowuje router,
+        orkiestrator, wtyczki i serwis Gita, ale magazyn sekretów jest domknięciem z chwili
+        startu i przebudowie nie podlega. Bez sprawdzania bieżącej konfiguracji wyłączenie
+        `security.secret_store` w panelu kończyło się odpowiedzią `ok: true`, a kreator
+        **nadal przyjmował i zapisywał tokeny** — kontrola bezpieczeństwa wyglądała na
+        wyłączoną, będąc włączoną.
+
+        Świadomie NIE przebudowujemy tu magazynu: klucz główny bywa rozwiązywalny wyłącznie
+        ze środowiska procesu launchera, więc próba odtworzenia go w API mogłaby zawieść
+        i zamienić „włącz z powrotem" w nieodwracalne wyłączenie do restartu. Instancja
+        zostaje, zmienia się wyłącznie BRAMKA — dzięki temu ponowne włączenie działa od razu.
+        """
+        if secret_store is None:
+            return False
+        biezacy: HusarzConfig = state["config"]
+        return biezacy.security.secret_store.enabled
+
     def _require_secret_store() -> EncryptedFileSecretStore:
         # Kreator wymaga ZAPISYWALNEGO magazynu. Bez niego jedyną drogą jest referencja do
         # źródła zewnętrznego — mówimy to wprost, zamiast po cichu zapisać token gdziekolwiek.
-        if secret_store is None:
+        if not _magazyn_wlaczony() or secret_store is None:
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -961,7 +1005,9 @@ def create_app(
         Zwraca WYŁĄCZNIE nazwy i znaczniki czasu. Wartości i szyfrogramy nie opuszczają
         procesu — panel nigdy nie ma powodu ich zobaczyć.
         """
-        if secret_store is None:
+        # Panel musi widzieć stan BIEŻĄCY, nie ten z chwili startu — inaczej po wyłączeniu
+        # magazynu w runtime pokazywałby „włączony" i podpowiadał tryb, który już nie działa.
+        if not _magazyn_wlaczony() or secret_store is None:
             return SecretStoreStatusView(enabled=False, entries=[])
         wpisy = [secret_store.describe(n) for n in secret_store.names()]
         return SecretStoreStatusView(
@@ -969,12 +1015,10 @@ def create_app(
             entries=[SecretEntryView(**o) for o in wpisy if o is not None],
         )
 
-    @app.post(
-        "/api/git/connections/wizard",
-        response_model=GitConnectionView,
-        dependencies=[dep_git_write],
-    )
-    def git_add_connection_with_token(request: GitConnectionWizardIn) -> GitConnectionView:
+    @app.post("/api/git/connections/wizard", response_model=GitConnectionView)
+    def git_add_connection_with_token(
+        request: GitConnectionWizardIn, principal: Principal | None = dep_git_write
+    ) -> GitConnectionView:
         """Kreator: przyjmuje token, zapisuje go zaszyfrowany, tworzy połączenie z referencją.
 
         Kolejność operacji jest ISTOTNA. Najpierw sprawdzamy kolizję nazwy połączenia, potem
@@ -1031,7 +1075,13 @@ def create_app(
         audit_log.record(
             "api",
             "git.connection.add",
-            {"name": conn.name, "provider": conn.provider, "token_ref": token_ref, "wizard": True},
+            {
+                "name": conn.name,
+                "provider": conn.provider,
+                "token_ref": token_ref,
+                "wizard": True,
+            },
+            principal=_principal_ref(principal),
         )
         return GitConnectionView(
             name=conn.name,

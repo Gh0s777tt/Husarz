@@ -173,11 +173,18 @@ class EncryptedFileSecretStore:
             # do niczego, co mogłoby trafić dalej niż do operatora.
             raise SecretStoreError(f"Nie można zaszyfrować sekretu: {exc}") from exc
         with self._lock:
-            self._entries[name] = {
+            # Kolejność jest ISTOTNA: najpierw utrwalamy na dysku, dopiero potem podmieniamy
+            # stan w pamięci. Odwrotnie (mutacja → zapis) nieudany `_persist` zostawiał
+            # magazyn rozjechany: proces widział sekret, którego w pliku nie było, więc po
+            # restarcie referencja przestawała się rozwiązywać, choć wcześniej „działała".
+            # Pracujemy na KOPII, żeby nieudany zapis nie zostawił śladu.
+            kandydat = dict(self._entries)
+            kandydat[name] = {
                 "sealed": base64.b64encode(sealed).decode("ascii"),
                 "created_at": self._clock().isoformat(),
             }
-            self._persist()
+            self._persist(kandydat)
+            self._entries = kandydat
         return f"{SCHEME}{name}"
 
     def delete(self, name: str) -> bool:
@@ -193,10 +200,14 @@ class EncryptedFileSecretStore:
             SecretStoreError: Gdy zapis pliku się nie uda.
         """
         with self._lock:
-            existed = self._entries.pop(name, None) is not None
-            if existed:
-                self._persist()
-        return existed
+            if name not in self._entries:
+                return False
+            # Jak w `put`: utrwalamy, potem podmieniamy stan. Nieudany zapis nie może
+            # sprawić, że proces uzna sekret za usunięty, podczas gdy w pliku nadal jest.
+            kandydat = {k: v for k, v in self._entries.items() if k != name}
+            self._persist(kandydat)
+            self._entries = kandydat
+        return True
 
     # ---------------------------------------------------------------- wewnętrzne
 
@@ -229,30 +240,70 @@ class EncryptedFileSecretStore:
                 f"Nie można wczytać magazynu sekretów z {self._path}: {exc}"
             ) from exc
 
-    def _persist(self) -> None:
-        """Zapisuje magazyn atomowo, z prawami ``0600`` od chwili powstania pliku.
+    def _persist(self, entries: dict[str, dict[str, Any]]) -> None:
+        """Zapisuje podane wpisy atomowo i TRWALE, z prawami ``0600`` od chwili powstania.
 
         Plik tymczasowy powstaje przez ``os.open`` z jawnym trybem, a nie przez
         ``write_text``: inaczej istniałoby okno, w którym szyfrogramy leżą z domyślnymi
-        prawami (na wielu systemach czytelnymi dla grupy). ``os.replace`` jest atomowe
-        w obrębie jednego systemu plików, więc czytelnik nigdy nie zobaczy połowy zapisu.
+        prawami (na wielu systemach czytelnymi dla grupy).
+
+        **Trzy poziomy gwarancji, każdy potrzebny z innego powodu.** ``os.replace`` daje
+        atomowość wobec CZYTELNIKA — nikt nie zobaczy połowy zapisu. To jednak nie to samo
+        co trwałość wobec AWARII ZASILANIA: bez ``fsync`` dane mogą jeszcze siedzieć
+        w buforze systemu, a po nagłym restarcie plik bywa pusty albo obcięty — czyli
+        magazyn sekretów staje się nieczytelny i (fail-closed) blokuje start aplikacji.
+        Dlatego synchronizujemy najpierw PLIK, a po podmianie także KATALOG: sama zawartość
+        pliku nie wystarcza, gdy w buforze zostaje jeszcze wpis katalogowy wskazujący na
+        nową nazwę.
+
+        Pełna pętla ``os.write`` jest konieczna, bo zapis krótszy niż całość jest legalny
+        (na zwykłym pliku rzadki, ale kontrakt tego nie gwarantuje) — cichy zapis połowy
+        JSON-a zniszczyłby WSZYSTKIE sekrety naraz, nie tylko bieżący.
+
+        Args:
+            entries: Wpisy do utrwalenia. Świadomie parametr, a nie ``self._entries``:
+                stan w pamięci podmieniamy dopiero PO udanym zapisie.
+
+        Raises:
+            SecretStoreError: Gdy zapis się nie powiedzie.
         """
-        payload = {"version": _FORMAT_VERSION, "entries": self._entries}
-        blob = json.dumps(payload, ensure_ascii=False, indent=2)
+        payload = {"version": _FORMAT_VERSION, "entries": entries}
+        blob = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = self._path.with_name(f"{self._path.name}.{os.getpid()}.tmp")
         try:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             try:
-                os.write(fd, blob.encode("utf-8"))
+                zapisane = 0
+                while zapisane < len(blob):
+                    zapisane += os.write(fd, blob[zapisane:])
+                os.fsync(fd)
             finally:
                 os.close(fd)
             os.replace(tmp, self._path)
+            self._fsync_katalogu()
         except OSError as exc:
             tmp.unlink(missing_ok=True)
             raise SecretStoreError(
                 f"Nie można zapisać magazynu sekretów do {self._path}: {exc}"
             ) from exc
+
+    def _fsync_katalogu(self) -> None:
+        """Synchronizuje wpis katalogowy po ``os.replace``.
+
+        Nieobsługiwane na części systemów (m.in. Windows) — tam brak synchronizacji katalogu
+        NIE jest błędem i nie może wywrócić zapisu, który się powiódł.
+        """
+        try:
+            fd = os.open(self._path.parent, os.O_RDONLY)
+        except OSError:  # pragma: no cover - zależy od systemu plików
+            return
+        try:
+            os.fsync(fd)
+        except OSError:  # pragma: no cover - Windows nie pozwala fsync na katalogu
+            pass
+        finally:
+            os.close(fd)
 
 
 def build_secret_store(

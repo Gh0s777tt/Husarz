@@ -182,7 +182,12 @@ class MeResponse(BaseModel):
 class GitConnectionIn(BaseModel):
     """Żądanie dodania połączenia Git. ``token_ref`` to REFERENCJA do sekretu (nie token)."""
 
-    name: str = Field(min_length=1, max_length=64)
+    # Nazwa trafia do ŚCIEŻKI URL-a (`/api/git/connections/{name}`), więc nie może
+    # zawierać ukośnika ani znaków wymagających kodowania. Bez tego ograniczenia
+    # połączenie o nazwie "grupa/projekt" powstawało poprawnie, ale DELETE zwracało 404
+    # (routing FastAPI nie dopasowuje ukośnika w segmencie, a `%2F` też nie pomaga) —
+    # zostawało nieusuwalne przez API i trzymało token bezterminowo. Sprawdzone.
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     provider: Literal["github", "gitlab"]
     api_base: str = Field(min_length=1, max_length=256)
     token_ref: str = Field(min_length=1, max_length=256)
@@ -244,7 +249,12 @@ class GitConnectionWizardIn(BaseModel):
     :class:`GitConnectionView`, w którym pola ``token`` po prostu nie ma.
     """
 
-    name: str = Field(min_length=1, max_length=64)
+    # Nazwa trafia do ŚCIEŻKI URL-a (`/api/git/connections/{name}`), więc nie może
+    # zawierać ukośnika ani znaków wymagających kodowania. Bez tego ograniczenia
+    # połączenie o nazwie "grupa/projekt" powstawało poprawnie, ale DELETE zwracało 404
+    # (routing FastAPI nie dopasowuje ukośnika w segmencie, a `%2F` też nie pomaga) —
+    # zostawało nieusuwalne przez API i trzymało token bezterminowo. Sprawdzone.
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     provider: Literal["github", "gitlab"]
     api_base: str = Field(min_length=1, max_length=256)
     token: str

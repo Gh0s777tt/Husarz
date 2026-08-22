@@ -40,6 +40,19 @@ def _magazyn(tmp_path: Path) -> EncryptedFileSecretStore:
     )
 
 
+def _config_z_magazynem(repo_config_dir: Path) -> Any:
+    """Konfiguracja z WŁĄCZONYM magazynem sekretów.
+
+    ``create_app`` odrzuca przekazanie magazynu przy wyłączonej konfiguracji (parametr byłby
+    martwy, bo bramka i tak czyta konfigurację). Testy muszą więc włączyć go tak, jak zrobiłby
+    to operator — nadpisaniem, nie obejściem.
+    """
+    return load_config(
+        repo_config_dir,
+        runtime_overrides={"security": {"secret_store": {"enabled": True, "key_ref": "env:KLUCZ"}}},
+    )
+
+
 def _klient(
     repo_config_dir: Path,
     tmp_path: Path,
@@ -52,7 +65,7 @@ def _klient(
     svc = git_service or GitService(store=FileGitConnectionStore(plik_polaczen))
     plik_audytu = tmp_path / "audit.jsonl"
     app = create_app(
-        load_config(repo_config_dir),
+        _config_z_magazynem(repo_config_dir),
         audit=AuditLog(path=plik_audytu),
         git_service=svc,
         secret_store=magazyn,

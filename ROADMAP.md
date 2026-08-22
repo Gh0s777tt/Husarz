@@ -76,14 +76,14 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   Prymityw szyfrujący przeniesiony do `husarz.core.crypto` (warstwa 0), bo dzielą go
   pamięć i magazyn sekretów. Testy: +36, nośność sprawdzona 13 mutacjami. Docs: ADR-0023,
   GIT.md, BEZPIECZENSTWO.md (notatka weryfikacyjna z uruchomionej aplikacji).
-- ⬜ **Domknięcia po przeglądzie Etapu 17** (zgłoszenia odcięte przez limit weryfikacji,
-  wyglądają na realne, wymagają rozstrzygnięcia): magazyn sekretów NIE jest przebudowywany przy
-  `POST /api/config/runtime`, więc wyłączenie go w panelu może być fail-open; `EncryptedFileSecretStore`
-  mutuje stan w pamięci PRZED udanym zapisem pliku (nieudany zapis rozjeżdża pamięć z dyskiem);
-  brak `fsync` przed `os.replace` (atomowość wobec czytelnika, nie wobec awarii zasilania);
-  kreator nie waliduje znaków w `name`, więc ukośnik tworzy nazwę sekretu kolidującą z inną;
-  wpis audytu kreatora nie niesie `principal`; `SecretStoreConfig` i sklejenie
-  konfiguracja→magazyn w launcherze mają zerowe pokrycie testami.
+- ✅ **Domknięcia po przeglądzie Etapu 17** (Etap 17d): wszystkie sześć zgłoszeń odciętych
+  przez limit weryfikacji okazało się realnych i zostało naprawionych — fail-open przy
+  nadpisaniu runtime, martwy parametr `secret_store`, nieusuwalne połączenie z ukośnikiem
+  w nazwie, brak `principal` w audycie, mutacja pamięci przed zapisem, brak `fsync`.
+  Plus 41 testów tam, gdzie było zero. Szczegóły: `docs/BEZPIECZENSTWO.md`, „Etap 17d".
+- ⬜ **Magazyn sekretów — pozostałe** (mniejsza waga): brak limitu liczby wpisów, brak rotacji
+  i sygnalizacji wygasania tokenów, niezweryfikowane zachowanie na systemach plików bez
+  atomowego `rename` (część udziałów sieciowych).
 - ⬜ **Device flow OAuth** — połączenie bez ręcznego generowania tokenu u dostawcy.
   Magazyn sekretów jest jego warunkiem koniecznym i już istnieje; brakuje samego przepływu.
   Na GitHubie „kod autoryzacyjny + PKCE" NIE zwalnia z `client_secret`, więc device flow

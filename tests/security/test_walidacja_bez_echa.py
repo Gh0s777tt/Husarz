@@ -43,13 +43,26 @@ class _DictSecrets:
         return "klucz-glowny-testowy" if ref == "env:KLUCZ" else None
 
 
+def _config_z_magazynem(repo_config_dir: Path) -> Any:
+    """Konfiguracja z WŁĄCZONYM magazynem sekretów.
+
+    ``create_app`` odrzuca przekazanie magazynu przy wyłączonej konfiguracji (parametr byłby
+    martwy, bo bramka i tak czyta konfigurację). Testy muszą więc włączyć go tak, jak zrobiłby
+    to operator — nadpisaniem, nie obejściem.
+    """
+    return load_config(
+        repo_config_dir,
+        runtime_overrides={"security": {"secret_store": {"enabled": True, "key_ref": "env:KLUCZ"}}},
+    )
+
+
 @pytest.fixture
 def klient(repo_config_dir: Path) -> TestClient:
     """Aplikacja z włączonym magazynem sekretów i trwałym magazynem połączeń."""
     katalog = Path(tempfile.mkdtemp())
     return TestClient(
         create_app(
-            load_config(repo_config_dir),
+            _config_z_magazynem(repo_config_dir),
             audit=AuditLog(path=katalog / "audit.jsonl"),
             git_service=GitService(store=FileGitConnectionStore(katalog / "conn.json")),
             secret_store=build_secret_store(

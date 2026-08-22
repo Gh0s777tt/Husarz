@@ -5,6 +5,38 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (Etap 17d — domknięcia odcięte przez limit weryfikacji przeglądu)
+
+Sześć zgłoszeń, których przegląd nie zweryfikował z powodu capu. Każde sprawdzono osobno —
+**wszystkie sześć okazało się realne.**
+
+- **Fail-open: wyłączenie magazynu sekretów w runtime nic nie robiło.** `POST /api/config/runtime`
+  przebudowuje router, orkiestrator, wtyczki i serwis Gita, ale magazyn był domknięciem
+  z chwili startu. Odtworzone na żywej instancji: wyłączenie kończyło się `ok: true`, a kreator
+  NADAL zapisywał token (HTTP 200) — kontrola wyglądała na wyłączoną, będąc włączoną.
+  Bramka czyta teraz bieżącą konfigurację; instancja zostaje, więc ponowne włączenie działa
+  bez restartu (klucz główny bywa rozwiązywalny wyłącznie w procesie launchera).
+- **`create_app(secret_store=…)` mógł być parametrem MARTWYM** przy wyłączonej konfiguracji —
+  ta sama klasa pułapki, co `internal: true` cicho wyłączające publikowanie portów w compose.
+  Sprzeczność jest teraz wykrywana przy konstrukcji i zgłaszana wyjątkiem.
+- **Ukośnik w nazwie połączenia czynił je NIEUSUWALNYM.** Nazwa jest segmentem ścieżki URL-a
+  i nie była walidowana: utworzenie `grupa/projekt` zwracało 200, a `DELETE` — 404, także
+  z `%2F`. Połączenie zostawało na liście i trzymało token bezterminowo. Dodano wzorzec na
+  OBU endpointach dodających.
+- **Wpisy audytu bez `principal`** przy wprowadzeniu i usunięciu poświadczenia — czyli przy
+  zdarzeniach, w których pytanie „kto to zrobił" jest jedynym istotnym.
+- **Mutacja stanu w pamięci przed udanym zapisem pliku.** Nieudany zapis rozjeżdżał magazyn:
+  proces widział sekret, którego w pliku nie było, więc po restarcie referencja przestawała
+  się rozwiązywać. Praca na kopii; stan podmieniany PO udanym zapisie.
+- **`os.replace` bez `fsync` — atomowość bez trwałości.** Po awarii zasilania plik bywa pusty
+  albo obcięty, co (fail-closed) blokuje start i traci WSZYSTKIE sekrety naraz. Dodano `fsync`
+  pliku i katalogu oraz pełną pętlę `os.write` (krótszy zapis jest legalny).
+- **Zerowe pokrycie `SecretStoreConfig` i sklejenia w launcherze** — cały walidator dało się
+  usunąć, a zestaw zostawał zielony. To jedyny kod czyniący kreator użytecznym.
+- Testy: +41. Nośność: 8 mutacji, z czego **dwie ujawniły wady w moich własnych testach**
+  (mutacja obejmująca jeden z dwóch modeli; asercja na obecność pola `principal` zamiast na
+  jego wartość — `AuditLog` zapisuje je zawsze, także puste). Oba testy poprawione.
+
 ### Poprawione (Etap 17c — po adwersaryjnym przeglądzie Etapu 17)
 
 Commit 5f4039d przeszedł przegląd: pięć niezależnych soczewek, każde zgłoszenie oceniane przez

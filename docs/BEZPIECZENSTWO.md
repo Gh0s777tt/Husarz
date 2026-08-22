@@ -1495,3 +1495,116 @@ fail-open), mutacja stanu w pamięci przed udanym zapisem pliku, brak `fsync` pr
 `os.replace`, brak walidacji znaków w nazwie połączenia po stronie kreatora, wpis audytu
 kreatora bez `principal`, oraz zerowe pokrycie testami `SecretStoreConfig` i sklejenia
 konfiguracja→magazyn w launcherze.
+
+### Etap 17d — domknięcia odcięte przez limit weryfikacji (data: 2026-08-23)
+
+Sekcja „Etap 17c" kończyła się listą piętnastu zgłoszeń, których przegląd nie objął, bo cap
+na liczbę weryfikowanych pozycji je odciął. Sześć z nich sprawdzono osobno — **wszystkie
+sześć okazało się realne** — i domknięto tutaj. Zapisujemy je z tą samą starannością co
+zgłoszenia, które przeszły pełną weryfikację: pozycja odcięta przez limit nie jest pozycją
+nieistotną.
+
+#### 1. Fail-open: wyłączenie magazynu w runtime nic nie robiło
+
+`POST /api/config/runtime` przebudowuje router, orkiestrator, wtyczki, pętlę narzędziową
+i serwis Gita, ale magazyn sekretów jest domknięciem z chwili startu i przebudowie nie
+podlegał. Odtworzone na żywej instancji: wyłączenie kończyło się `ok: true`, a kreator
+**nadal przyjmował i zapisywał token** (HTTP 200). Kontrola bezpieczeństwa wyglądała na
+wyłączoną, będąc włączoną — najgorszy możliwy stan, bo operator sądzi, że powierzchnia
+zapisu jest zamknięta.
+
+**Naprawa.** Bramka czyta BIEŻĄCĄ konfigurację (`state["config"]`), a nie domknięcie
+z chwili startu. Świadomie NIE przebudowujemy samego magazynu: klucz główny bywa rozwiązywalny
+wyłącznie ze środowiska procesu launchera, więc próba odtworzenia go w API mogłaby zawieść
+i zamienić „włącz z powrotem" w nieodwracalne wyłączenie do restartu. Instancja zostaje,
+zmienia się wyłącznie bramka — ponowne włączenie działa natychmiast (zweryfikowane na żywo).
+
+**Przy okazji domknięta pułapka projektowa.** Poprawka odsłoniła, że parametr `secret_store`
+w `create_app` mógł być po cichu MARTWY, gdy konfiguracja wyłącza magazyn. To ta sama klasa
+błędu, co `internal: true` w compose, które bezgłośnie wyłączało publikowanie portów, a testy
+utrwalały sprzeczność zamiast ją wykryć. Sprzeczność jest teraz wykrywana przy KONSTRUKCJI
+i zgłaszana wyjątkiem; zmiana konfiguracji w runtime pozostaje legalna, bo to świadoma decyzja
+operatora.
+
+#### 2. Ukośnik w nazwie połączenia czynił je NIEUSUWALNYM
+
+Nazwa połączenia jest segmentem ścieżki URL-a (`/api/git/connections/{name}`), a nie była
+walidowana. Odtworzone na żywej instancji: utworzenie połączenia o nazwie `grupa/projekt`
+zwracało **200**, a `DELETE` — **404**, także w wariancie z `%2F`. Połączenie zostawało na
+liście i trzymało token bezterminowo, bez żadnej drogi usunięcia przez API.
+
+**Naprawa.** Wzorzec `^[A-Za-z0-9][A-Za-z0-9._-]*$` na obu endpointach dodających — jeden
+kontrakt dla obu dróg, inaczej jedna z nich zostawałaby furtką.
+
+#### 3. Wpisy audytu bez `principal`
+
+Wprowadzenie poświadczenia to zdarzenie, przy którym pytanie „kto to zrobił" jest jedynym
+istotnym. Oba endpointy dodające zapisywały wpis bez wywołującego. Naprawione; dodano też
+brakującą referencję dla `git.connection.remove`.
+
+**Uwaga metodologiczna.** Pierwsza wersja testu sprawdzała, że pole `principal` ISTNIEJE
+w rekordzie — i przechodziła także po usunięciu poprawki, bo `AuditLog` serializuje to pole
+zawsze, również puste. Wykryte kontrolą nośności. Test sprawdza teraz WARTOŚĆ, na żądaniu
+uwierzytelnionym tokenem maszynowym (`principal == "token:operator"`).
+
+#### 4. Mutacja stanu przed udanym zapisem
+
+`put` i `delete` zmieniały słownik w pamięci, a dopiero potem zapisywały plik. Nieudany zapis
+zostawiał magazyn rozjechany: proces widział sekret, którego w pliku nie było, więc po
+restarcie referencja przestawała się rozwiązywać, choć wcześniej „działała". Odtworzone
+przez zasymulowanie awarii zapisu.
+
+**Naprawa.** Praca na kopii: utrwalamy, a stan w pamięci podmieniamy dopiero PO udanym
+zapisie. `_persist` przyjmuje wpisy parametrem, żeby ta kolejność była widoczna w sygnaturze,
+a nie tylko w komentarzu.
+
+#### 5. `os.replace` bez `fsync` — atomowość bez trwałości
+
+`os.replace` gwarantuje, że czytelnik nie zobaczy połowy zapisu. To NIE to samo, co trwałość
+wobec awarii zasilania: bez `fsync` dane mogą siedzieć w buforze systemu, a po nagłym
+restarcie plik bywa pusty albo obcięty — czyli magazyn staje się nieczytelny i (fail-closed)
+blokuje start aplikacji, tracąc WSZYSTKIE sekrety naraz.
+
+**Naprawa.** `fsync` pliku przed podmianą ORAZ katalogu po niej — sama zawartość pliku nie
+wystarcza, gdy w buforze zostaje wpis katalogowy wskazujący na nową nazwę. Synchronizacja
+katalogu jest nieobsługiwana na części systemów (m.in. Windows) i tam jej brak NIE jest
+błędem. Dodano też pełną pętlę `os.write`: krótszy zapis jest legalny, a cichy zapis połowy
+JSON-a zniszczyłby wszystkie sekrety, nie tylko bieżący.
+
+#### 6. Zerowe pokrycie konfiguracji i sklejenia w launcherze
+
+`SecretStoreConfig` oraz ścieżka konfiguracja → magazyn → referencja `husarz:` nie miały ani
+jednej asercji: cały walidator dało się usunąć, a zestaw zostawał zielony. Był to jedyny kod
+czyniący kreator UŻYTECZNYM (bez niego token jest zapisany, ale serwis Gita go nie odczyta)
+i jednocześnie jedyny bez testów. Dodano 19 testów w `tests/unit/test_secret_store_config.py`.
+
+| Niezmiennik | Test |
+|---|---|
+| Wyłączenie w runtime blokuje kreator | `test_wylaczenie_w_runtime_blokuje_kreator` |
+| Panel widzi stan bieżący, nie startowy | `test_wylaczenie_w_runtime_widac_w_stanie_dla_panelu` |
+| Ponowne włączenie działa bez restartu | `test_ponowne_wlaczenie_dziala_bez_restartu` |
+| Sprzeczny parametr przy konstrukcji jest głośny | `test_sprzeczny_parametr_przy_konstrukcji_jest_glosny` |
+| Nazwa niebezpieczna w URL-u odrzucana (5 wariantów) | `test_nazwa_niebezpieczna_w_url_jest_odrzucana` |
+| Ten sam kontrakt na obu endpointach | `test_ta_sama_walidacja_na_endpoincie_z_referencja` |
+| Poprawne nazwy nadal przechodzą (nośność) | `test_poprawne_nazwy_nadal_przechodza` |
+| Audyt kreatora niesie WARTOŚĆ principala | `test_wpis_audytu_kreatora_niesie_principala` |
+| Audyt zwykłego dodania — to samo | `test_wpis_audytu_zwyklego_dodania_tez_niesie_principala` |
+| Audyt usunięcia — to samo | `test_usuniecie_polaczenia_tez_niesie_principala` |
+| Nieudany zapis nie rozjeżdża pamięci z dyskiem | `test_nieudany_zapis_nie_rozjezdza_pamieci_z_dyskiem` |
+| To samo dla usuwania | `test_nieudane_usuwanie_nie_rozjezdza_pamieci_z_dyskiem` |
+| Zapis synchronizowany na dysk (plik i katalog) | `test_zapis_jest_synchronizowany_na_dysk` |
+| Konfiguracja magazynu: 11 niezmienników | `tests/unit/test_secret_store_config.py` |
+| Sklejenie launchera i schemat `husarz:` | `test_scheme_secrets_rozwiazuje_referencje_husarz` |
+
+**Nośność sprawdzona dla każdej poprawki.** Osiem mutacji; dwie z nich ujawniły problemy
+w samych testach (mutacja obejmująca tylko jeden z dwóch modeli oraz asercja na obecność
+pola zamiast na jego wartość) — oba poprawione, po czym wszystkie osiem czerwieni zestaw.
+
+**Weryfikacja na uruchomionej aplikacji.** Wyłączenie magazynu w runtime → kreator odmawia
+(409), panel pokazuje `enabled: false`, token nie osiada w żadnym pliku; ponowne włączenie →
+kreator działa natychmiast; nazwa z ukośnikiem → 422 zamiast nieusuwalnego połączenia.
+
+**Czego nadal NIE domknięto.** Z listy z Etapu 17c zostają pozycje o mniejszej wadze,
+zapisane w ROADMAP: brak limitu liczby wpisów w magazynie, brak rotacji i sygnalizacji
+wygasania tokenów, oraz nieprzetestowane zachowanie na systemach plików bez atomowego
+`rename` (część udziałów sieciowych).

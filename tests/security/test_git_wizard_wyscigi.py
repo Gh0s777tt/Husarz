@@ -99,6 +99,19 @@ class _WolnyMagazynPolaczen(FileGitConnectionStore):
         time.sleep(self._opoznienie)
 
 
+def _config_z_magazynem(repo_config_dir: Path) -> Any:
+    """Konfiguracja z WŁĄCZONYM magazynem sekretów.
+
+    ``create_app`` odrzuca przekazanie magazynu przy wyłączonej konfiguracji (parametr byłby
+    martwy, bo bramka i tak czyta konfigurację). Testy muszą więc włączyć go tak, jak zrobiłby
+    to operator — nadpisaniem, nie obejściem.
+    """
+    return load_config(
+        repo_config_dir,
+        runtime_overrides={"security": {"secret_store": {"enabled": True, "key_ref": "env:KLUCZ"}}},
+    )
+
+
 def _srodowisko(
     repo_config_dir: Path,
     *,
@@ -116,7 +129,7 @@ def _srodowisko(
         else FileGitConnectionStore(katalog / "conn.json")
     )
     app = create_app(
-        load_config(repo_config_dir),
+        _config_z_magazynem(repo_config_dir),
         audit=AuditLog(path=katalog / "audit.jsonl"),
         git_service=GitService(store=polaczenia),
         secret_store=magazyn,
