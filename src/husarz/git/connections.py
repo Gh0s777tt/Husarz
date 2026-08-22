@@ -85,6 +85,10 @@ class FileGitConnectionStore(InMemoryGitConnectionStore):
                     api_base=item["api_base"],
                     token_ref=item["token_ref"],
                     username=item.get("username"),
+                    # `.get`, nie `[...]`: pliki zapisane przed dodaniem pola muszą się
+                    # wczytywać. Aktualizacja Husarza nie może unieruchomić istniejących
+                    # połączeń — objawiłoby się to jako „nie można wczytać połączeń".
+                    ca_bundle=item.get("ca_bundle"),
                 )
                 self._by_name[conn.name] = conn
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:

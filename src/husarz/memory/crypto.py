@@ -66,8 +66,9 @@ def build_cipher(
             f"Nie udało się rozwiązać encryption_key_ref ('{key_ref}') — "
             "pamięć at-rest fail-closed."
         )
-    # Fail-closed PRZY BUDOWIE: sprawdź, że backend kryptograficzny jest dostępny, zanim
-    # magazyn stanie się używalny (inaczej błąd wyszedłby dopiero przy pierwszym add).
+    # Fail-closed PRZY BUDOWIE: konstruktor `AesGcmCipher` sam sprawdza dostępność backendu
+    # kryptograficznego, więc magazyn nie powstanie bez niego (inaczej błąd wyszedłby
+    # dopiero przy pierwszym `add`). Tłumaczymy tylko wyjątek na kontrakt pamięci.
     try:
         return AesGcmCipher(derive_key(material))
     except CryptoError as exc:

@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.datastructures import Headers
@@ -78,6 +80,7 @@ from husarz.config import HusarzConfig, load_config
 from husarz.config.errors import ConfigError
 from husarz.config.secrets import SecretsProvider
 from husarz.git import GitConnection, GitProviderKind, GitService
+from husarz.git.client import build_ssl_context
 from husarz.git.errors import GitAuthError, GitConnectionError, GitError
 from husarz.orchestrator import Orchestrator, build_orchestrator
 from husarz.plugins import PluginService
@@ -102,6 +105,7 @@ from husarz.security.audit import AuditLog, build_audit_log
 from husarz.security.errors import AuditError, SecurityError
 from husarz.security.rbac import Rbac
 from husarz.security.roe_runtime import build_roe_runtime
+from husarz.security.secret_store import SCHEME as SECRET_SCHEME
 from husarz.security.secret_store import EncryptedFileSecretStore, SecretStoreError
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -258,6 +262,41 @@ def create_app(
     # Czyste ASGI: egzekwuje limit też strumieniowo, więc 'Transfer-Encoding: chunked'
     # (żądanie bez Content-Length) NIE omija kontroli — patrz BodySizeLimitMiddleware.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=config.chat.max_request_bytes)
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Zwraca błąd walidacji BEZ pola ``input`` — inaczej API odsyła to, co dostało.
+
+        **Po co ten handler istnieje.** Domyślna obsługa w FastAPI zwraca ``exc.errors()``,
+        a każdy wpis niesie pole ``input`` z ODRZUCONĄ WARTOŚCIĄ. Dla endpointów przyjmujących
+        materiał sekretu oznacza to, że token wraca w ciele odpowiedzi 422 — a stamtąd trafia
+        do zakładki sieciowej przeglądarki, do pośredników logujących ciała odpowiedzi i do
+        zgłoszeń błędów.
+
+        Pole ``token`` w :class:`~husarz.api.schemas.GitConnectionWizardIn` celowo nie ma
+        ograniczeń Pydantica właśnie po to, by nie dało się wywołać dla niego błędu walidacji.
+        Zamykało to JEDEN wariant z wielu. Pozostałe pięć wychodzi bez żadnego ograniczenia na
+        samym polu: brak innego wymaganego pola (``input`` = CAŁE ciało z tokenem), literówka
+        w nazwie pola, ``Content-Type: application/x-www-form-urlencoded`` (zwykłe ``curl -d``
+        — ``input`` = surowe ciało), ciało jako lista JSON, a przede wszystkim wklejenie
+        surowego tokenu w pole ``token_ref`` na ``POST /api/git/connections``, gdzie walidator
+        odrzuca wartość i odsyła ją w ``input``.
+
+        Dlatego bramka jest tutaj, na poziomie CAŁEJ aplikacji, a nie przy pojedynczym polu:
+        pojedyncze pole zamyka jedną drogę, handler zamyka wszystkie — także na endpointach,
+        które dopiero powstaną.
+
+        Zwracamy ``type``, ``loc`` i ``msg``: wołający wie, GDZIE i CO jest nie tak, ale nie
+        dostaje z powrotem wartości, którą wysłał. ``ctx`` również pomijamy — dla walidatorów
+        własnych niesie obiekt wyjątku, którego treści nie kontrolujemy w jednym miejscu.
+        """
+        bezpieczne = [
+            {"type": e.get("type", ""), "loc": e.get("loc", []), "msg": e.get("msg", "")}
+            for e in exc.errors()
+        ]
+        return JSONResponse({"detail": jsonable_encoder(bezpieczne)}, status_code=422)
 
     @app.exception_handler(AuditError)
     async def _audit_error_handler(request: Request, exc: AuditError) -> JSONResponse:
@@ -831,6 +870,7 @@ def create_app(
                 api_base=c.api_base,
                 username=c.username,
                 token_ref=c.token_ref,
+                ca_bundle=c.ca_bundle,
             )
             for c in svc.list_connections()
         ]
@@ -842,12 +882,14 @@ def create_app(
     )
     def git_add_connection(request: GitConnectionIn) -> GitConnectionView:
         svc = _require_git()
+        _sprawdz_ca(request.ca_bundle)
         conn = GitConnection(
             name=request.name,
             provider=GitProviderKind(request.provider),
             api_base=request.api_base,
             token_ref=request.token_ref,
             username=request.username,
+            ca_bundle=request.ca_bundle,
         )
         try:
             svc.add(conn)
@@ -862,11 +904,37 @@ def create_app(
             api_base=conn.api_base,
             username=conn.username,
             token_ref=conn.token_ref,
+            ca_bundle=conn.ca_bundle,
         )
 
     # Maksymalna długość przyjmowanego tokenu. Nie jest to ograniczenie Pydantic (patrz
     # GitConnectionWizardIn) — sprawdzamy tu, żeby komunikat błędu NIE powtórzył wartości.
     _MAX_TOKEN_LEN = 4096
+
+    # Zamek obejmujący operacje, które mutują DWA magazyny naraz: połączeń i sekretów.
+    # Każdy z nich ma własną synchronizację wewnętrzną, ale to nie wystarcza — niebezpieczna
+    # jest sekwencja „sprawdź, czy nazwa wolna → zapisz sekret → dodaj połączenie", bo między
+    # sprawdzeniem a zapisem wciska się drugie żądanie. Bez tego zamka dwa równoległe żądania
+    # kreatora o tej samej nazwie kończyły się tak: oba przechodzą pre-check, drugie NADPISUJE
+    # sekret pierwszego, jego `add` zawodzi na kolizji, a sprzątanie kasuje token ZWYCIĘZCY.
+    # Skutkiem jest połączenie bez działającego poświadczenia — dokładnie ta cicha utrata,
+    # przed którą miał chronić pre-check. Ten sam wyścig zachodzi między kreatorem a DELETE.
+    # Operacje są administracyjne i rzadkie, więc jeden zamek na całość jest wystarczający
+    # i znacznie łatwiejszy do uzasadnienia niż zamki per nazwa.
+    _mutex_polaczen = threading.Lock()
+
+    def _sprawdz_ca(ca_bundle: str | None) -> None:
+        """Waliduje ścieżkę do własnego CA już przy dodawaniu połączenia.
+
+        Bez tego literówka w ścieżce ujawniłaby się dopiero przy pierwszej operacji, jako
+        błąd TLS — komunikat, którego nikt nie powiąże z polem w formularzu.
+        """
+        if not ca_bundle:
+            return
+        try:
+            build_ssl_context(ca_bundle)
+        except GitError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     def _require_secret_store() -> EncryptedFileSecretStore:
         # Kreator wymaga ZAPISYWALNEGO magazynu. Bez niego jedyną drogą jest referencja do
@@ -914,6 +982,8 @@ def create_app(
         w magazynie osierocony sekret za każdym razem, gdy nazwa jest zajęta.
         """
         store = _require_secret_store()
+        # PRZED zapisem sekretu: błędna ścieżka CA po zapisie zostawiłaby sekret osierocony.
+        _sprawdz_ca(request.ca_bundle)
         token = request.token.strip()
         if not token:
             raise HTTPException(status_code=400, detail="Token jest pusty.")
@@ -924,34 +994,37 @@ def create_app(
                 detail=f"Token jest dłuższy niż {_MAX_TOKEN_LEN} znaków — to nie wygląda na token.",
             )
         svc = _require_git()
-        # Kolizję sprawdzamy PRZED zapisem sekretu i przez magazyn (svc.get rzuca wyjątek
-        # dla nieistniejącej nazwy, więc nie nadaje się do sprawdzania istnienia).
-        # To nie optymalizacja, tylko ochrona danych: bez tego `put` nadpisałby token
-        # istniejącego połączenia, a sprzątanie po nieudanym `add` skasowałoby go zupełnie.
-        if svc.store.get(request.name) is not None:
-            raise HTTPException(
-                status_code=409, detail=f"Połączenie '{request.name}' już istnieje."
-            )
-
         nazwa_sekretu = f"git/{request.name}"
-        try:
-            token_ref = store.put(nazwa_sekretu, token)
-        except SecretStoreError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
         conn = GitConnection(
             name=request.name,
             provider=GitProviderKind(request.provider),
             api_base=request.api_base,
-            token_ref=token_ref,
+            token_ref=f"{SECRET_SCHEME}{nazwa_sekretu}",
             username=request.username,
+            ca_bundle=request.ca_bundle,
         )
-        try:
-            svc.add(conn)
-        except GitConnectionError as exc:
-            # Sprzątamy zapisany przed chwilą sekret — inaczej zostałby osierocony.
-            store.delete(nazwa_sekretu)
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # CAŁA sekwencja pod jednym zamkiem — patrz uzasadnienie przy `_mutex_polaczen`.
+        # Sam pre-check niczego nie gwarantuje: między sprawdzeniem a zapisem mieści się
+        # drugie żądanie, a wtedy sprzątanie po przegranym kasuje token zwycięzcy.
+        with _mutex_polaczen:
+            # Kolizję sprawdzamy przez magazyn (`svc.get` rzuca wyjątek dla nieistniejącej
+            # nazwy, więc nie nadaje się do sprawdzania istnienia).
+            if svc.store.get(request.name) is not None:
+                raise HTTPException(
+                    status_code=409, detail=f"Połączenie '{request.name}' już istnieje."
+                )
+            try:
+                token_ref = store.put(nazwa_sekretu, token)
+            except SecretStoreError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            try:
+                svc.add(conn)
+            except GitConnectionError as exc:
+                # Pod zamkiem ta gałąź jest nieosiągalna dla kolizji nazwy (pre-check ją
+                # wyklucza), ale zostaje jako obrona przed innym błędem magazynu — wtedy
+                # sprzątamy sekret, żeby nie został osierocony.
+                store.delete(nazwa_sekretu)
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
 
         # W audycie: nazwa, dostawca i REFERENCJA. Nigdy token — dziennik audytu jest
         # niemodyfikowalny, więc sekret raz w nim zapisany zostałby tam na zawsze.
@@ -966,6 +1039,7 @@ def create_app(
             api_base=conn.api_base,
             username=conn.username,
             token_ref=conn.token_ref,
+            ca_bundle=conn.ca_bundle,
         )
 
     @app.delete("/api/git/connections/{name}")
@@ -973,17 +1047,22 @@ def create_app(
         name: str, principal: Principal | None = dep_git_write
     ) -> dict[str, bool]:
         svc = _require_git()
-        # Referencję odczytujemy PRZED usunięciem — potem połączenia już nie ma.
-        istniejace = svc.store.get(name)
-        svc.remove(name)
-        # Sekret kasujemy TYLKO wtedy, gdy należał do tego połączenia i pochodził
-        # z naszego magazynu. Referencji zewnętrznej (env:/vault:) nie ruszamy — nie jest
-        # nasza, a operator mógł jej użyć także gdzie indziej.
         sekret_usuniety = False
-        oczekiwana = f"husarz:git/{name}"
-        nasz_sekret = istniejace is not None and istniejace.token_ref == oczekiwana
-        if secret_store is not None and nasz_sekret:
-            sekret_usuniety = secret_store.delete(f"git/{name}")
+        oczekiwana = f"{SECRET_SCHEME}git/{name}"
+        # Pod tym samym zamkiem co kreator. Bez niego kasowanie sekretu wyścigało się
+        # z zapisem: DELETE odczytywał połączenie, kreator w międzyczasie tworzył NOWE
+        # połączenie o tej samej nazwie wraz z sekretem, a DELETE kasował świeżo zapisany
+        # token — zostawiając połączenie z nierozwiązywalną referencją.
+        with _mutex_polaczen:
+            # Referencję odczytujemy PRZED usunięciem — potem połączenia już nie ma.
+            istniejace = svc.store.get(name)
+            svc.remove(name)
+            # Sekret kasujemy TYLKO wtedy, gdy należał do tego połączenia i pochodził
+            # z naszego magazynu. Referencji zewnętrznej (env:/vault:) nie ruszamy — nie jest
+            # nasza, a operator mógł jej użyć także gdzie indziej.
+            nasz_sekret = istniejace is not None and istniejace.token_ref == oczekiwana
+            if secret_store is not None and nasz_sekret:
+                sekret_usuniety = secret_store.delete(f"git/{name}")
         audit_log.record(
             "api",
             "git.connection.remove",

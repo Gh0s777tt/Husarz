@@ -187,6 +187,10 @@ class GitConnectionIn(BaseModel):
     api_base: str = Field(min_length=1, max_length=256)
     token_ref: str = Field(min_length=1, max_length=256)
     username: str | None = Field(default=None, max_length=128)
+    # Ścieżka do pliku PEM z certyfikatem urzędu, który podpisał certyfikat serwera —
+    # dla samodzielnie hostowanego GitLaba z PRYWATNYM CA. Zaufanie jest zawężone do
+    # tego jednego połączenia (patrz husarz.git.client.build_ssl_context).
+    ca_bundle: str | None = Field(default=None, max_length=1024)
 
     @field_validator("token_ref")
     @classmethod
@@ -222,11 +226,19 @@ class GitConnectionWizardIn(BaseModel):
     a w magazynie połączeń ląduje wyłącznie wygenerowana referencja ``husarz:git/<nazwa>``.
 
     **Pole ``token`` celowo NIE ma ograniczeń Pydantic** (``min_length``/``max_length``).
-    Powód jest konkretny: domyślna obsługa ``RequestValidationError`` w FastAPI zwraca
-    w ciele odpowiedzi pole ``input`` z ODRZUCONĄ WARTOŚCIĄ. Ograniczenie długości na
-    ``token`` sprawiłoby, że przy naruszeniu limitu token wróciłby w treści błędu 422 —
-    a stamtąd trafiłby do dziennika dostępu serwera. Długość i pustkę sprawdza więc
-    endpoint, zgłaszając komunikat, który wartości nie powtarza.
+    Powód: domyślna obsługa ``RequestValidationError`` w FastAPI zwraca w ciele odpowiedzi
+    pole ``input`` z ODRZUCONĄ WARTOŚCIĄ, więc ograniczenie długości sprawiłoby, że przy
+    naruszeniu limitu token wróciłby w treści błędu 422. Długość i pustkę sprawdza endpoint,
+    komunikatem, który wartości nie powtarza.
+
+    **To NIE wystarcza i pierwotnie było tu opisane jako wystarczające — sprostowanie.**
+    Brak ograniczeń na polu zamyka wyłącznie wariant, w którym błąd dotyczy TEGO pola.
+    ``input`` wraca również, gdy brakuje innego wymaganego pola (echo CAŁEGO ciała wraz
+    z tokenem), gdy nazwa pola ma literówkę, gdy ciało przyszło jako formularz
+    ``x-www-form-urlencoded`` albo jako lista JSON. Właściwą bramką jest handler
+    ``RequestValidationError`` zarejestrowany w :func:`husarz.api.app.create_app`, który
+    usuwa ``input`` z KAŻDEJ odpowiedzi walidacyjnej. Brak ograniczeń na tym polu zostaje
+    jako druga warstwa, nie jako jedyna.
 
     Ten model NIE jest używany jako model odpowiedzi nigdzie w API — odpowiedzią jest
     :class:`GitConnectionView`, w którym pola ``token`` po prostu nie ma.
@@ -237,6 +249,10 @@ class GitConnectionWizardIn(BaseModel):
     api_base: str = Field(min_length=1, max_length=256)
     token: str
     username: str | None = Field(default=None, max_length=128)
+    # Ścieżka do pliku PEM z certyfikatem urzędu, który podpisał certyfikat serwera —
+    # dla samodzielnie hostowanego GitLaba z PRYWATNYM CA. Zaufanie jest zawężone do
+    # tego jednego połączenia (patrz husarz.git.client.build_ssl_context).
+    ca_bundle: str | None = Field(default=None, max_length=1024)
 
     @field_validator("api_base")
     @classmethod
@@ -274,6 +290,7 @@ class GitConnectionView(BaseModel):
     api_base: str
     username: str | None
     token_ref: str
+    ca_bundle: str | None = None
 
 
 class RepoView(BaseModel):

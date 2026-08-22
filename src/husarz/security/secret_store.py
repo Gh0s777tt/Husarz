@@ -279,7 +279,10 @@ def build_secret_store(
 
     Raises:
         SecretStoreError: Gdy brak ``key_ref``, gdy nie da się go rozwiązać albo gdy brakuje
-            biblioteki ``cryptography``.
+            biblioteki ``cryptography``. Ostatni przypadek wykrywa konstruktor
+            :class:`~husarz.core.crypto.AesGcmCipher` — magazyn NIE powstanie bez
+            działającego backendu, więc nie da się dojść do stanu, w którym wygląda on na
+            sprawny, a pierwszy zapis tokenu zawodzi.
     """
     if not key_ref:
         raise SecretStoreError(

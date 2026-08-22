@@ -172,7 +172,13 @@ def test_add_connection_rejects_raw_token_422(repo_config_dir: Path) -> None:
         "api_base": "https://api.github.com",
         "token_ref": "ghp_RAWSECRET",
     }  # nie-referencja
-    assert client.post("/api/git/connections", json=body).status_code == 422
+    odp = client.post("/api/git/connections", json=body)
+
+    assert odp.status_code == 422
+    # Sam kod statusu NIE wystarcza: odrzucenie było poprawne od początku, ale odpowiedź
+    # odsyłała wklejony token z powrotem w polu `input`. Test sprawdzający wyłącznie kod
+    # przechodził mimo wycieku — patrz sprostowanie w docs/BEZPIECZENSTWO.md (Etap 17c).
+    assert "ghp_RAWSECRET" not in odp.text
 
 
 def test_add_connection_rejects_http_422(repo_config_dir: Path) -> None:

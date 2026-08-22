@@ -1236,16 +1236,23 @@ powodu go włączać. To zalecana konfiguracja tam, gdzie zarządzanie sekretami
 | Fail-closed przy starcie | brak/nierozwiązywalny `key_ref` = magazyn NIE powstaje; nie ma trybu zapisu jawnego |
 | Fail-closed przy odczycie | uszkodzony plik to błąd, nie „pusty magazyn" (inaczej awaria wyglądałaby jak wygaśnięcie tokenu) |
 | Ograniczenie kręgu zaufania | `secret_store.key_ref` nie przyjmuje schematu `husarz:` — magazyn nie odblokuje się własnym sekretem |
-| Higiena wyjścia | token nie występuje w modelu odpowiedzi, w audycie ani w komunikatach błędów |
+| Higiena wyjścia | token nie występuje w modelu odpowiedzi, w audycie ani w komunikatach błędów (**pierwotne brzmienie tego wiersza było nieprawdziwe** — patrz sprostowanie w „Etap 17c") |
 
 **Osobne ryzyko: echo wartości w błędzie walidacji.** Domyślna obsługa
 `RequestValidationError` w FastAPI zwraca odrzuconą wartość w polu `input`. Gdyby pole
 `token` miało ograniczenie `max_length` Pydantica, przekroczenie limitu odesłałoby token
 w treści odpowiedzi 422 — a stamtąd trafiłby do dziennika dostępu serwera. Dlatego pole jest
 **celowo bez ograniczeń Pydantica**, a długość i pustkę sprawdza endpoint, zgłaszając
-komunikat, który wartości nie powtarza. Pokryte regresją.
+komunikat, który wartości nie powtarza.
 
-**Kolejność operacji jako kontrola bezpieczeństwa.** Kreator sprawdza kolizję nazwy
+!!! danger "Sprostowanie: powyższe zamykało JEDEN wariant z sześciu"
+    Rezygnacja z ograniczeń na polu `token` nie zamyka kanału `input` — zamyka wyłącznie
+    ten wariant, w którym błąd dotyczy samego pola `token`. Pięć innych dróg działało dalej.
+    Właściwą bramką jest handler `RequestValidationError` na poziomie aplikacji; opis
+    i lista wariantów: „Etap 17c" niżej.
+
+**Kolejność operacji jako kontrola bezpieczeństwa** (uzupełnione w Etapie 17c: sama
+kolejność NIE wystarcza pod współbieżnością — potrzebny jest zamek). Kreator sprawdza kolizję nazwy
 **przed** zapisem sekretu. Naiwna kolejność (zapisz → dodaj połączenie → posprzątaj po
 błędzie) przy zajętej nazwie nadpisałaby token istniejącego połączenia, a sprzątanie
 skasowałoby go zupełnie — cicha utrata działającego poświadczenia. Wykryte i domknięte
@@ -1305,3 +1312,186 @@ usunięcie połączenia. Sprawdzone na artefaktach z dysku, nie na deklaracjach:
 4. **Nie weryfikowano** zachowania na systemie plików bez atomowego `rename` (niektóre udziały
    sieciowe) ani współbieżnego zapisu z dwóch procesów Husarza wskazujących ten sam plik.
    Drugi przypadek jest z założenia niewspierany — magazyn ma być jedną instancją na proces.
+
+### Etap 17b — własne CA dla połączeń Git (data: 2026-08-22)
+
+**Co doszło.** Pole `ca_bundle` na połączeniu Git: ścieżka do pliku PEM z certyfikatem urzędu,
+który podpisał certyfikat samodzielnie hostowanego GitLaba. Bez tego taka instancja była
+nieosiągalna — udokumentowane wcześniej jako ograniczenie, teraz domknięte.
+
+**Kluczowa decyzja: zaufanie ZAWĘŻONE, nie rozszerzone.** `ssl.create_default_context(cafile=…)`
+ładuje wyłącznie wskazany plik — magazyn systemowy przestaje obowiązywać **dla tego jednego
+połączenia**. Odwrotna semantyka (dołożenie do magazynu systemowego, jak robi `SSL_CERT_FILE`)
+byłaby wygodniejsza i **wyraźnie gorsza**: prywatny urząd zyskałby prawo poświadczania
+dowolnego hosta na wszystkich ścieżkach wychodzących, więc jego przejęcie pozwoliłoby podszyć
+się pod `api.github.com`. Zawężenie kosztuje operatora tyle, że bundle musi zawierać pełny
+łańcuch — i to jest właściwa cena.
+
+**Czego to pole NIE robi.** Nie wyłącza weryfikacji i nie ma przełącznika „ignoruj błędy
+certyfikatu". Kontekst zachowuje `check_hostname=True` i `verify_mode=CERT_REQUIRED`, więc
+własne CA nie jest tylnymi drzwiami do akceptowania dowolnego hosta podpisanego przez ten
+urząd. Przy przypiętym adresie IP weryfikacja nadal idzie po NAZWIE (`sni_hostname`) —
+pin nie degraduje TLS, a CA tego nie zmienia.
+
+**Fail-closed przy błędnej ścieżce.** Nieistniejący plik, katalog albo plik, który nie jest
+zbiorem certyfikatów, dają błąd **przy dodawaniu połączenia** (HTTP 400). Cicha degradacja do
+CA systemowych byłaby gorsza niż błąd: operator dostałby niepowiązany błąd TLS przy pierwszej
+operacji. Komunikat NIE zawiera treści pliku — operator może omyłkowo wskazać klucz prywatny,
+a komunikat trafia do odpowiedzi API.
+
+| Niezmiennik | Test |
+|---|---|
+| Własne CA **zastępuje** magazyn systemowy, a nie go rozszerza | `test_wlasne_ca_ZASTEPUJE_magazyn_systemowy_a_nie_go_rozszerza` |
+| Urząd, którego nie wskazano, nie jest zaufany | `test_obce_ca_nie_jest_zaufane` |
+| `check_hostname` i `CERT_REQUIRED` pozostają włączone | `test_kontekst_zachowuje_bezpieczne_ustawienia` |
+| Nieistniejąca ścieżka to błąd, nie cicha degradacja | `test_nieistniejaca_sciezka_jest_bledem_a_nie_cicha_degradacja` |
+| Komunikat błędu nie ujawnia zawartości pliku | `test_komunikat_bledu_nie_ujawnia_zawartosci_pliku` |
+| **Realne uzgodnienie TLS przechodzi z własnym CA** | `test_polaczenie_z_wlasnym_ca_dochodzi_do_skutku` |
+| **To samo połączenie BEZ CA zawodzi** (dowód skutku) | `test_bez_wlasnego_ca_to_samo_polaczenie_ZAWODZI` |
+| Poprawny kontekst z niewłaściwym urzędem też zawodzi | `test_obce_ca_nie_wystarcza` |
+| Certyfikat na inną nazwę jest odrzucany mimo zaufanego CA | `test_wlasne_ca_nie_wylacza_weryfikacji_nazwy_hosta` |
+| Połączenia zapisane przed zmianą nadal się wczytują | `test_polaczenia_zapisane_przed_zmiana_nadal_sie_wczytuja` |
+
+**Test mutacyjny wykrył realną lukę w pokryciu — i tak powstał test integracyjny.** Sześć
+mutacji czerwieniło odpowiednie testy, ale siódma — **podmiana `verify=self._ssl_context` na
+`verify=True` w samym transporcie** — przechodziła przez CAŁY zestaw na zielono. Cały łańcuch
+był sprawdzony (kontekst budowany poprawnie, wstawiany do transportu), a ostatnie ogniwo,
+to które faktycznie decyduje, nie było sprawdzone wcale. Dokładnie ten wzorzec — weryfikacja
+deklaracji zamiast skutku — przepuścił w tym projekcie sześć wcześniejszych wad.
+
+Domknięte testem `tests/integration/test_git_ca_bundle_tls.py`: podnosi PRAWDZIWY serwer TLS
+na loopbacku z certyfikatem podpisanym przez wygenerowany na miejscu urząd i wykonuje
+PRAWDZIWE uzgodnienie. Dowodem nie jest to, że połączenie z własnym CA działa — dowodem jest
+to, że **bez niego zawodzi**. Po dodaniu tego testu mutacja `verify=True` czerwieni zestaw.
+
+Test omija `build_provider`, bo bramka egress twardo blokuje loopback dla Gita (i słusznie);
+konstruuje `PinnedTarget` ręcznie. Globalny bezpiecznik DNS z `tests/conftest.py` zostaje
+w mocy dla całego zestawu — ten jeden test przepuszcza wyłącznie `127.0.0.1`/`::1`.
+
+**Ograniczenia — wprost.**
+
+1. **Zakres jest wąski: tylko integracja Git.** Pozostałe cztery ścieżki wychodzące (`web`,
+   konektory MCP, embedder pamięci, router modeli) nadal używają wyłącznie magazynu
+   systemowego. Samodzielnie hostowany vLLM albo serwer MCP za prywatnym CA pozostaje
+   nieosiągalny po HTTPS. Ujednolicenie: ROADMAP.
+2. **Ścieżka wskazuje plik na maszynie Husarza**, nie treść certyfikatu w konfiguracji.
+   Przy wdrożeniu w kontenerze plik trzeba zamontować.
+3. **Nie weryfikowano** zachowania z urzędem pośrednim w osobnym pliku ani z certyfikatem
+   odwołanym (CRL/OCSP — Python domyślnie ich nie sprawdza, co jest zachowaniem sprzed tej
+   zmiany i jej nie dotyczy).
+
+### Etap 17c — sprostowania po przeglądzie adwersaryjnym (data: 2026-08-22)
+
+Commit 5f4039d (Etap 17) przeszedł adwersaryjny przegląd: pięć niezależnych soczewek nad tą
+samą zmianą, każde zgłoszenie oceniane potem przez dwóch sceptyków (jeden próbuje OBALIĆ,
+drugi ODTWORZYĆ awarię). Zgłoszeń było dwadzieścia, pięć trafiło do weryfikacji, wszystkie
+pięć potwierdzono uruchomieniem kodu. **Trzy z nich to wady wprowadzone albo utrwalone przez
+tamten commit**, a dwie z tych trzech dotyczyły twierdzeń, które sam ten dokument zawierał.
+
+Zapisujemy to jawnie, bo dokumentacja, której nie można ufać w jednym miejscu, przestaje być
+wiarygodna w całości.
+
+#### 1. Sprostowanie: „token nie występuje w komunikatach błędów" było NIEPRAWDĄ
+
+Tabela obrony w sekcji „Etap 17" twierdziła, że materiał tokenu nie wraca w komunikatach
+błędów, a akapit o echu w błędzie walidacji uznawał sprawę za zamkniętą przez rezygnację
+z ograniczeń Pydantica na polu `token`. **To zamykało jeden wariant z sześciu.**
+
+Domyślna obsługa `RequestValidationError` w FastAPI zwraca `exc.errors()`, a każdy wpis niesie
+`input` z odrzuconą wartością. Brak ograniczeń na polu `token` sprawia jedynie, że dla TEGO
+pola nie da się wywołać błędu. Odtworzone warianty, w których token wracał w ciele 422:
+
+| Wariant | Co wracało w `input` |
+|---|---|
+| brak innego wymaganego pola (np. `name`) | CAŁE ciało żądania wraz z tokenem |
+| literówka w nazwie pola (`token_ref` zamiast `token`) | CAŁE ciało żądania |
+| `Content-Type: application/x-www-form-urlencoded` (zwykłe `curl -d`) | surowe ciało jako napis |
+| ciało jako lista JSON | cała lista |
+| **surowy token wklejony w `token_ref`** na `POST /api/git/connections` | sam token |
+
+Ostatni wariant jest w praktyce najbardziej prawdopodobny i **istniał przed Etapem 17** —
+nowy był wyłącznie fałszywy zapis, że kanał jest zamknięty. Konsola podbija jego szansę: jedno
+pole przełącza się między trybem „wklej token" a „podaj referencję", a przy wyłączonym
+magazynie tryb jest wymuszany na referencję. Operator ma wtedy token w schowku i pole, które
+go przyjmie.
+
+**Naprawa.** Handler `RequestValidationError` zarejestrowany dla CAŁEJ aplikacji zwraca
+wyłącznie `type`, `loc` i `msg`. Wołający wie, GDZIE i CO jest nie tak, ale nie dostaje
+z powrotem tego, co wysłał. Bramka na poziomie aplikacji, a nie pojedynczego pola, obejmuje
+także endpointy, które dopiero powstaną. Brak ograniczeń na polu `token` zostaje jako druga
+warstwa.
+
+**Waga.** Przegląd zgłosił „krytyczna", sceptyk skorygował na średnią i ta korekta jest
+słuszna: endpointy są za `git:write`, więc sekret wraca do tego, kto go właśnie wysłał — to
+odbicie własnego wejścia, nie wyciek między użytkownikami. Panel nie renderuje wartości
+(`detail` jest tablicą, więc konkatenacja daje `[object Object]`). Realne drogi to zakładka
+sieciowa w przeglądarce, pośrednik logujący ciała odpowiedzi i zrzut z narzędzi deweloperskich
+dołączony do zgłoszenia błędu. Nasze wcześniejsze uzasadnienie mówiło o „dzienniku dostępu
+serwera" — typowy `access log` nginksa czy Caddy'ego ciał odpowiedzi NIE zapisuje, więc ten
+argument był słabszy, niż go przedstawiono.
+
+| Niezmiennik | Test |
+|---|---|
+| Brak innego wymaganego pola nie odsyła tokenu | `test_brak_innego_wymaganego_pola_nie_odsyla_tokenu` |
+| Literówka w nazwie pola nie odsyła tokenu | `test_literowka_w_nazwie_pola_nie_odsyla_tokenu` |
+| Ciało formularzowe nie odsyła tokenu | `test_cialo_formularzowe_nie_odsyla_tokenu` |
+| Ciało jako lista nie odsyła tokenu | `test_cialo_jako_lista_nie_odsyla_tokenu` |
+| Surowy token w polu referencji nie wraca | `test_surowy_token_w_polu_referencji_nie_wraca` |
+| `input` i `ctx` zniknęły z KAŻDEGO wpisu (kontrola strukturalna) | `test_pole_input_zniklo_z_kazdego_wpisu` |
+| Komunikat nadal mówi, co jest nie tak (nośność) | `test_komunikat_nadal_mowi_co_jest_nie_tak` |
+
+#### 2. Sprostowanie: pre-check kolizji NIE chronił pod współbieżnością
+
+Sekcja „Etap 17" opisywała sprawdzenie kolizji nazwy przed zapisem sekretu jako kontrolę
+bezpieczeństwa chroniącą przed cichą utratą poświadczenia. Jest to wzorzec **check-then-act**
+i pod współbieżnością nie chroni niczego — a chronić miał właśnie przed tym, co sam wtedy
+umożliwiał.
+
+Odtworzony przebieg dwóch równoległych żądań kreatora o tej samej nazwie: oba przechodzą
+pre-check (połączenia jeszcze nie ma), drugie **nadpisuje** sekret pierwszego, jego `add`
+zawodzi na kolizji, a sprzątanie po nieudanym `add` kasuje token **zwycięzcy**. Zostaje
+połączenie z referencją, która nie rozwiązuje się na nic. Ten sam wyścig zachodzi między
+kreatorem a `DELETE`: usuwanie odczytuje połączenie, kreator w szczelinie tworzy nowe wraz
+z sekretem, a usuwanie kasuje świeżo zapisany token.
+
+**Naprawa.** Zamek obejmujący obie operacje w całości. Oba magazyny mają własną synchronizację
+wewnętrzną, ale niebezpieczna jest SEKWENCJA dotykająca ich obu — to ona musi być
+niepodzielna. Operacje są administracyjne i rzadkie, więc jeden zamek wystarcza i jest
+łatwiejszy do uzasadnienia niż zamki per nazwa.
+
+| Niezmiennik | Test |
+|---|---|
+| Dwa równoległe żądania nie niszczą tokenu zwycięzcy | `test_dwa_rownolegle_zadania_nie_niszcza_tokenu_zwyciezcy` |
+| Usuwanie nie kasuje sekretu zapisanego w międzyczasie | `test_usuwanie_nie_kasuje_sekretu_zapisanego_w_miedzyczasie` |
+| Po kolizji w magazynie jest dokładnie jeden wpis | `test_polaczenie_ktore_przegralo_nie_zostawia_sekretu` |
+| Kolizja bez współbieżności nadal daje 409 (nośność) | `test_kolizja_bez_wspolbieznosci_nadal_zwraca_409` |
+| Równoległe żądania o RÓŻNYCH nazwach nie giną (nośność) | `test_rownolegle_rozne_nazwy_dzialaja_niezaleznie` |
+
+**Uwaga metodologiczna do samych testów.** Pierwsza wersja testu wyścigu `DELETE` przechodziła
+także BEZ zamka, czyli nie chroniła niczego. Przyczyna: pauzę wstrzyknięto PRZED usunięciem
+połączenia, więc drugie żądanie widziało je jeszcze i odpadało na pre-checku z kodem 409.
+Groźna jest szczelina MIĘDZY usunięciem połączenia a usunięciem jego sekretu. Po przestawieniu
+pauzy test czerwieni się bez zamka — jak powinien od początku.
+
+#### 3. Regresja fail-closed przy braku `cryptography`
+
+Przed Etapem 17 `build_cipher` jawnie importowało `AESGCM` przy budowie, żeby magazyn nie
+powstał bez działającego backendu kryptograficznego. Przeniesienie prymitywu do
+`husarz.core.crypto` **zgubiło tę kontrolę**, a komentarz w kodzie nadal twierdził, że ona
+istnieje. Potwierdzone przez zasymulowanie braku biblioteki: magazyn pamięci i magazyn
+sekretów budowały się bez przeszkód, a awaria wychodziła dopiero przy pierwszym zapisie —
+czyli w chwili, gdy operator już liczy na to, że dane są zabezpieczone.
+
+**Naprawa.** Kontrola dostępności backendu mieszka teraz w konstruktorze `AesGcmCipher`, czyli
+w JEDNYM miejscu obejmującym wszystkich wołających. Docstring `build_secret_store`, który
+deklarował fail-closed, jest znów zgodny z kodem.
+
+#### Czego przegląd NIE objął
+
+Cap na liczbę weryfikowanych zgłoszeń odciął piętnaście pozycji. Kilka wygląda na realne
+i pozostaje do rozstrzygnięcia — zapisane w ROADMAP, żeby nie zginęły: brak przebudowy
+magazynu sekretów przy nadpisaniu konfiguracji w runtime (wyłączenie w panelu może być
+fail-open), mutacja stanu w pamięci przed udanym zapisem pliku, brak `fsync` przed
+`os.replace`, brak walidacji znaków w nazwie połączenia po stronie kreatora, wpis audytu
+kreatora bez `principal`, oraz zerowe pokrycie testami `SecretStoreConfig` i sklejenia
+konfiguracja→magazyn w launcherze.

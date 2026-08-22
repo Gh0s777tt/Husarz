@@ -163,7 +163,7 @@
     <section class="tab" id="tab-git">
       <div class="card">
         <h3>Połączenia Git</h3>
-        <p class="muted">Dwie drogi: <b>wklej token</b> — Husarz zapisze go zaszyfrowany i sam utworzy referencję <code>husarz:git/&lt;nazwa&gt;</code>; albo <b>podaj referencję</b> do sekretu, którym już zarządzasz (<code>env:</code>, <code>file:</code>, <code>vault:</code>, <code>sops:</code>). Token nigdy nie trafia do pliku konfiguracji. Host dostawcy musi być na <code>security.egress.allowlist</code>.</p>
+        <p class="muted">Dwie drogi: <b>wklej token</b> — Husarz zapisze go zaszyfrowany i sam utworzy referencję <code>husarz:git/&lt;nazwa&gt;</code>; albo <b>podaj referencję</b> do sekretu, którym już zarządzasz (<code>env:</code>, <code>file:</code>, <code>vault:</code>, <code>sops:</code>). Token nigdy nie trafia do pliku konfiguracji. Host dostawcy musi być na <code>security.egress.allowlist</code>. Samodzielnie hostowany GitLab z <b>prywatnym urzędem certyfikacji</b> wymaga wskazania pliku PEM w polu „własne CA" — zaufanie obowiązuje wtedy wyłącznie dla tego połączenia.</p>
         <div id="git-conns">…</div>
       </div>
       <div class="card">
@@ -181,6 +181,8 @@
                ekranu do dokumentacji, a przeglądarka nie proponuje go w autouzupełnianiu. -->
           <input id="g-token" type="password" autocomplete="off" spellcheck="false"
                  placeholder="token dostępu (np. ghp_… albo glpat-…)" />
+          <input id="g-ca" style="grid-column:1 / -1"
+                 placeholder="własne CA — ścieżka do pliku PEM (opcjonalnie, dla GitLaba z prywatnym urzędem)" />
         </div>
         <p id="g-store-note" class="muted" style="margin:6px 0 0"></p>
         <button class="primary" id="g-add">Dodaj</button>
@@ -366,8 +368,9 @@
       if (r.status === 404) { $("git-conns").innerHTML = "<p class='muted'>Integracje Git nie są włączone (ustaw <code>git.enabled: true</code>).</p>"; return; }
       if (!r.ok) { $("git-conns").innerHTML = `<p class='err'>${esc((await r.json()).detail || "Brak dostępu.")}</p>`; return; }
       gitConns = await r.json();
-      $("git-conns").innerHTML = gitConns.length ? "<table><tr><th>Nazwa</th><th>Dostawca</th><th>Host</th><th>token_ref</th><th></th></tr>" +
+      $("git-conns").innerHTML = gitConns.length ? "<table><tr><th>Nazwa</th><th>Dostawca</th><th>Host</th><th>token_ref</th><th>własne CA</th><th></th></tr>" +
         gitConns.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.provider)}</td><td>${esc(c.api_base)}</td><td>${esc(c.token_ref)}</td>` +
+          `<td>${c.ca_bundle ? esc(c.ca_bundle) : "—"}</td>` +
           `<td><button class="link g-del" type="button" data-n="${esc(c.name)}">usuń</button></td></tr>`).join("") + "</table>"
         : "<p class='muted'>Brak połączeń.</p>";
       $("git-conns").querySelectorAll(".g-del").forEach((b) => b.onclick = async () => {
@@ -410,7 +413,8 @@
         $("g-add-out").hidden = false; $("g-add-out").textContent = "…";
         const tryb = $("g-mode").value;
         const wspolne = { name: $("g-name").value.trim(), provider: $("g-provider").value,
-          api_base: $("g-base").value.trim(), username: $("g-user").value.trim() || null };
+          api_base: $("g-base").value.trim(), username: $("g-user").value.trim() || null,
+          ca_bundle: $("g-ca").value.trim() || null };
         // Token NIE jest przycinany po stronie klienta poza białymi znakami brzegowymi
         // i nigdy nie trafia do `g-add-out` — komunikat pokazuje tylko nazwę połączenia.
         const sciezka = tryb === "token" ? "git/connections/wizard" : "git/connections";
@@ -421,6 +425,7 @@
         if (d.name) {
           // Czyścimy pole natychmiast po sukcesie — token nie ma powodu dłużej wisieć w DOM.
           $("g-token").value = "";
+          $("g-ca").value = "";
           $("g-add-out").textContent = "Dodano: " + d.name + " (referencja: " + (d.token_ref || "—") + ")";
         } else {
           $("g-add-out").textContent = "Błąd: " + (d.detail || JSON.stringify(d));

@@ -5,6 +5,69 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (Etap 17c — po adwersaryjnym przeglądzie Etapu 17)
+
+Commit 5f4039d przeszedł przegląd: pięć niezależnych soczewek, każde zgłoszenie oceniane przez
+dwóch sceptyków (jeden próbuje obalić, drugi odtworzyć awarię). Pięć zgłoszeń potwierdzono
+uruchomieniem kodu; trzy z nich to wady wprowadzone albo utrwalone przez tamten commit.
+
+- **SPROSTOWANIE — „token nie występuje w komunikatach błędów" było NIEPRAWDĄ.** Rezygnacja
+  z ograniczeń Pydantica na polu `token` zamykała JEDEN wariant z sześciu. Domyślna obsługa
+  `RequestValidationError` w FastAPI zwraca `input` z odrzuconą wartością, a wychodzi ono także
+  gdy: brakuje INNEGO wymaganego pola (echo całego ciała wraz z tokenem), nazwa pola ma
+  literówkę, ciało przyszło jako formularz `x-www-form-urlencoded` (zwykłe `curl -d`) albo jako
+  lista JSON, oraz — najbardziej prawdopodobne w praktyce — gdy operator wklei surowy token
+  w pole `token_ref` na `POST /api/git/connections`. Ostatni wariant istniał PRZED Etapem 17;
+  nowy był wyłącznie fałszywy zapis, że kanał jest zamknięty.
+  Naprawa: handler `RequestValidationError` dla CAŁEJ aplikacji zwraca tylko `type`, `loc`
+  i `msg`. Bramka na poziomie aplikacji obejmuje też endpointy, które dopiero powstaną.
+- **SPROSTOWANIE — pre-check kolizji NIE chronił pod współbieżnością.** Opisaliśmy go jako
+  kontrolę bezpieczeństwa przed cichą utratą poświadczenia; jest to wzorzec check-then-act
+  i umożliwiał dokładnie to, przed czym miał chronić. Dwa równoległe żądania kreatora o tej
+  samej nazwie: oba przechodzą sprawdzenie, drugie NADPISUJE sekret pierwszego, jego `add`
+  zawodzi na kolizji, a sprzątanie kasuje token ZWYCIĘZCY — zostaje połączenie z referencją,
+  która nie rozwiązuje się na nic. Ten sam wyścig między kreatorem a `DELETE`.
+  Naprawa: zamek obejmujący obie sekwencje w całości (magazyn połączeń + magazyn sekretów
+  jako jedna operacja niepodzielna).
+- **Regresja fail-closed przy braku `cryptography`.** Przeniesienie prymitywu do
+  `husarz.core.crypto` zgubiło kontrolę dostępności backendu przy budowie szyfru, a komentarz
+  w kodzie nadal twierdził, że ona istnieje. Magazyn pamięci i magazyn sekretów budowały się
+  bez przeszkód, a awaria wychodziła przy pierwszym zapisie. Kontrola mieszka teraz
+  w konstruktorze `AesGcmCipher` — w jednym miejscu, obejmującym wszystkich wołających.
+- **Test wyścigu `DELETE` w pierwszej wersji nic nie chronił** — przechodził także bez zamka,
+  bo pauzę wstrzyknięto po niewłaściwej stronie `remove`. Przebudowany; teraz czerwieni się
+  bez poprawki.
+- Testy: +16 (`tests/security/test_walidacja_bez_echa.py`,
+  `tests/security/test_git_wizard_wyscigi.py`). Nośność sprawdzona: usunięcie handlera
+  czerwieni 6 testów, usunięcie zamka — 3.
+
+### Dodane (Etap 17b — własne CA dla połączeń Git)
+- Pole `ca_bundle` na połączeniu Git — ścieżka do pliku PEM z certyfikatem urzędu, który
+  podpisał certyfikat serwera. Odblokowuje **samodzielnie hostowanego GitLaba z prywatnym CA**,
+  udokumentowanego wcześniej jako ograniczenie. Dostępne w obu ścieżkach dodawania (kreator
+  i referencja) oraz w konsoli, jako pole „własne CA" i kolumna w tabeli połączeń.
+- **Zaufanie ZAWĘŻONE do jednego połączenia**: `ssl.create_default_context(cafile=…)` zastępuje
+  magazyn systemowy, zamiast się do niego dokładać. Semantyka `SSL_CERT_FILE` (dołożenie)
+  byłaby wygodniejsza i wyraźnie gorsza — prywatny urząd zyskałby prawo poświadczania
+  dowolnego hosta na wszystkich ścieżkach wychodzących, w tym `api.github.com`.
+- Brak przełącznika „ignoruj błędy certyfikatu" i brak takich planów. Kontekst zachowuje
+  `check_hostname=True` i `CERT_REQUIRED`; przy przypiętym IP weryfikacja nadal idzie po NAZWIE.
+- Błędna ścieżka wykrywana PRZY DODAWANIU połączenia (HTTP 400), nie przy pierwszej operacji —
+  inaczej literówka objawiałaby się jako niepowiązany błąd TLS. Komunikat nie zawiera treści
+  pliku (operator może omyłkowo wskazać klucz prywatny).
+- Zgodność wstecz: pliki połączeń zapisane przed zmianą wczytują się bez `ca_bundle`.
+- Testy: +18, w tym `tests/integration/test_git_ca_bundle_tls.py` — REALNY serwer TLS na
+  loopbacku i REALNE uzgodnienie z certyfikatem podpisanym przez wygenerowany na miejscu urząd.
+
+### Poprawione (Etap 17b — luka w pokryciu wykryta testem mutacyjnym)
+- **Nic nie sprawdzało, czy kontekst TLS dociera do httpx.** Podmiana
+  `verify=self._ssl_context` na `verify=True` w `HttpxGitTransport` przechodziła przez CAŁY
+  zestaw testów na zielono: kontekst był poprawnie budowany i poprawnie wstawiany do
+  transportu, ale ostatnie ogniwo — to, które faktycznie decyduje — nie było sprawdzone wcale.
+  Ten sam wzorzec (weryfikacja deklaracji zamiast skutku) przepuścił w tym projekcie sześć
+  wcześniejszych wad. Domknięte testem realnego uzgodnienia TLS; dowodem nie jest to, że
+  połączenie z własnym CA działa, tylko że **bez niego zawodzi**.
+
 ### Dodane (Etap 17 — zapisywalny magazyn sekretów i kreator połączeń Git)
 - Nowy moduł `husarz.security.secret_store` — szyfrowany, ZAPISYWALNY magazyn sekretów.
   Pierwsze miejsce, w którym Husarz PRZYJMUJE materiał sekretu, zamiast wyłącznie rozwiązywać

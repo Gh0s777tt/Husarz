@@ -76,6 +76,14 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   Prymityw szyfrujący przeniesiony do `husarz.core.crypto` (warstwa 0), bo dzielą go
   pamięć i magazyn sekretów. Testy: +36, nośność sprawdzona 13 mutacjami. Docs: ADR-0023,
   GIT.md, BEZPIECZENSTWO.md (notatka weryfikacyjna z uruchomionej aplikacji).
+- ⬜ **Domknięcia po przeglądzie Etapu 17** (zgłoszenia odcięte przez limit weryfikacji,
+  wyglądają na realne, wymagają rozstrzygnięcia): magazyn sekretów NIE jest przebudowywany przy
+  `POST /api/config/runtime`, więc wyłączenie go w panelu może być fail-open; `EncryptedFileSecretStore`
+  mutuje stan w pamięci PRZED udanym zapisem pliku (nieudany zapis rozjeżdża pamięć z dyskiem);
+  brak `fsync` przed `os.replace` (atomowość wobec czytelnika, nie wobec awarii zasilania);
+  kreator nie waliduje znaków w `name`, więc ukośnik tworzy nazwę sekretu kolidującą z inną;
+  wpis audytu kreatora nie niesie `principal`; `SecretStoreConfig` i sklejenie
+  konfiguracja→magazyn w launcherze mają zerowe pokrycie testami.
 - ⬜ **Device flow OAuth** — połączenie bez ręcznego generowania tokenu u dostawcy.
   Magazyn sekretów jest jego warunkiem koniecznym i już istnieje; brakuje samego przepływu.
   Na GitHubie „kod autoryzacyjny + PKCE" NIE zwalnia z `client_secret`, więc device flow
@@ -83,8 +91,14 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   włączany w configu, nie domyślny.
 - ⬜ **Rotacja i wygasanie sekretów w magazynie** — dziś ponowny zapis pod tą samą nazwą
   zastępuje wartość i to cała „rotacja"; nic nie przypomina, że token dostawcy wygasa.
-- ⬜ **Pole na bundle CA dla ruchu wychodzącego** — bez niego samodzielnie hostowany GitLab
-  z prywatnym CA jest nieosiągalny (`verify=True`/`trust_env=False` na sztywno).
+- ✅ **Pole na bundle CA — integracja Git** (Etap 17b): `ca_bundle` na połączeniu, zaufanie
+  ZAWĘŻONE do tego połączenia (kontekst zastępuje magazyn systemowy, zamiast go rozszerzać).
+  Weryfikacja nazwy hosta nienaruszona, brak przełącznika wyłączającego TLS. Zweryfikowane
+  REALNYM uzgodnieniem TLS, nie tylko przekazaniem argumentu.
+- ⬜ **Bundle CA dla POZOSTAŁYCH ścieżek wychodzących** — `web`, konektory MCP, embedder
+  pamięci i router modeli nadal używają wyłącznie magazynu systemowego. Samodzielnie
+  hostowany vLLM albo serwer MCP za prywatnym CA jest po HTTPS nieosiągalny. Do rozważenia
+  wspólny mechanizm w `husarz.ssrf` zamiast czterech osobnych pól.
 - ⬜ Pozostaje: autoryzacja NA CEL w przepływie (dziś `RoeGate.evaluate` gotowe, ale Puszkarz
   nie wykonuje akcji); klucze prywatne z hasłem; rotacja/wersjonowanie kluczy.
 - 🚧 Uwierzytelnienie + przypisanie ról: **token Bearer + RBAC wpięte w API (Etap 5)**;

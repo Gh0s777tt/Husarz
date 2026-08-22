@@ -75,12 +75,21 @@ class AesGcmCipher:
         key: Klucz 32-bajtowy (AES-256). Krótszy/dłuższy → :class:`CryptoError`.
 
     Raises:
-        CryptoError: Gdy klucz ma niewłaściwą długość.
+        CryptoError: Gdy klucz ma niewłaściwą długość albo gdy brakuje biblioteki
+            ``cryptography`` (kontrola przy konstrukcji — fail-closed).
     """
 
     def __init__(self, key: bytes) -> None:
         if len(key) != _KEY_BYTES:
             raise CryptoError("Klucz AES-256 musi mieć 32 bajty.")
+        # Fail-closed PRZY KONSTRUKCJI: sprawdzamy dostępność backendu kryptograficznego
+        # tutaj, a nie dopiero w `seal`. Inaczej magazyn (pamięci albo sekretów) powstaje
+        # bez przeszkód i wygląda na sprawny, a awaria wychodzi przy pierwszym zapisie —
+        # czyli w miejscu, w którym operator już liczy na to, że dane są zabezpieczone.
+        # REGRESJA: kontrola istniała w `husarz.memory.crypto.build_cipher` przed
+        # przeniesieniem prymitywu do warstwy 0 i została wtedy zgubiona. Mieszka teraz
+        # w JEDNYM miejscu, więc obejmuje wszystkich wołających.
+        _load_aesgcm()
         self._key = key
 
     def blind_id(self, item_id: str, *, namespace: str) -> str:

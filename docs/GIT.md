@@ -124,6 +124,43 @@ W konsoli: ten sam formularz, tryb **„Podaj referencję do sekretu"**. Gdy mag
 wyłączony, konsola sama przełącza się w ten tryb i wyjaśnia, czego brakuje — kreator nie
 udaje, że działa.
 
+### Samodzielnie hostowany GitLab z prywatnym CA
+
+Instancja pod własnym adresem (`https://git.firma.wewn/api/v4`) zwykle ma certyfikat podpisany
+przez **wewnętrzny urząd certyfikacji**, którego nie ma w magazynie systemowym. Wskaż jego
+certyfikat polem `ca_bundle` — ścieżką do pliku PEM na maszynie, na której działa Husarz:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/git/connections/wizard \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"firmowy-gitlab","provider":"gitlab",
+       "api_base":"https://git.firma.wewn/api/v4",
+       "token":"glpat-...",
+       "ca_bundle":"/etc/ssl/certs/firma-ca.pem"}'
+```
+
+W konsoli to samo robi pole **„własne CA"** w formularzu dodawania połączenia.
+
+!!! info "Zaufanie jest ZAWĘŻONE do tego jednego połączenia"
+    Wskazany plik **zastępuje** magazyn systemowy dla tego połączenia, zamiast się do niego
+    dokładać. To celowe i mocniejsze niż `SSL_CERT_FILE`: prywatny urząd NIE zyskuje prawa
+    poświadczania `api.github.com` ani żadnego innego hosta. Odwrotna semantyka rozszerzyłaby
+    zaufanie na cały ruch wychodzący — jeden przejęty urząd wewnętrzny wystarczyłby wtedy do
+    podszycia się pod dowolnego dostawcę.
+
+    Konsekwencja praktyczna: bundle musi zawierać **pełny łańcuch** aż do korzenia, który
+    podpisał certyfikat serwera. Jeżeli certyfikat wystawia urząd pośredni, dołącz oba.
+
+Czego to pole **nie** robi: nie wyłącza weryfikacji. Nie ma i nie będzie przełącznika
+„ignoruj błędy certyfikatu" — połączenie niosące token z prawem zapisu do repozytoriów nie
+może iść po nieuwierzytelnionym kanale. Nazwa hosta jest nadal sprawdzana (`check_hostname`),
+także przy przypiętym adresie IP: weryfikacja idzie po nazwie z `api_base`, nie po adresie.
+
+Błędna ścieżka jest wykrywana **przy dodawaniu połączenia** (HTTP 400), a nie dopiero przy
+pierwszej operacji — inaczej literówka objawiłaby się jako błąd TLS, którego nikt nie powiąże
+z polem w formularzu. Plik musi istnieć, być zwykłym plikiem i dawać się wczytać jako zbiór
+certyfikatów; katalog (`capath`) to inny mechanizm i nie jest obsługiwany.
+
 ### Którą wybrać
 
 | Sytuacja | Droga |
@@ -144,8 +181,8 @@ udaje, że działa.
 | Metoda i ścieżka | Opis | Uprawnienie |
 |------------------|------|-------------|
 | `GET /api/git/connections` | lista połączeń (bez sekretu; tylko `token_ref`) | `git:read` |
-| `POST /api/git/connections` | `{name, provider, api_base, token_ref, username?}` | `git:write` |
-| `POST /api/git/connections/wizard` | `{name, provider, api_base, token, username?}` — token zapisywany zaszyfrowany | `git:write` |
+| `POST /api/git/connections` | `{name, provider, api_base, token_ref, username?, ca_bundle?}` | `git:write` |
+| `POST /api/git/connections/wizard` | `{name, provider, api_base, token, username?, ca_bundle?}` — token zapisywany zaszyfrowany | `git:write` |
 | `GET /api/secrets/store` | stan magazynu: `enabled` + nazwy wpisów (bez wartości) | `git:read` |
 | `DELETE /api/git/connections/{name}` | usuń połączenie | `git:write` |
 | `GET /api/git/connections/{name}/repos` | lista repozytoriów | `git:read` |
@@ -153,7 +190,7 @@ udaje, że działa.
 
 Błędy: nieznane połączenie → `404`; egress zablokowany → `403`; token/dostawca
 odrzucił → `502`; kolizja nazwy połączenia → `409`; kreator przy wyłączonym magazynie
-→ `409` z instrukcją, co włączyć.
+→ `409` z instrukcją, co włączyć; nieczytelny albo nieistniejący plik `ca_bundle` → `400`.
 
 ## Konsola
 
@@ -173,19 +210,17 @@ przełącznik trybu — wklejenie tokenu albo podanie referencji (patrz wyżej).
     To jest zamierzone (airgap = brak wyjścia), ale bywa zaskoczeniem: operator z własnym
     GitLabem w LAN-ie spodziewa się, że „lokalne" zadziała. Nie zadziała.
 
-!!! warning "Własne CA nie zadziała — blokuje samodzielnie hostowanego GitLaba"
-    `HttpxGitTransport` ustawia `verify=True` i `trust_env=False` **na sztywno**
-    (`husarz/git/client.py`). `trust_env=False` jest celowe — zmienne `HTTP(S)_PROXY`
-    nie mogą przekierować przypiętego połączenia wraz z tokenem przez cudzy serwer — ale
-    powoduje też, że `SSL_CERT_FILE` i `REQUESTS_CA_BUNDLE` są **ignorowane**, a pola
-    konfiguracyjnego na własny bundle CA **nie ma**.
+!!! note "Zmiennych `SSL_CERT_FILE` i `REQUESTS_CA_BUNDLE` Husarz nie czyta"
+    `trust_env=False` jest **celowe**: zmienne `HTTP(S)_PROXY` ze środowiska nie mogą
+    przekierować przypiętego połączenia wraz z tokenem przez cudzy serwer. Skutkiem ubocznym
+    jest ignorowanie zmiennych wskazujących magazyn certyfikatów. Własny urząd wskazuje się
+    **per połączenie**, polem `ca_bundle` (patrz „Samodzielnie hostowany GitLab" wyżej) —
+    i jest to rozwiązanie mocniejsze niż zmienna środowiskowa, bo zaufanie nie rozlewa się
+    na cały ruch wychodzący.
 
-    Instancja GitLaba z certyfikatem podpisanym przez prywatne CA jest więc nieosiągalna.
-    Wymóg `https` w `api_base` operator sobie spełni; prywatnego CA nie wstrzyknie.
-
-    **Uwaga na fałszywy trop:** `security.mtls.ca_cert_ref` wygląda na rozwiązanie, ale
-    dotyczy mTLS **między usługami** i — jak cała sekcja `security.mtls` — nie jest dziś
-    przez żaden kod odczytywane (mTLS to Etap 6). Ustawienie go nie zmieni niczego.
+    **Uwaga na fałszywy trop:** `security.mtls.ca_cert_ref` wygląda na to samo, ale dotyczy
+    mTLS **między usługami** i — jak cała sekcja `security.mtls` — nie jest dziś przez żaden
+    kod odczytywane (mTLS to Etap 6). Ustawienie go nie zmieni niczego.
 
 !!! note "Zakresy nie są równoważne między dostawcami"
     Utworzenie merge requesta na GitLabie wymaga zakresu `api`, czyli **pełnego odczytu
@@ -195,6 +230,10 @@ przełącznik trybu — wklejenie tokenu albo podanie referencji (patrz wyżej).
     Do samego listowania projektów wystarcza `read_api` — nadawaj `api` dopiero wtedy,
     gdy faktycznie tworzysz MR-y.
 
+- **`ca_bundle` działa wyłącznie dla integracji Git.** Pozostałe ścieżki wychodzące
+  (`web`, konektory MCP, embedder pamięci, router modeli) nadal używają magazynu
+  systemowego i nie mają pola na własny urząd. Samodzielnie hostowany vLLM czy serwer MCP
+  za prywatnym CA pozostaje więc nieosiągalny po HTTPS — patrz ROADMAP.
 - Kreator **nie generuje tokenu za Ciebie** — token nadal tworzysz u dostawcy i wklejasz.
   Magazyn sekretów jest warunkiem koniecznym pełnego OAuth (token musi mieć gdzie wylądować),
   ale sam z siebie go nie wprowadza.

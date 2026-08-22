@@ -18,6 +18,12 @@ samodzielnie hostowany GitLab pod adresem RFC 1918 to legalny scenariusz suweren
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # `ssl` tylko dla adnotacji — import właściwy jest leniwy
+    import ssl
+
 import time
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import quote, urlparse, urlsplit
@@ -155,13 +161,16 @@ class GitTransport(Protocol):
 
 
 class HttpxGitTransport:
-    """Transport oparty o httpx (import leniwy). TLS ``verify=True`` jawnie, na sztywno.
+    """Transport oparty o httpx (import leniwy). TLS zawsze weryfikowany.
 
     Łączy się z ``target.connect_url`` (literał IP dla nazw domenowych), a nagłówek ``Host``
     i SNI/weryfikacja certyfikatu idą po ORYGINALNEJ nazwie — pin nie degraduje TLS.
     ``trust_env=False``: zmienne ``HTTP(S)_PROXY`` ze środowiska nie mogą przekierować
     przypiętego połączenia (egress pochodzi z configu, nie ze środowiska procesu).
     ``follow_redirects=False`` — przekierowanie omijałoby walidację i pin.
+    ``ssl_context`` (opcjonalny, z ``build_ssl_context``) pozwala zaufać WŁASNEMU urzędowi
+    certyfikacji dla tego jednego połączenia — bez niego samodzielnie hostowany GitLab
+    z prywatnym CA jest nieosiągalny. Nie istnieje gałąź wyłączająca weryfikację.
 
     Ciało czytane strumieniowo z twardym sufitem ``max_bytes`` i bezwzględnym deadline'em
     wall-clock (anty-OOM i anty-„slow-drip"; wcześniej ``response.json()`` wciągało całą
@@ -169,10 +178,18 @@ class HttpxGitTransport:
     httpx, które trafiłyby do audytu/API (parytet z konektorem MCP).
     """
 
-    def __init__(self, *, max_bytes: int = _DEFAULT_MAX_BYTES) -> None:
+    def __init__(
+        self,
+        *,
+        max_bytes: int = _DEFAULT_MAX_BYTES,
+        ssl_context: ssl.SSLContext | None = None,
+    ) -> None:
         # Limit czasu przychodzi z KAŻDYM wywołaniem (providerzy podają własny), więc
         # konstruktor go nie przyjmuje — pole `self._timeout` byłoby martwe i mylące.
         self._max_bytes = max_bytes
+        # None = magazyn systemowy (`verify=True`). Kontekst pochodzi z `build_ssl_context`
+        # i jest ZAWĘŻONY do jednego połączenia — patrz tam po uzasadnienie.
+        self._ssl_context = ssl_context
 
     def __call__(
         self,
@@ -202,7 +219,12 @@ class HttpxGitTransport:
         try:
             with (
                 httpx.Client(
-                    timeout=timeout, follow_redirects=False, verify=True, trust_env=False
+                    timeout=timeout,
+                    follow_redirects=False,
+                    # Kontekst własnego CA albo True (magazyn systemowy). W OBU wypadkach
+                    # weryfikacja jest włączona — nie ma gałęzi wyłączającej TLS.
+                    verify=self._ssl_context if self._ssl_context is not None else True,
+                    trust_env=False,
                 ) as client,
                 client.stream(
                     method,
@@ -371,6 +393,54 @@ class GitLabProvider:
         )
 
 
+def build_ssl_context(ca_bundle: str | None) -> ssl.SSLContext | None:
+    """Buduje kontekst TLS dla własnego CA albo zwraca ``None`` (magazyn systemowy).
+
+    **Semantyka ZASTĄPIENIA, nie dołożenia.** ``ssl.create_default_context(cafile=...)``
+    ładuje WYŁĄCZNIE wskazany plik — systemowe urzędy nie są wtedy zaufane. To celowe i jest
+    mocniejsze niż zmienna ``SSL_CERT_FILE``: prywatne CA obowiązuje tylko dla połączenia,
+    które je wskazało, więc nie zyskuje prawa poświadczania `api.github.com`. Odwrotna
+    semantyka (dołożenie do magazynu systemowego) rozszerzyłaby zaufanie na CAŁY ruch
+    wychodzący — jeden przejęty prywatny urząd wystarczyłby do podszycia się pod dowolnego
+    dostawcę.
+
+    Kontekst zachowuje bezpieczne domyślne ustawienia ``create_default_context``:
+    ``check_hostname=True`` i ``verify_mode=CERT_REQUIRED``. Przy przypiętym adresie IP
+    weryfikacja i tak idzie po ORYGINALNEJ nazwie (``sni_hostname``), więc pin nie degraduje TLS.
+
+    Args:
+        ca_bundle: Ścieżka do pliku PEM albo ``None``.
+
+    Returns:
+        Gotowy kontekst albo ``None``, gdy mają obowiązywać CA systemowe.
+
+    Raises:
+        GitError: Gdy pliku nie ma, nie jest zwykłym plikiem albo nie daje się wczytać jako
+            zbiór certyfikatów. Fail-closed: NIE degradujemy po cichu do CA systemowych,
+            bo operator, który wskazał własny urząd, dostałby wtedy błąd weryfikacji TLS
+            w zupełnie innym miejscu i nie powiązałby go z literówką w ścieżce.
+    """
+    if ca_bundle is None or not ca_bundle.strip():
+        return None
+    import ssl  # noqa: PLC0415
+
+    sciezka = Path(ca_bundle.strip())
+    if not sciezka.is_file():
+        raise GitError(
+            f"Plik CA '{ca_bundle}' nie istnieje albo nie jest zwykłym plikiem "
+            f"(oczekiwany plik PEM z certyfikatem urzędu)."
+        )
+    try:
+        return ssl.create_default_context(cafile=str(sciezka))
+    except (OSError, ssl.SSLError) as exc:
+        # Komunikat NIE zawiera treści pliku — mogłaby to być zawartość, którą operator
+        # wskazał omyłkowo (np. klucz prywatny), a błąd trafia do odpowiedzi API.
+        raise GitError(
+            f"Nie można wczytać pliku CA '{ca_bundle}' jako zbioru certyfikatów: "
+            f"{type(exc).__name__}."
+        ) from exc
+
+
 def build_provider(
     conn: GitConnection,
     token: str,
@@ -390,7 +460,13 @@ def build_provider(
         GitError: api_base nie jest poprawnym https bez poświadczeń w URL.
     """
     target = _endpoint_target(conn.api_base, egress, resolve=resolve)
-    active = transport if transport is not None else HttpxGitTransport()
+    # Transport wstrzyknięty (testy) używany jest bez zmian; domyślny dostaje kontekst TLS
+    # zbudowany z `conn.ca_bundle`, więc własne CA obowiązuje WYŁĄCZNIE dla tego połączenia.
+    active = (
+        transport
+        if transport is not None
+        else HttpxGitTransport(ssl_context=build_ssl_context(conn.ca_bundle))
+    )
     if conn.provider is GitProviderKind.GITHUB:
         return GitHubProvider(target, token, active)
     return GitLabProvider(target, token, active)
