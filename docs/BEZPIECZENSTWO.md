@@ -1813,3 +1813,83 @@ i przestała być prawdziwa po nim.
 **Nośność.** Pięć mutacji, wszystkie czerwienią testy. Jedna wymagała powtórzenia, bo mój
 wzorzec mutacji trafił w niewłaściwe wystąpienie `except GitConnectionError` (jest ich dwa) —
 wada narzędzia sprawdzającego, nie testu.
+
+### Etap 17g — pięć ostatnich zgłoszeń drugiego przeglądu (data: 2026-08-23)
+
+Ostatnia partia zgłoszeń odciętych przez limit weryfikacji. **Cztery potwierdzone, jedno
+obalone** — pierwszy przypadek w tej serii, gdy sprawdzenie nie odtworzyło opisanej wady.
+
+Zaktualizowany bilans: **z dziewiętnastu zgłoszeń sprawdzonych osobno osiemnaście okazało się
+realnych**. Wskaźnik jest wysoki, ale nie stuprocentowy — i dobrze, że tak zostało zapisane:
+traktowanie każdego zgłoszenia jako pewnego byłoby tym samym błędem, co ignorowanie ich.
+
+#### 1. `enabled: false` zamykało tylko ZAPIS — teraz jest KILL-SWITCHEM
+
+Bramka z Etapu 17d chroniła kreator i widok stanu, ale **rozwiązywanie referencji szło obok
+niej**: `_SchemeSecrets` w launcherze sięgało do magazynu niezależnie od konfiguracji.
+Wyłączenie magazynu blokowało więc nowe wpisy, podczas gdy dotychczasowe tokeny nadal
+uwierzytelniały operacje Gita.
+
+**Decyzja i jej uzasadnienie.** Zmieniamy semantykę: wyłączenie odcina także ODCZYT. Operator
+wyłączający magazyn robi to zwykle w reakcji na incydent i oczekuje, że przestanie on wydawać
+materiał — a nie że zablokuje wyłącznie przyszłe zapisy, zostawiając napastnikowi dostęp przez
+istniejące połączenie. Fail-closed jest tu spójne z resztą projektu.
+
+Skutek uboczny jest zamierzony i GŁOŚNY: operacja Gita kończy się komunikatem „Nie udało się
+rozwiązać tokenu połączenia" (zweryfikowane na realnej ścieżce `GitService.provider_for`), a nie
+cichą degradacją. Ponowne włączenie działa natychmiast, bez restartu, więc koszt pomyłki jest
+niski.
+
+To **zmiana zachowania**, nie tylko poprawka — odnotowana jako taka w CHANGELOG-u.
+
+#### 2. Bramka magazynu sprawdzana POZA zamkiem
+
+`_require_secret_store()` wołane jest na początku kreatora, a zamek zakładany dopiero przed
+sekwencją zapisu. Żądanie, które przeszło bramkę tuż przed wyłączeniem magazynu, zapisywało
+token JUŻ PO tym wyłączeniu. Okno wąskie, ale kontrola bezpieczeństwa nie może mieć okna
+„prawie zamkniętego", a koszt domknięcia to jedno porównanie pod zamkiem, który i tak trzymamy.
+
+#### 3. `ca_bundle` wracał dosłownie w odpowiedzi 400
+
+Druga droga echa obok tej, którą zamknął handler walidacji z Etapu 17c. Wartość jest ścieżką,
+nie sekretem, więc waga jest niższa — ale niezmiennik brzmi „API nie odsyła tego, co dostało",
+a pole przyjmuje dowolny tekst od operatora. Komunikat wskazuje teraz POLE i mówi, co jest nie
+tak, nie powtarzając wartości.
+
+#### 4. `POST /api/git/connections` był poza zamkiem
+
+Druga droga dodawania nie była objęta `_mutex_polaczen`, więc mogła wyścigać się ze
+sprzątaniem sekretu w `DELETE`. Objęta.
+
+**Uczciwie o pokryciu tej poprawki.** Nie ma dla niej testu sprawdzającego SKUTEK. Groźne okno
+to dwie sąsiednie instrukcje w `DELETE` (lista połączeń → usunięcie sekretu) i otwarcie go
+wymagałoby pauzy wstrzykniętej w kod produkcyjny, czyli testu zmieniającego to, co bada.
+Zamiast udawać pokrycie, zostawiliśmy kontrolę STRUKTURALNĄ (`svc.add` musi stać pod zamkiem)
+z jawnym komentarzem, że jest słabszym dowodem: chroni przed usunięciem zamka, nie dowodzi
+jego poprawności. Test współbieżnego dodawania również ma dopisane wprost, że przechodzi
+z poprawką i bez niej.
+
+#### 5. OBALONE: bezwzględne ścieżki operatora w odpowiedziach konfiguracji
+
+Zgłoszenie mówiło, że `POST /api/config/validate` odsyła bezwzględną ścieżkę katalogu
+konfiguracji. Sprawdzone: odpowiedź nie zawiera ani `config_dir`, ani żadnego przedrostka
+ścieżki systemowej. Zgłoszenie nietrafione — odnotowane, żeby nie wracało.
+
+| Niezmiennik | Test |
+|---|---|
+| Wyłączony magazyn nie rozwiązuje istniejących referencji | `test_wylaczony_magazyn_nie_rozwiazuje_istniejacych_referencji` |
+| Kill-switch nie dotyka pozostałych schematów (nośność) | `test_killswitch_nie_dotyka_pozostalych_schematow` |
+| Wyłączenie w trakcie żądania zatrzymuje zapis | `test_wylaczenie_w_trakcie_zadania_zatrzymuje_zapis` |
+| Komunikat o błędzie CA nie powtarza wartości | `test_komunikat_o_bledzie_ca_nie_powtarza_wartosci` |
+| Konsola nie skleja tablicy błędów ze stringiem | `test_konsola_nie_sklejaja_tablicy_bledow_ze_stringiem` |
+| Obie drogi dodawania pod zamkiem (kontrola STRUKTURALNA) | `test_obie_drogi_dodawania_sa_pod_zamkiem` |
+
+**Przy okazji: konsola pokazywała błędy walidacji jako `[object Object]`.** Odpowiedź 422
+niesie TABLICĘ obiektów, a panel sklejał ją ze stringiem — komunikat ginął dokładnie tam, gdzie
+użytkownik pomylił się w formularzu i najbardziej go potrzebował. Regresja własna, wprowadzona
+razem z handlerem z Etapu 17c.
+
+**Czego nadal NIE zrobiono.** Magazyn nie ma blokady pliku, więc dwa procesy Husarza
+wskazujące ten sam plik mogą się nadpisać. Jest to z założenia niewspierane (jedna instancja
+na proces) i zapisane w ROADMAP; przenośna blokada plikowa wymaga osobnych ścieżek dla POSIX
+i Windows, więc to zadanie na osobny krok, nie doklejka.

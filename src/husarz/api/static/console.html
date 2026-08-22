@@ -362,6 +362,24 @@
     }
 
     // --- Połączenia Git ---
+    // Zamienia `detail` z odpowiedzi błędu na czytelny tekst.
+    // Dla błędów walidacji (422) `detail` jest TABLICĄ obiektów {type, loc, msg} — zwykła
+    // konkatenacja ze stringiem dawała w przeglądarce „Błąd: [object Object]", czyli
+    // komunikat bezużyteczny akurat tam, gdzie użytkownik pomylił się w formularzu.
+    function opisBledu(d) {
+      if (!d) return "nieznany błąd";
+      const detail = d.detail !== undefined ? d.detail : d;
+      if (typeof detail === "string") return detail;
+      if (Array.isArray(detail)) {
+        return detail.map((e) => {
+          const pole = Array.isArray(e.loc) ? e.loc.filter((x) => x !== "body").join(".") : "";
+          const msg = (e.msg || "").replace(/^Value error, /, "");
+          return pole ? `${pole}: ${msg}` : msg;
+        }).join("; ");
+      }
+      return JSON.stringify(detail);
+    }
+
     let gitConns = [];
     async function loadGit() {
       const r = await fetch("/api/git/connections", { headers: authHeaders() });
@@ -428,7 +446,7 @@
           $("g-ca").value = "";
           $("g-add-out").textContent = "Dodano: " + d.name + " (referencja: " + (d.token_ref || "—") + ")";
         } else {
-          $("g-add-out").textContent = "Błąd: " + (d.detail || JSON.stringify(d));
+          $("g-add-out").textContent = "Błąd: " + opisBledu(d);
         }
         loadGit();
       };
@@ -451,7 +469,7 @@
           head: $("pr-head").value.trim(), base: $("pr-base").value.trim(), body: $("pr-body").value };
         try {
           const d = await api("git/connections/" + encodeURIComponent(name) + "/pull-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-          $("pr-out").textContent = d.url ? "Utworzono PR/MR: " + d.url : "Błąd: " + (d.detail || JSON.stringify(d));
+          $("pr-out").textContent = d.url ? "Utworzono PR/MR: " + d.url : "Błąd: " + opisBledu(d);
         } catch (e) { $("pr-out").textContent = "Błąd sieci: " + (e.message || e); }
       };
     }

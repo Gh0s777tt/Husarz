@@ -229,7 +229,14 @@ def _build_git(config: HusarzConfig, store: Any = None) -> Any:
         return None
     from husarz.git import build_git_service  # noqa: PLC0415
 
-    return build_git_service(config.git, config.security, secrets=_SchemeSecrets(), store=store)
+    return build_git_service(
+        config.git,
+        config.security,
+        # Bieżąca wartość, nie startowa: serwis jest przebudowywany po nadpisaniu runtime,
+        # więc wyłączenie magazynu w panelu odcina też ODCZYT istniejących tokenów.
+        secrets=_SchemeSecrets(magazyn_dostepny=config.security.secret_store.enabled),
+        store=store,
+    )
 
 
 def _build_plugins(config: HusarzConfig) -> Any:
@@ -239,7 +246,7 @@ def _build_plugins(config: HusarzConfig) -> Any:
     return build_plugin_service(
         config.plugins,
         config.security,
-        secrets=_SchemeSecrets(),
+        secrets=_SchemeSecrets(magazyn_dostepny=config.security.secret_store.enabled),
         transport=HttpxPluginTransport(),
     )
 
@@ -280,14 +287,36 @@ def _zbuduj_magazyn_sekretow(config: HusarzConfig) -> EncryptedFileSecretStore |
     sciezka = ustawienia.path or (config.platform.data_dir / "secrets" / "store.json")
     try:
         return build_secret_store(
-            path=sciezka, key_ref=ustawienia.key_ref, secrets=_SchemeSecrets()
+            path=sciezka,
+            key_ref=ustawienia.key_ref,
+            # Domyślne `magazyn_dostepny=True` jest tu bez znaczenia: klucz główny ma
+            # schemat ZEWNĘTRZNY (walidacja zabrania `husarz:`), więc bramka go nie dotyka.
+            secrets=_SchemeSecrets(),
         )
     except SecretStoreError as exc:
         raise ConfigError(f"Magazyn sekretów: {exc}") from exc
 
 
 class _SchemeSecrets:
-    """Dostawca sekretów rozwiązujący referencje po schemacie (env:/file:/husarz:)."""
+    """Dostawca sekretów rozwiązujący referencje po schemacie (env:/file:/husarz:).
+
+    ``magazyn_dostepny`` decyduje, czy referencje ``husarz:`` w ogóle są rozwiązywane.
+    Domyślnie tak; wołający, który zna BIEŻĄCĄ konfigurację (fabryki serwisów przebudowywane
+    po nadpisaniu runtime), przekazuje ``config.security.secret_store.enabled``.
+
+    **Dlaczego wyłączenie zamyka także ODCZYT.** ``security.secret_store.enabled = false`` to
+    kill-switch, a nie tylko zakaz zapisu. Operator wyłączający magazyn — zwykle w reakcji na
+    incydent — oczekuje, że przestanie on wydawać materiał, a nie że zablokuje wyłącznie nowe
+    wpisy, podczas gdy dotychczasowe tokeny nadal uwierzytelniają połączenia. Skutek jest
+    GŁOŚNY: operacja Gita kończy się czytelnym „nie udało się rozwiązać tokenu", nie cichą
+    degradacją. Ponowne włączenie działa natychmiast, bez restartu, więc pomyłka jest tania.
+
+    Args:
+        magazyn_dostepny: Czy referencje ``husarz:`` mają być rozwiązywane.
+    """
+
+    def __init__(self, *, magazyn_dostepny: bool = True) -> None:
+        self._magazyn_dostepny = magazyn_dostepny
 
     def resolve(self, ref: str) -> str | None:
         """Zwraca wartość sekretu dla referencji ``env:``/``file:``/``husarz:`` albo ``None``."""
@@ -297,9 +326,12 @@ class _SchemeSecrets:
         )
 
         if ref.startswith("husarz:"):
-            # Magazyn zapisywalny bywa wyłączony — wtedy referencja jest nierozwiązywalna
-            # i wołający dostaje None, dokładnie jak przy braku zmiennej środowiskowej.
-            return _SEKRETY.resolve(ref) if _SEKRETY is not None else None
+            # Brak magazynu ALBO wyłączony w bieżącej konfiguracji — referencja jest
+            # nierozwiązywalna i wołający dostaje None, dokładnie jak przy braku zmiennej
+            # środowiskowej.
+            if _SEKRETY is None or not self._magazyn_dostepny:
+                return None
+            return _SEKRETY.resolve(ref)
         if ref.startswith("file:"):
             return FileSecretsProvider("./secrets").resolve(ref)
         return EnvSecretsProvider().resolve(ref)

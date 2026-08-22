@@ -196,6 +196,20 @@ certyfikatów; katalog (`capath`) to inny mechanizm i nie jest obsługiwany.
 | Wdrożenie w kontenerze, sekrety wstrzykiwane przez orkiestrator | **B** |
 | Chcesz, żeby token przeżył restart bez wpisywania do `.env` | **A** |
 
+!!! danger "Wyłączenie magazynu to KILL-SWITCH — odcina także ODCZYT"
+    `security.secret_store.enabled: false` nie oznacza „nie zapisuj nowych tokenów". Oznacza,
+    że magazyn przestaje wydawać materiał **w ogóle**: istniejące połączenia z referencją
+    `husarz:` przestają się uwierzytelniać, a operacje Gita kończą się komunikatem „Nie udało
+    się rozwiązać tokenu połączenia".
+
+    Jest to zamierzone. Wyłączenie robi się zwykle w reakcji na incydent, a kontrola, która
+    blokuje tylko przyszłe zapisy, zostawiałaby napastnikowi dostęp przez połączenie już
+    istniejące. Skutek jest głośny, nie cichy, a ponowne włączenie działa natychmiast — bez
+    restartu — więc pomyłka jest tania.
+
+    Połączeń wskazujących referencje ZEWNĘTRZNE (`env:`, `vault:`, `file:`, `sops:`) to nie
+    dotyczy: ich sekrety pochodzą spoza magazynu i działają dalej.
+
 !!! warning "Magazyn jest tak mocny, jak ochrona klucza głównego"
     Klucz w Vaulcie daje realną separację. Klucz w zmiennej środowiskowej **obok** pliku
     magazynu chroni przede wszystkim kopie zapasowe i wyniesiony dysk — nie kogoś, kto

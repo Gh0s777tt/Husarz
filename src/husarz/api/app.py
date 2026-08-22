@@ -982,6 +982,18 @@ def create_app(
             for c in svc.list_connections()
         ]
 
+    # Zamek obejmujący operacje, które mutują DWA magazyny naraz: połączeń i sekretów.
+    # Każdy z nich ma własną synchronizację wewnętrzną, ale to nie wystarcza — niebezpieczna
+    # jest sekwencja „sprawdź, czy nazwa wolna → zapisz sekret → dodaj połączenie", bo między
+    # sprawdzeniem a zapisem wciska się drugie żądanie. Bez tego zamka dwa równoległe żądania
+    # kreatora o tej samej nazwie kończyły się tak: oba przechodzą pre-check, drugie NADPISUJE
+    # sekret pierwszego, jego `add` zawodzi na kolizji, a sprzątanie kasuje token ZWYCIĘZCY.
+    # Skutkiem jest połączenie bez działającego poświadczenia — dokładnie ta cicha utrata,
+    # przed którą miał chronić pre-check. Ten sam wyścig zachodzi między kreatorem a DELETE.
+    # Operacje są administracyjne i rzadkie, więc jeden zamek na całość jest wystarczający
+    # i znacznie łatwiejszy do uzasadnienia niż zamki per nazwa.
+    _mutex_polaczen = threading.Lock()
+
     @app.post("/api/git/connections", response_model=GitConnectionView)
     def git_add_connection(
         request: GitConnectionIn, principal: Principal | None = dep_git_write
@@ -996,8 +1008,13 @@ def create_app(
             username=request.username,
             ca_bundle=request.ca_bundle,
         )
+        # Ta droga też pod zamkiem. Sama w sobie dotyka jednego magazynu, ale wyścig zachodzi
+        # z DELETE: usunięcie połączenia o tej samej nazwie sprząta sekret z przestrzeni
+        # `husarz:git/<nazwa>`, więc równoległe dodanie mogło zostać z referencją wskazującą
+        # na wpis skasowany chwilę później.
         try:
-            svc.add(conn)
+            with _mutex_polaczen:
+                svc.add(conn)
         except GitConnectionError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         # `principal` jest OBOWIĄZKOWY dla wejścia poświadczenia: dziennik audytu jest
@@ -1023,18 +1040,6 @@ def create_app(
     # GitConnectionWizardIn) — sprawdzamy tu, żeby komunikat błędu NIE powtórzył wartości.
     _MAX_TOKEN_LEN = 4096
 
-    # Zamek obejmujący operacje, które mutują DWA magazyny naraz: połączeń i sekretów.
-    # Każdy z nich ma własną synchronizację wewnętrzną, ale to nie wystarcza — niebezpieczna
-    # jest sekwencja „sprawdź, czy nazwa wolna → zapisz sekret → dodaj połączenie", bo między
-    # sprawdzeniem a zapisem wciska się drugie żądanie. Bez tego zamka dwa równoległe żądania
-    # kreatora o tej samej nazwie kończyły się tak: oba przechodzą pre-check, drugie NADPISUJE
-    # sekret pierwszego, jego `add` zawodzi na kolizji, a sprzątanie kasuje token ZWYCIĘZCY.
-    # Skutkiem jest połączenie bez działającego poświadczenia — dokładnie ta cicha utrata,
-    # przed którą miał chronić pre-check. Ten sam wyścig zachodzi między kreatorem a DELETE.
-    # Operacje są administracyjne i rzadkie, więc jeden zamek na całość jest wystarczający
-    # i znacznie łatwiejszy do uzasadnienia niż zamki per nazwa.
-    _mutex_polaczen = threading.Lock()
-
     def _sprawdz_ca(ca_bundle: str | None) -> None:
         """Waliduje ścieżkę do własnego CA już przy dodawaniu połączenia.
 
@@ -1046,7 +1051,19 @@ def create_app(
         try:
             build_ssl_context(ca_bundle)
         except GitError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # Komunikat NIE powtarza wartości pola. `build_ssl_context` wpisuje ścieżkę do
+            # swojego komunikatu (przydatne w logu operatora), ale w ODPOWIEDZI API byłoby to
+            # echo wejścia — druga droga obok tej, którą zamknął handler walidacji. Pole jest
+            # jedno, więc wskazanie go wystarcza wołającemu do naprawy.
+            _ = exc
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Pole ca_bundle nie wskazuje czytelnego pliku PEM z certyfikatem urzędu. "
+                    "Sprawdź, czy ścieżka istnieje, wskazuje zwykły plik i zawiera certyfikat "
+                    "(katalog w stylu capath nie jest obsługiwany)."
+                ),
+            ) from exc
 
     def _magazyn_wlaczony() -> bool:
         """Czy zapis sekretów jest DZIŚ dozwolony — wg BIEŻĄCEJ konfiguracji.
@@ -1158,6 +1175,16 @@ def create_app(
         # Sam pre-check niczego nie gwarantuje: między sprawdzeniem a zapisem mieści się
         # drugie żądanie, a wtedy sprzątanie po przegranym kasuje token zwycięzcy.
         with _mutex_polaczen:
+            # Bramkę sprawdzamy PONOWNIE, już pod zamkiem. Pierwsze sprawdzenie (przy
+            # `_require_secret_store`) dzieje się poza nim, więc żądanie, które przeszło je
+            # tuż przed wyłączeniem magazynu, zapisałoby token JUŻ PO tym wyłączeniu.
+            # Okno jest wąskie, ale kontrola bezpieczeństwa nie może mieć okna „prawie
+            # zamknięte" — a koszt to jedno porównanie pod zamkiem, który i tak trzymamy.
+            if not _magazyn_wlaczony():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Magazyn sekretów został wyłączony w trakcie obsługi żądania.",
+                )
             # Kolizję sprawdzamy przez magazyn (`svc.get` rzuca wyjątek dla nieistniejącej
             # nazwy, więc nie nadaje się do sprawdzania istnienia).
             if svc.store.get(request.name) is not None:

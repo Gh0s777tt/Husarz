@@ -87,14 +87,15 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ **Cztery wady z dokończonej weryfikacji drugiego przeglądu** (Etap 17f): regresja
   sprzątania sierot niszcząca cudze poświadczenie, martwe nadpisania runtime (`secret_store.path`,
   `key_ref`, `audit`), token przyjmowany w polu nazwy, awaria zapisu przy `DELETE` bez śladu.
-- ⬜ **Pozostałe zgłoszenia z drugiego przeglądu** (odcięte przez limit weryfikacji; biorąc pod
-  uwagę, że 14 z 14 sprawdzonych okazało się realnych, traktuję je jako prawdopodobne):
-  wyłączenie magazynu zamyka tylko ZAPIS — istniejące tokeny nadal się rozwiązują
-  i uwierzytelniają Gita; `ca_bundle` wraca dosłownie w odpowiedzi 400 (druga droga echa obok
-  bramki 422); panel wyświetla błędy 422 jako `[object Object]`; `POST /api/git/connections`
-  jest poza zamkiem `_mutex_polaczen`; bramka magazynu sprawdzana poza zamkiem (żądanie w locie
-  zapisuje token po wyłączeniu); endpointy konfiguracji odsyłają bezwzględną ścieżkę operatora;
-  brak blokady pliku przy dwóch procesach na tym samym magazynie.
+- ✅ **Ostatnie zgłoszenia z drugiego przeglądu** (Etap 17g): kill-switch magazynu (ZMIANA
+  ZACHOWANIA — wyłączenie odcina też odczyt), bramka sprawdzana pod zamkiem, koniec echa
+  `ca_bundle` w 400, obie drogi dodawania pod zamkiem, czytelne błędy walidacji w panelu.
+  Jedno zgłoszenie (ścieżki operatora w odpowiedziach) **obalone** — nie potwierdziło się.
+  Bilans serii: 18 z 19 sprawdzonych zgłoszeń było realnych.
+- ⬜ **Blokada pliku magazynu między procesami** — dwa procesy Husarza wskazujące ten sam plik
+  mogą się nadpisać. Z założenia niewspierane (jedna instancja na proces), ale nic tego nie
+  egzekwuje. Przenośna blokada wymaga osobnych ścieżek dla POSIX (`fcntl`) i Windows
+  (`msvcrt`), więc to zadanie na osobny krok.
 - ⬜ **Magazyn sekretów — pozostałe** (mniejsza waga): brak limitu liczby wpisów, brak rotacji
   i sygnalizacji wygasania tokenów, niezweryfikowane zachowanie na systemach plików bez
   atomowego `rename` (część udziałów sieciowych).

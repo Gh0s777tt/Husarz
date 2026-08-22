@@ -5,6 +5,37 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Zmienione (Etap 17g — ZMIANA ZACHOWANIA: wyłączenie magazynu to kill-switch)
+
+- **`security.secret_store.enabled: false` odcina teraz także ODCZYT.** Dotąd zamykało
+  wyłącznie ZAPIS: rozwiązywanie referencji szło obok bramki, więc dotychczasowe tokeny nadal
+  uwierzytelniały operacje Gita. Operator wyłączający magazyn robi to zwykle w reakcji na
+  incydent i oczekuje, że przestanie on wydawać materiał. Skutek jest GŁOŚNY — operacja Gita
+  kończy się „Nie udało się rozwiązać tokenu połączenia" (zweryfikowane na realnej ścieżce),
+  nie cichą degradacją. Ponowne włączenie działa natychmiast, bez restartu.
+
+### Poprawione (Etap 17g — ostatnie zgłoszenia drugiego przeglądu)
+
+Cztery potwierdzone, **jedno obalone** — pierwszy taki przypadek w tej serii. Bilans:
+z dziewiętnastu zgłoszeń sprawdzonych osobno osiemnaście okazało się realnych.
+
+- **Bramka magazynu sprawdzana POZA zamkiem.** Żądanie, które przeszło ją tuż przed
+  wyłączeniem magazynu, zapisywało token JUŻ PO tym wyłączeniu. Sprawdzana ponownie pod
+  zamkiem — kontrola bezpieczeństwa nie może mieć okna „prawie zamkniętego".
+- **`ca_bundle` wracał dosłownie w odpowiedzi 400** — druga droga echa obok tej, którą zamknął
+  handler walidacji. Komunikat wskazuje teraz pole, nie powtarzając wartości.
+- **`POST /api/git/connections` był poza zamkiem** `_mutex_polaczen` i mógł wyścigać się ze
+  sprzątaniem sekretu w `DELETE`. Objęty.
+- **Konsola wyświetlała błędy walidacji jako `[object Object]`** — odpowiedź 422 niesie TABLICĘ
+  obiektów, a panel sklejał ją ze stringiem. Komunikat ginął dokładnie tam, gdzie użytkownik
+  pomylił się w formularzu. Regresja własna, wprowadzona razem z handlerem z Etapu 17c.
+- **OBALONE:** zgłoszenie o bezwzględnych ścieżkach operatora w odpowiedziach konfiguracji nie
+  potwierdziło się — odpowiedź nie zawiera ani `config_dir`, ani przedrostków ścieżek.
+- Testy: +8. Nośność: 4 mutacje czerwienią zestaw. Piąta poprawka (objęcie zamkiem drugiej
+  drogi dodawania) **nie ma testu na SKUTEK** i jest to zapisane wprost — okno to dwie
+  sąsiednie instrukcje, nieodtwarzalne bez pauzy wstrzykniętej w kod produkcyjny. Zostaje
+  kontrola strukturalna z komentarzem, że jest słabszym dowodem.
+
 ### Poprawione (Etap 17f — dokończona weryfikacja drugiego przeglądu)
 
 Faza weryfikacji potwierdziła pięć zgłoszeń; dwa dotyczyły wad naprawionych już w `cab4d12`.
