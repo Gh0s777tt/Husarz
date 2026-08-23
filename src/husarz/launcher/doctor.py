@@ -132,68 +132,100 @@ def _pasuje(oczekiwany: str, dostepne: Sequence[str]) -> bool:
     return any(_kanoniczna(n) == cel for n in dostepne)
 
 
-def _kontrola_modelu_czatu(config: HusarzConfig, sonda: Sonda) -> list[Ustalenie]:
-    """Czy model trybu czatu istnieje w rejestrze i czy dostawca faktycznie go ma.
+def _role_modeli(config: HusarzConfig) -> dict[str, list[str]]:
+    """Mapuje model → role, w których jest używany.
 
-    To jest kontrola, dla której ten moduł powstał: bez niej operator dostaje ``502`` i tyle.
+    Trzy role, bo trzy niezależne drogi mogą być martwe niezależnie od siebie:
+    tryb czatu (``/api/chat``), orkiestracja (``/api/orchestrate``, model domyślny) oraz
+    poszczególni agenci (``routing.agent_models``). Na świeżej instalacji czat potrafi
+    działać, a orkiestracja być martwa — i odwrotnie.
+
+    Grupujemy PO MODELU, nie po roli: siedmiu agentów wskazujących ten sam model dałoby
+    siedem identycznych ustaleń, co utopiłoby diagnozę w powtórzeniach.
+
+    Args:
+        config: Wczytana konfiguracja.
+
+    Returns:
+        Model → posortowane nazwy ról, które go używają.
     """
-    # `models.chat` bywa pusty — wtedy tryb czatu spada na model DOMYŚLNY. Odtwarzamy
-    # tę samą regułę co `_resolve_chat_model` w API, żeby diagnoza opisywała model,
-    # który faktycznie obsłuży żądanie, a nie ten wpisany w konfiguracji.
-    nazwa = config.models.chat or config.models.default
-    spec = config.models.registry.get(nazwa)
+    role: dict[str, list[str]] = {}
+
+    def dopisz(model_id: str, rola: str) -> None:
+        role.setdefault(model_id, []).append(rola)
+
+    dopisz(config.models.chat or config.models.default, "tryb czatu")
+    dopisz(config.models.default, "orkiestracja")
+    for agent, model_id in sorted(config.routing.agent_models.items()):
+        dopisz(model_id, f"agent {agent}")
+    return {m: sorted(set(r)) for m, r in role.items()}
+
+
+def _kontrola_modelu(
+    model_id: str,
+    role: Sequence[str],
+    config: HusarzConfig,
+    sonda: Sonda,
+    pamiec: dict[str, list[str] | None],
+) -> list[Ustalenie]:
+    """Sprawdza JEDEN model: czy jest w rejestrze, włączony, z endpointem i u dostawcy.
+
+    Args:
+        model_id: Identyfikator modelu z rejestru.
+        role: Role, w których ten model jest używany (do komunikatu).
+        config: Konfiguracja.
+        sonda: Dostęp do świata zewnętrznego.
+        pamiec: Wyniki sondowania per endpoint — kilka modeli często dzieli jeden silnik,
+            a diagnoza nie ma powodu pytać go wielokrotnie.
+
+    Returns:
+        Ustalenia dotyczące tego modelu.
+    """
+    gdzie = ", ".join(role)
+    spec = config.models.registry.get(model_id)
     if spec is None:
-        # Walidacja schematu tego pilnuje (`models.chat` musi istnieć w rejestrze), więc
-        # przez `load_config` tu nie wejdziemy. Gałąź zostaje, bo `zdiagnozuj` przyjmuje
-        # DOWOLNY obiekt konfiguracji — także zbudowany programowo — a diagnoza, która sama
-        # wywala się na `None`, byłaby bezużyteczna dokładnie wtedy, gdy jest potrzebna.
+        # Walidacja schematu pilnuje WSZYSTKICH odwołań do modeli — `models.chat`,
+        # `models.default`, `routing.agent_models` i `routing.rules` (sprawdzone).
+        # Przez `load_config` tu więc nie wejdziemy. Gałąź zostaje, bo `zdiagnozuj`
+        # przyjmuje DOWOLNY obiekt konfiguracji — także zbudowany programowo — a diagnoza,
+        # która sama wywala się na `None`, byłaby bezużyteczna dokładnie wtedy, gdy jest
+        # potrzebna.
         return [
             Ustalenie(
-                id="model-czatu-w-rejestrze",
+                id=f"model-{model_id}",
                 stan=Stan.PROBLEM,
                 waga=Waga.BLOKUJACA,
-                opis=f"Model trybu czatu '{nazwa}' nie istnieje w rejestrze modeli.",
+                opis=f"Model '{model_id}' ({gdzie}) nie istnieje w rejestrze modeli.",
                 naprawa=(
-                    f"Dodaj '{nazwa}' do `models.registry` albo zmień `models.chat` na jeden "
-                    f"z: {', '.join(sorted(config.models.registry))}."
+                    f"Dodaj '{model_id}' do `models.registry` albo popraw odwołanie. "
+                    f"Dostępne: {', '.join(sorted(config.models.registry))}."
                 ),
             )
         ]
 
     ustalenia: list[Ustalenie] = []
-
-    # Luka, której schemat NIE pilnuje: `models.chat` może wskazywać model WYŁĄCZONY.
-    # Konfiguracja wczytuje się bez zastrzeżeń, a czat wywraca się dopiero przy pierwszym
-    # żądaniu — sprawdzone.
     if not spec.enabled:
         ustalenia.append(
             Ustalenie(
-                id="model-czatu-wlaczony",
+                id=f"model-{model_id}-wlaczony",
                 stan=Stan.PROBLEM,
                 waga=Waga.BLOKUJACA,
-                opis=f"Model trybu czatu '{nazwa}' jest WYŁĄCZONY (`enabled: false`).",
-                naprawa=(
-                    f"Ustaw `enabled: true` dla '{nazwa}' w config/models.yaml albo wskaż "
-                    f"w `models.chat` inny, włączony model."
-                ),
+                opis=f"Model '{model_id}' ({gdzie}) jest WYŁĄCZONY (`enabled: false`).",
+                naprawa=f"Ustaw `enabled: true` dla '{model_id}' albo wskaż inny model.",
             )
         )
 
-    # Druga luka schematu: brak endpointu przy backendzie, który go potrzebuje.
     if spec.endpoint is None:
         ustalenia.append(
             Ustalenie(
-                id="model-czatu-u-dostawcy",
+                id=f"model-{model_id}-u-dostawcy",
                 stan=Stan.PROBLEM,
                 waga=Waga.BLOKUJACA,
                 opis=(
-                    f"Model '{nazwa}' (backend: {spec.backend}) nie ma endpointu — "
-                    f"nie ma dokąd wysłać żądania."
+                    f"Model '{model_id}' ({gdzie}, backend: {spec.backend}) nie ma endpointu "
+                    f"— nie ma dokąd wysłać żądania."
                 ),
-                naprawa=(
-                    f"Ustaw `endpoint` dla '{nazwa}' w config/models.yaml "
-                    f"(np. http://localhost:11434/v1 dla Ollamy)."
-                ),
+                naprawa=f"Ustaw `endpoint` dla '{model_id}' w config/models.yaml.",
             )
         )
         return ustalenia
@@ -202,67 +234,84 @@ def _kontrola_modelu_czatu(config: HusarzConfig, sonda: Sonda) -> list[Ustalenie
     if odmowa is not None:
         ustalenia.append(
             Ustalenie(
-                id="model-czatu-u-dostawcy",
+                id=f"model-{model_id}-u-dostawcy",
                 stan=Stan.NIEZNANY,
                 waga=Waga.BLOKUJACA,
                 opis=(
-                    f"Nie sprawdzono modelu '{spec.model}': polityka egress nie pozwala "
-                    f"odpytać {spec.endpoint} ({odmowa})."
+                    f"Nie sprawdzono modelu '{model_id}' ({gdzie}): polityka egress nie "
+                    f"pozwala odpytać {spec.endpoint} ({odmowa})."
                 ),
                 naprawa=(
                     "Router ODMÓWI temu modelowi z tego samego powodu. Dodaj host do "
-                    "`security.egress.allowlist` albo wskaż endpoint lokalny. "
-                    "W profilu airgap zdalny endpoint jest zabroniony z założenia."
+                    "`security.egress.allowlist` albo wskaż endpoint lokalny. W profilu "
+                    "airgap zdalny endpoint jest zabroniony z założenia."
                 ),
             )
         )
         return ustalenia
 
-    dostepne = sonda.modele_u_dostawcy(spec.endpoint)
+    if spec.endpoint not in pamiec:
+        pamiec[spec.endpoint] = sonda.modele_u_dostawcy(spec.endpoint)
+    dostepne = pamiec[spec.endpoint]
+
     if dostepne is None:
         ustalenia.append(
             Ustalenie(
-                id="model-czatu-u-dostawcy",
+                id=f"model-{model_id}-u-dostawcy",
                 stan=Stan.NIEZNANY,
                 waga=Waga.BLOKUJACA,
                 opis=(
-                    f"Silnik modelu pod {spec.endpoint} nie odpowiedział — nie wiadomo, "
-                    f"czy model '{spec.model}' jest dostępny."
+                    f"Silnik pod {spec.endpoint} nie odpowiedział — nie wiadomo, czy model "
+                    f"'{spec.model}' ({gdzie}) jest dostępny."
                 ),
                 naprawa=(
-                    "Uruchom silnik (np. `ollama serve`) i sprawdź, czy endpoint w "
-                    "config/models.yaml wskazuje właściwy port. Instrukcja: ollama/README.md."
+                    "Uruchom silnik (np. `ollama serve` albo serwer vLLM) i sprawdź, czy "
+                    "endpoint w config/models.yaml wskazuje właściwy port. "
+                    "Instrukcja: ollama/README.md."
                 ),
             )
         )
-        return ustalenia
-
-    if _pasuje(spec.model, dostepne):
+    elif _pasuje(spec.model, dostepne):
         ustalenia.append(
             Ustalenie(
-                id="model-czatu-u-dostawcy",
+                id=f"model-{model_id}-u-dostawcy",
                 stan=Stan.OK,
                 waga=Waga.INFORMACJA,
-                opis=f"Silnik pod {spec.endpoint} ma model '{spec.model}'.",
+                opis=f"Model '{spec.model}' ({gdzie}) jest dostępny pod {spec.endpoint}.",
             )
         )
-        return ustalenia
-
-    ustalenia.append(
-        Ustalenie(
-            id="model-czatu-u-dostawcy",
-            stan=Stan.PROBLEM,
-            waga=Waga.BLOKUJACA,
-            opis=(
-                f"Silnik odpowiada, ale NIE MA modelu '{spec.model}'. "
-                f"Dostępne: {', '.join(sorted(dostepne)) or '(żadnego)'}."
-            ),
-            naprawa=(
-                "Przygotuj model wg ollama/README.md (`ollama create ...`) albo zmień pole "
-                "`model` w config/models.yaml na jeden z dostępnych."
-            ),
+    else:
+        ustalenia.append(
+            Ustalenie(
+                id=f"model-{model_id}-u-dostawcy",
+                stan=Stan.PROBLEM,
+                waga=Waga.BLOKUJACA,
+                opis=(
+                    f"Silnik odpowiada, ale NIE MA modelu '{spec.model}' ({gdzie}). "
+                    f"Dostępne: {', '.join(sorted(dostepne)) or '(żadnego)'}."
+                ),
+                naprawa=(
+                    "Przygotuj model wg ollama/README.md (`ollama create ...`) albo zmień "
+                    "pole `model` w config/models.yaml na jeden z dostępnych."
+                ),
+            )
         )
-    )
+    return ustalenia
+
+
+def _kontrola_modeli(config: HusarzConfig, sonda: Sonda) -> list[Ustalenie]:
+    """Sprawdza WSZYSTKIE modele, od których zależy działanie: czat, orkiestracja, agenci.
+
+    Pierwsza wersja sprawdzała wyłącznie model trybu czatu. Na dostarczonej konfiguracji
+    dawało to obraz mylący: czat działa na lokalnej Ollamie, więc diagnoza kończyła się
+    „ostrzeżeń: 1", podczas gdy orkiestracja i WSZYSTKICH SIEDMIU agentów wskazywało na
+    serwery vLLM, których nikt nie uruchomił. Diagnoza opisująca fragment rzeczywistości
+    jako całość jest tą samą klasą błędu, co diagnoza mówiąca nieprawdę.
+    """
+    pamiec: dict[str, list[str] | None] = {}
+    ustalenia: list[Ustalenie] = []
+    for model_id, role in sorted(_role_modeli(config).items()):
+        ustalenia += _kontrola_modelu(model_id, role, config, sonda, pamiec)
     return ustalenia
 
 
@@ -346,7 +395,7 @@ def zdiagnozuj(
         pusta — brak problemów też jest ustaleniem, które operator ma zobaczyć.
     """
     ustalenia: list[Ustalenie] = []
-    ustalenia += _kontrola_modelu_czatu(config, sonda)
+    ustalenia += _kontrola_modeli(config, sonda)
     ustalenia += _kontrola_katalogow(config, sonda)
     ustalenia += _kontrola_portow(config, host, port)
 

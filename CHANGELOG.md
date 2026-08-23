@@ -22,7 +22,18 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 - **Diagnoza NIE jest obejściem bramki egress** — sondowanie endpointu przechodzi tę samą
   kontrolę co ruch routera; endpoint spoza allowlisty nie jest odpytywany. Bez tego `doctor`
   wystawiony w konsoli byłby skanerem portów.
-- Sonda jest wstrzykiwana, więc cały zestaw testów działa offline. Testy: +17.
+- **Diagnoza obejmuje CAŁY łańcuch**, nie tylko model czatu: `models.chat`, `models.default`
+  (orkiestracja) i `routing.agent_models` (agenci). Pierwsza wersja sprawdzała wyłącznie czat
+  i na dostarczonej konfiguracji kończyła się „ostrzeżeń: 1", podczas gdy orkiestracja
+  i WSZYSTKICH SIEDMIU agentów wskazywało na serwery vLLM, których nikt nie uruchomił —
+  obraz prawdziwy co do litery, mylący co do całości. Sprawdzone na realnej konfiguracji repo.
+- Ustalenia grupowane po MODELU, nie po roli (siedmiu agentów na jednym modelu = jeden wpis
+  z listą ról); silnik pytany RAZ na endpoint, nawet gdy dzieli go kilka modeli.
+- **Sprostowanie komentarza w kodzie**: twierdził, że schemat nie pilnuje wartości
+  w `routing.agent_models`. Pilnuje — sprawdziłem; pilnuje też `routing.rules`. Gałąź obronna
+  zostaje (funkcja przyjmuje dowolny obiekt konfiguracji), ale opis mówi teraz prawdę.
+
+- Sonda jest wstrzykiwana, więc cały zestaw testów działa offline. Testy: +21.
 
 ### Poprawione (Etap 12b — trzy wady wykryte NA PIERWSZYM uruchomieniu narzędzia)
 

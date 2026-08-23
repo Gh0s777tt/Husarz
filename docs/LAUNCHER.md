@@ -80,14 +80,42 @@ kontrole przeszły", jeśli którakolwiek nie została wykonana.
 
 | Kontrola | Wykrywa |
 |---|---|
-| `model-czatu-wlaczony` | `models.chat` wskazuje model z `enabled: false` — **schemat tego NIE łapie** |
-| `model-czatu-u-dostawcy` | silnik nie odpowiada, nie zna modelu, albo egress zabrania pytać |
+| `model-<id>-wlaczony` | model z `enabled: false` — **schemat tego NIE łapie** |
+| `model-<id>-u-dostawcy` | silnik nie odpowiada, nie zna modelu, albo egress zabrania pytać |
 | `katalog-*` | `data_dir`/`artifacts_dir`/`workspace_dir` niezapisywalne (audyt jest fail-closed, więc objawia się to dopiero jako 503) |
 | `kolizja-portu` | endpoint modelu celuje w port, na którym nasłuchuje sam Husarz |
 
 Nazwy modeli porównujemy z kanonizacją etykiety: `husarz` i `husarz:latest` to ten sam model,
 ale **`qwen2.5-coder:7b` i `qwen2.5-coder:1.5b` to NIE** — obcinanie etykiety po obu stronach
 dawałoby fałszywe „OK".
+
+### Sprawdzany jest CAŁY łańcuch, nie tylko czat
+
+Diagnoza obejmuje trzy niezależne drogi, bo każda może być martwa osobno:
+
+- **tryb czatu** (`/api/chat`) — `models.chat`,
+- **orkiestracja** (`/api/orchestrate`) — `models.default`,
+- **poszczególni agenci** — `routing.agent_models`.
+
+Na dostarczonej konfiguracji to nie jest teoria. Czat działa na lokalnej Ollamie, a orkiestracja
+i wszyscy agenci wskazują na serwery vLLM, których na świeżej maszynie nikt nie uruchomił:
+
+```
+[!!] model-bielik-u-dostawcy: Silnik odpowiada, ale NIE MA modelu
+     'bielik-11b-v3.0-instruct' (agent bielik).
+[??] model-glm-main-u-dostawcy: Silnik pod http://localhost:8000/v1 nie odpowiedział
+     (agent husarz, agent kanclerz, orkiestracja).
+[??] model-hermes-u-dostawcy: Silnik pod http://localhost:8001/v1 nie odpowiedział
+     (agent chorazy, agent kopijnik, agent puszkarz, agent zwiadowca).
+[ok] model-husarz-local-u-dostawcy: Model 'husarz' (tryb czatu) jest dostępny.
+```
+
+Pierwsza wersja diagnozy sprawdzała wyłącznie model czatu i kończyła się na tej samej
+konfiguracji zdaniem „ostrzeżeń: 1" — obraz prawdziwy co do litery, a mylący co do całości.
+
+Ustalenia są grupowane **po modelu**, nie po roli: siedmiu agentów wskazujących ten sam model
+daje jeden wpis z listą ról. Silnik jest pytany **raz na endpoint**, nawet gdy korzysta z niego
+kilka modeli.
 
 !!! warning "Diagnoza NIE jest obejściem bramki egress"
     Sondowanie endpointu to połączenie wychodzące, więc przechodzi tę samą kontrolę co ruch

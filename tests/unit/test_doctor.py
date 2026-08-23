@@ -86,7 +86,7 @@ def test_wylaczony_model_czatu_jest_problemem_blokujacym(make_config) -> None:
 
     ustalenia = zdiagnozuj(config, sonda=_Sonda(modele=["husarz"]))
 
-    u = _ustalenie(ustalenia, "model-czatu-wlaczony")
+    u = _ustalenie(ustalenia, "model-wylaczony-wlaczony")
     assert u.stan is Stan.PROBLEM
     assert u.waga is Waga.BLOKUJACA
     assert "enabled" in u.naprawa
@@ -102,7 +102,7 @@ def test_model_czatu_bez_endpointu_jest_problemem_blokujacym(make_config) -> Non
 
     ustalenia = zdiagnozuj(config, sonda=_Sonda())
 
-    u = _ustalenie(ustalenia, "model-czatu-u-dostawcy")
+    u = _ustalenie(ustalenia, "model-bez-u-dostawcy")
     assert u.stan is Stan.PROBLEM
     assert "endpoint" in u.naprawa
 
@@ -117,7 +117,7 @@ def test_brak_odpowiedzi_silnika_to_NIEZNANY_a_nie_problem(make_config) -> None:
 
     ustalenia = zdiagnozuj(config, sonda=_Sonda(modele=None))
 
-    u = _ustalenie(ustalenia, "model-czatu-u-dostawcy")
+    u = _ustalenie(ustalenia, "model-lokalny-u-dostawcy")
     assert u.stan is Stan.NIEZNANY
     assert "ollama" in u.naprawa.lower()
 
@@ -128,7 +128,7 @@ def test_silnik_bez_modelu_wymienia_to_co_ma(make_config) -> None:
 
     ustalenia = zdiagnozuj(config, sonda=_Sonda(modele=["qwen2.5-coder:7b"]))
 
-    u = _ustalenie(ustalenia, "model-czatu-u-dostawcy")
+    u = _ustalenie(ustalenia, "model-lokalny-u-dostawcy")
     assert u.stan is Stan.PROBLEM
     assert u.waga is Waga.BLOKUJACA
     assert "qwen2.5-coder:7b" in u.opis
@@ -145,7 +145,7 @@ def test_model_z_etykieta_jest_rozpoznawany(make_config) -> None:
 
     ustalenia = zdiagnozuj(config, sonda=_Sonda(modele=["husarz:latest", "qwen2.5-coder:7b"]))
 
-    assert _ustalenie(ustalenia, "model-czatu-u-dostawcy").stan is Stan.OK
+    assert _ustalenie(ustalenia, "model-lokalny-u-dostawcy").stan is Stan.OK
 
 
 def test_model_bez_etykiety_u_dostawcy_tez_pasuje(make_config) -> None:
@@ -157,7 +157,7 @@ def test_model_bez_etykiety_u_dostawcy_tez_pasuje(make_config) -> None:
 
     ustalenia = zdiagnozuj(config, sonda=_Sonda(modele=["husarz"]))
 
-    assert _ustalenie(ustalenia, "model-czatu-u-dostawcy").stan is Stan.OK
+    assert _ustalenie(ustalenia, "model-lokalny-u-dostawcy").stan is Stan.OK
 
 
 # -------------------------------------------------------------------- katalogi
@@ -289,7 +289,7 @@ def test_zablokowany_egress_to_INNE_ustalenie_niz_milczacy_silnik(make_config) -
 
     ustalenia = zdiagnozuj(config, sonda=_Sonda(odmowa="host spoza allowlisty"))
 
-    u = _ustalenie(ustalenia, "model-czatu-u-dostawcy")
+    u = _ustalenie(ustalenia, "model-lokalny-u-dostawcy")
     assert u.stan is Stan.NIEZNANY
     assert "egress" in u.opis.lower()
     assert "allowlist" in u.naprawa
@@ -310,6 +310,88 @@ def test_rozne_warianty_modelu_NIE_sa_uznawane_za_ten_sam(make_config) -> None:
 
     ustalenia = zdiagnozuj(config, sonda=_Sonda(modele=["qwen2.5-coder:1.5b"]))
 
-    u = _ustalenie(ustalenia, "model-czatu-u-dostawcy")
+    u = _ustalenie(ustalenia, "model-lokalny-u-dostawcy")
     assert u.stan is Stan.PROBLEM, "inny wariant modelu NIE jest tym samym modelem"
     assert "qwen2.5-coder:1.5b" in u.opis
+
+
+# ------------------------------------------- łańcuch: czat + orkiestracja + agenci
+
+
+def test_diagnoza_obejmuje_orkiestracje_i_agentow(make_config) -> None:
+    """Regresja: pierwsza wersja sprawdzała WYŁĄCZNIE model trybu czatu.
+
+    Na dostarczonej konfiguracji dawało to obraz mylący — czat działał na lokalnej Ollamie,
+    więc diagnoza kończyła się „ostrzeżeń: 1", podczas gdy orkiestracja i wszystkich siedmiu
+    agentów wskazywało na serwery vLLM, których nikt nie uruchomił. Sprawdzone na realnej
+    konfiguracji repo.
+    """
+    rejestr: dict[str, Any] = {
+        "lokalny": _REGISTRY["lokalny"],
+        "zdalny": {**_REGISTRY["lokalny"], "model": "nie-ma", "endpoint": "http://localhost:9/v1"},
+    }
+    config = make_config(
+        registry=rejestr,
+        default="zdalny",
+        chat="lokalny",
+        agent_models={"husarz": "zdalny"},
+    )
+
+    ustalenia = zdiagnozuj(config, sonda=_Sonda(modele=["husarz"]))
+
+    zdalne = _ustalenie(ustalenia, "model-zdalny-u-dostawcy")
+    assert zdalne.stan is Stan.PROBLEM, "model orkiestracji nie został sprawdzony"
+    assert "orkiestracja" in zdalne.opis
+    assert "agent husarz" in zdalne.opis
+    assert _ustalenie(ustalenia, "model-lokalny-u-dostawcy").stan is Stan.OK
+
+
+def test_jeden_model_w_wielu_rolach_daje_JEDNO_ustalenie(make_config) -> None:
+    """Siedmiu agentów na tym samym modelu nie może dać siedmiu identycznych wpisów."""
+    config = make_config(
+        registry=_REGISTRY,
+        default="lokalny",
+        chat="lokalny",
+        agent_models={f"agent{i}": "lokalny" for i in range(7)},
+    )
+
+    ustalenia = zdiagnozuj(config, sonda=_Sonda(modele=["husarz"]))
+
+    dotyczace = [u for u in ustalenia if u.id.startswith("model-lokalny")]
+    assert len(dotyczace) == 1, [u.id for u in dotyczace]
+    assert "agent agent0" in dotyczace[0].opis
+
+
+def test_silnik_pytany_RAZ_na_endpoint(make_config) -> None:
+    """Kilka modeli dzieli jeden silnik — diagnoza nie ma powodu pytać go wielokrotnie."""
+    rejestr: dict[str, Any] = {
+        "a": _REGISTRY["lokalny"],
+        "b": {**_REGISTRY["lokalny"], "model": "inny"},
+    }
+    config = make_config(registry=rejestr, default="a", chat="b", agent_models={"x": "a"})
+    sonda = _Sonda(modele=["husarz", "inny"])
+
+    zdiagnozuj(config, sonda=sonda)
+
+    assert sonda.zapytania == ["http://localhost:11434/v1"], sonda.zapytania
+
+
+def test_model_spoza_rejestru_nie_wywraca_diagnozy(make_config) -> None:
+    """Gałąź obronna: `zdiagnozuj` przyjmuje DOWOLNY obiekt konfiguracji.
+
+    Sprawdziłem: schemat pilnuje wszystkich odwołań do modeli (`models.chat`,
+    `models.default`, `routing.agent_models`, `routing.rules`), więc przez `load_config`
+    ta gałąź jest nieosiągalna — pierwotny komentarz w kodzie twierdził inaczej i był
+    nieprawdziwy. Gałąź zostaje jednak celowo: diagnoza, która sama wywala się na `None`,
+    byłaby bezużyteczna dokładnie wtedy, gdy jest potrzebna.
+    """
+    config = make_config(registry=_REGISTRY, default="lokalny", chat="lokalny")
+    okrojony = config.model_copy(
+        update={"models": config.models.model_copy(update={"registry": {}})}
+    )
+
+    ustalenia = zdiagnozuj(okrojony, sonda=_Sonda(modele=["husarz"]))
+
+    u = _ustalenie(ustalenia, "model-lokalny")
+    assert u.stan is Stan.PROBLEM
+    assert "nie istnieje w rejestrze" in u.opis

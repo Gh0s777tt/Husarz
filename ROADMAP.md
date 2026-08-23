@@ -323,9 +323,10 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
     wstrzykiwana sonda, bramka egress obowiązująca też diagnozę. Widoczna także przy
     `husarz up`. Docs: `docs/LAUNCHER.md`.
   - ⬜ Endpoint `GET /api/doctor` + panel w konsoli (ta sama funkcja, inny nośnik).
-  - ⬜ Kontrola CAŁEGO łańcucha kandydatów (dziś tylko model czatu): `models.default`
-    dla orkiestracji i `routing.agent_models` dla agentów — na świeżej instalacji bywają
-    martwe nawet gdy czat działa.
+  - ✅ Kontrola CAŁEGO łańcucha: `models.chat`, `models.default` (orkiestracja)
+    i `routing.agent_models` (agenci). Grupowanie po modelu, silnik pytany raz na endpoint.
+    Na dostarczonej konfiguracji ujawnia, że orkiestracja i wszystkich 7 agentów jest martwych,
+    choć czat działa.
   - ⬜ Opcjonalna sonda `--probe`, która NAPRAWDĘ pyta model (jedyna kontrola skutku, nie
     deklaracji katalogu). Ma skutki uboczne: ładuje wagi do pamięci — stąd opt-in.
   - ⬜ Pobranie silnika i wag z ekranem zgody podającym liczbę GB PRZED pobraniem, wąską
