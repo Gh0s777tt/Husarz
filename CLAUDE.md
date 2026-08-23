@@ -75,34 +75,65 @@ python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
 python -m mkdocs build --strict
 ```
 
+**Zielone bramki lokalne to nie to samo, co zielone CI.** Pipeline uruchamia dodatkowo
+`pip-audit --strict` (znane podatności zależności), `hadolint` i `docker build` — żadnego
+z nich nie ma na liście wyżej i żaden nie jest domyślnie dostępny lokalnie. Po pushu
+sprawdź stan pipeline'u i zaraportuj; komplet lokalny nie jest dowodem, że CI przejdzie.
+
 Dwie ostatnie pozycje są równoprawnymi bramkami, nie dodatkiem: `husarz eval` sprawdza
 niezmienniki routingu i bramki narzędziowej bez modelu i sieci, a `mkdocs --strict`
 wychwytuje martwe odnośniki, czyli rozjazd dokumentacji.
 
-Osobno, przed commitem: `gitleaks protect --staged` musi być czysty.
+Osobno — `gitleaks` na zmianach wchodzących do commita:
 
-Definicja „ukończone": kod otypowany, testy (unit + integration + security) zielone, bramka
-ewaluacyjna zielona, dokumentacja buduje się w trybie `--strict`, brak sekretów, **cała
-dokumentacja zaktualizowana** (README/CHANGELOG/ROADMAP/`docs/`/wiki/PDF), repozytorium
-spójne, zmiany zacommitowane i **wypchnięte na oba zdalne**, stan zaraportowany operatorowi.
+```bash
+git add -A                                  # NAJPIERW indeks, potem skan
+gitleaks protect --staged --no-banner       # w wyjściu MUSI być scanned ~N bytes, N > 0
+```
 
-Zielone bramki to warunek KONIECZNY, nie wystarczający. Do „ukończone" należy jeszcze:
-**nowy test na zmienione zachowanie**, **sprawdzona nośność tego testu** oraz **audyt
-zmiany** — szczegóły w sekcji „Testowanie, audyt i dokumentacja KAŻDEJ zmiany". Zmiana
-z zielonymi bramkami, ale bez własnego testu, jest NIEUKOŃCZONA — choćby cały zestaw
-świecił się na zielono. Zielony zestaw mówi tylko, że nikt nie napisał asercji, która by
-ją złapała.
+**Kolejność jest bramką, nie stylem.** `gitleaks protect --staged` czyta WYŁĄCZNIE indeks:
+na pustym indeksie skanuje 0 bajtów i melduje „no leaks found" z kodem wyjścia 0. Uruchomiony
+przed `git add` daje więc **fałszywą zieleń** — sprawdzone: plik z prawdziwym tokenem GitLaba
+leżący w drzewie roboczym, ale niezaindeksowany, nie jest w ogóle oglądany. Zawsze sprawdź
+w wyjściu, że liczba przeskanowanych bajtów jest większa od zera.
+
+### Dwa progi — nazwane osobno, żeby nie było sporu, który obowiązuje
+
+Wcześniej plik dawał trzy różne odpowiedzi na pytanie „kiedy wolno commitować", a definicja
+„ukończone" zawierała push, więc nie mogła być warunkiem WSTĘPNYM commita. Rozdzielamy to:
+
+**„Gotowe do commita"** — wszystkie naraz:
+
+1. komplet bramek wyżej zielony (`ruff`, `black`, `mypy`, `pytest`, `husarz eval`, `mkdocs --strict`),
+2. `gitleaks` czysty na ZAINDEKSOWANYCH zmianach (patrz uwaga o kolejności),
+3. zmiana zachowania ma test SKUTKU o sprawdzonej nośności (zmiana bez wpływu na zachowanie
+   nie dostaje nowego testu — patrz „Testowanie, audyt i dokumentacja KAŻDEJ zmiany"),
+4. audyt wykonany na poziomie właściwym dla rodzaju zmiany i zapisany tam, gdzie wskazuje
+   tamta sekcja,
+5. dokumentacja zaktualizowana w TYM SAMYM kroku.
+
+**„Krok zamknięty"** = gotowe do commita + zacommitowane + wypchnięte na oba zdalne +
+repozytorium spójne (brak osieroconych artefaktów, właściwa gałąź) + stan zaraportowany
+operatorowi.
+
+Zielone bramki są warunkiem KONIECZNYM, nie wystarczającym: zmiana ZACHOWANIA bez własnego
+testu nie jest gotowa do commita, choćby cały zestaw świecił się na zielono. Zielony zestaw
+mówi tylko tyle, że nikt nie napisał asercji, która by tę zmianę złapała.
 
 ## Testowanie, audyt i dokumentacja KAŻDEJ zmiany (wymóg użytkownika)
 
-Nie „każdej istotnej" — **każdej**. Trzy rzeczy dzieją się w TYM SAMYM kroku co zmiana kodu,
-a krok bez nich nie jest ukończony:
+Nie „każdej istotnej" — **każdej**, w zakresie zależnym od jej rodzaju. „Drobna" nigdy nie
+jest powodem pominięcia; rodzaj zmiany decyduje o GŁĘBOKOŚCI, nie o tym, czy w ogóle.
 
 | Co | Znaczy konkretnie |
 |---|---|
-| **Test** | Nowa albo zmieniona zdolność ma test SKUTKU, o sprawdzonej nośności |
+| **Test** | KAŻDA zmiana ZACHOWANIA ma test SKUTKU o sprawdzonej nośności. Zmiana bez wpływu na zachowanie (refaktor, literówka, docstring) nie dostaje nowego testu — ale musi przejść istniejący zestaw, a jej „brak wpływu" jest twierdzeniem DO SPRAWDZENIA, nie założeniem |
 | **Audyt** | Zmiana zostaje przejrzana adwersaryjnie, a nie tylko „przeczytana jeszcze raz". Głębokość stopniowana — patrz tabela niżej |
 | **Dokumentacja** | `docs/` + CHANGELOG + ROADMAP + docstringi — szczegóły w sekcjach niżej |
+
+**Zmiana zachowania** = obserwowalna różnica dla wywołującego albo operatora: inna odpowiedź
+API, inny kod statusu, inny stan na dysku, inny wpis w audycie, inna decyzja bramki, inny
+komunikat błędu. Wątpliwość rozstrzygaj na korzyść „to zmiana zachowania".
 
 ### Test — co to znaczy w tym projekcie
 
@@ -111,8 +142,9 @@ a krok bez nich nie jest ukończony:
    wygląda na domkniętą.
 2. **Test sprawdza SKUTEK, nie deklarację** — patrz osobna sekcja niżej. To najdroższa lekcja
    tego projektu i nie ma od niej wyjątków dla warstwy bezpieczeństwa.
-3. **Nośność sprawdzona zawsze** — patrz „Nośność testów". Test, którego nie próbowano złamać,
-   jest hipotezą, nie zabezpieczeniem.
+3. **Nośność sprawdzasz dla KAŻDEGO nowego lub zmienionego testu** — patrz „Nośność testów".
+   To reguła TESTU, niezależna od stopniowania audytu: jeśli test powstał, próbujesz go
+   złamać. Test, którego nie próbowano złamać, jest hipotezą, nie zabezpieczeniem.
 4. **Gdy testu SKUTKU napisać się nie da — powiedz to wprost.** Bywają własności (wzajemne
    wykluczanie w oknie dwóch instrukcji, zachowanie przy awarii zasilania), których nie da się
    odtworzyć bez wstrzyknięcia pauzy w kod produkcyjny, czyli bez testu zmieniającego to, co
@@ -125,11 +157,22 @@ a krok bez nich nie jest ukończony:
 Audytowi podlega **każda** zmiana, ale jego GŁĘBOKOŚĆ jest stopniowana. Stopniowanie jest
 jawne po to, żeby nie stało się furtką („to była drobna zmiana, więc pominąłem"):
 
-| Rodzaj zmiany | Minimalny audyt |
-|---|---|
-| Refaktor bez zmiany zachowania, poprawka literówki, docstring | **Samokontrola z listy niżej** |
-| Zmiana zachowania, nowy endpoint, nowa opcja konfiguracji | Samokontrola + **próba obalenia własnego testu** (mutacja) |
-| Warstwa bezpieczeństwa, sekrety, egress, sandbox, ROE, audyt | **Pełny przegląd adwersaryjny**: kilka niezależnych perspektyw + próba OBALENIA każdego zgłoszenia przez uruchomienie kodu |
+| Rodzaj zmiany | Minimalny audyt | Gdzie zapisujesz wynik |
+|---|---|---|
+| Bez zmiany zachowania (refaktor, literówka, docstring) | **Samokontrola z listy niżej** | w raporcie kroku dla operatora; jeśli mimo wszystko powstał test — obowiązuje kontrola nośności |
+| Zmiana zachowania: nowy endpoint, nowa opcja, zmieniony komunikat, zmieniony stan na dysku | Samokontrola + **próba obalenia własnego testu** (mutacja) | sekcja `Audyt:` w treści commita — co sprawdzono, co obalono |
+| Zmiana, która MODYFIKUJE decyzję bramki bezpieczeństwa: ROE, allow/deny egressu, uprawnienia, izolacja sandboxa, obsługa sekretów, zawartość audytu, weryfikacja TLS | Samokontrola + mutacja + **pełny przegląd adwersaryjny**: kilka niezależnych perspektyw + próba OBALENIA każdego zgłoszenia przez uruchomienie kodu | notatka weryfikacyjna w `docs/BEZPIECZENSTWO.md`; zgłoszenia odcięte przez limit → ROADMAP |
+
+**Poziomy są KUMULATYWNE** — każdy zawiera wszystko z poziomów wyższych w tabeli. Bez tego
+zdania wiersz trzeci czytałoby się jako słabszy od drugiego (nie wymienia mutacji), co byłoby
+dokładnie tą klasą błędu, przed którą ostrzega sekcja „Trzy pułapki".
+
+**Kryterium wiersza trzeciego to CZYN, nie plik.** „Dotyka pliku w warstwie bezpieczeństwa"
+byłoby bezużyteczne: **75 ze 100** plików `.py` w `src/husarz` wspomina o sekretach,
+tokenach, egressie, sandboxie, ROE, audycie albo TLS-ie (pomiar, nie szacunek), więc reguła albo
+paraliżowałaby pracę, albo byłaby obchodzona. Liczy się, czy zmiana MODYFIKUJE decyzję bramki —
+poprawka literówki w komentarzu w `security/roe_gate.py` nie modyfikuje, a zmiana warunku
+w `api/app.py` decydująca o zapisie sekretu modyfikuje, choć plik nie nazywa się „security".
 
 Uzasadnienie jest empiryczne, nie teoretyczne. W Etapie 17 trzy takie przeglądy dały bilans:
 **z 19 zgłoszeń sprawdzonych osobno 18 okazało się realnych** — w tym trzy wady w kodzie, który
@@ -147,7 +190,11 @@ Zasady, które z tego wynikają:
 - **Sceptyk bywa cenniejszy niż zgłaszający.** W tym projekcie agent mający obalić zgłoszenie
   poszerzył jego zakres, wykazując, że wada nie dotyczy jednego modułu, lecz całego endpointu.
   Czytaj uzasadnienia obu stron, nie tylko werdykt.
-- **Wynik audytu zapisz** — także zgłoszenia obalone, żeby nie wracały.
+- **Wynik audytu zapisz** — także zgłoszenia obalone, żeby nie wracały. Adres zależy od
+  poziomu i jest podany w trzeciej kolumnie tabeli wyżej. Nie zakładamy nowego katalogu
+  na audyty: notatki bezpieczeństwa mają swoje miejsce w `docs/BEZPIECZENSTWO.md`, a dla
+  zwykłych zmian treść commita jest właściwym nośnikiem — trwałym, powiązanym ze zmianą
+  i nietworzącym osieroconych plików.
 
 **Samokontrola — pięć pytań, na które trzeba odpowiedzieć sobie wprost:**
 
@@ -299,6 +346,20 @@ wady w testach, ale przy okazji dwa razy skłamała sama:
 Reguła nadrzędna: **mutacja, która nie zaczerwieniła testu, jest sygnałem do zbadania — nie do
 przyjęcia.** Może nie działać test, ale równie dobrze może nie działać mutacja.
 
+### Krok domykający — mutacji NIGDY nie zostawiasz w commicie
+
+Kontrola nośności celowo psuje kod produkcyjny. Zanim wrócisz do bramek:
+
+```bash
+git diff --stat            # MUSI być puste dla plików, które mutowałeś
+git checkout -- <plik>     # gdy cokolwiek zostało
+```
+
+Dopiero po potwierdzeniu, że drzewo wróciło do stanu sprzed mutacji, przegoń bramki
+i commituj. Skrypt mutujący ma sam przywracać oryginał i **kończyć się asercją, że plik jest
+identyczny** — ale asercja w skrypcie nie zwalnia z obejrzenia `git diff`. Mutacja
+zacommitowana przez przeoczenie to celowo wprowadzona wada w kodzie produkcyjnym.
+
 ## Sprostowania — obowiązek, nie uprzejmość
 
 Gdy wcześniejsze twierdzenie okaże się nieprawdziwe (w commicie, CHANGELOG-u albo notatce),
@@ -319,9 +380,13 @@ pierwszym module, który zrobi inaczej. Nowy pakiet MUSI dostać warstwę — pi
 
 ## Rytm etapów
 
-Realizuj Etapy 0→6 (patrz ROADMAP.md). Po KAŻDYM etapie:
-**testy → wpis do docs/ (+ CHANGELOG/ROADMAP) → commit**. Nie zaczynaj kolejnego
-etapu, dopóki bieżący nie jest „ukończony" wg definicji powyżej.
+Realizuj etapy w kolejności z ROADMAP.md. **Numeracja i stan (✅/🚧/⬜) są utrzymywane
+WYŁĄCZNIE tam** — ten plik ich nie powiela, bo duplikat i tak nikt nie aktualizuje. (Etapy 0–6,
+czyli rdzeń, są zamknięte; praca toczy się w etapach tematycznych o dalszych numerach.)
+
+Po KAŻDYM etapie: **testy + sprawdzona nośność + audyt → wpis do docs/ (+ CHANGELOG/ROADMAP)
+→ commit**. Nie zaczynaj kolejnego etapu, dopóki bieżący nie jest „krokiem zamkniętym"
+wg definicji w „Bramki jakości".
 
 ## Rytm „na bieżąco" — obowiązek ciągły (wymóg użytkownika)
 
@@ -354,11 +419,11 @@ zmianę, która ich wymaga. Jeżeli którakolwiek pozycja zostaje w tyle, krok n
 - Zdalne (utrzymywane W SYNCHRONIZACJI — te same commity, tagi, wiki):
   - GitLab: https://gitlab.com/Gh0s777tt/husarz
   - GitHub: https://github.com/Gh0s777tt/Husarz
-- **Push wykonujesz samodzielnie, na bieżąco**, gdy spełnione są WSZYSTKIE warunki:
-  1. bramki jakości zielone (ruff, black, mypy, pytest, `husarz eval`),
-  2. `gitleaks` czysty na zmianach wchodzących do commita,
-  3. dokumentacja zaktualizowana w tym samym kroku,
-  4. `git status` czysty, właściwa gałąź.
+- **Push wykonujesz samodzielnie, na bieżąco**, gdy krok jest **gotowy do commita** (definicja
+  w „Bramki jakości") ORAZ `git status` jest czysty i gałąź właściwa. Świadomie NIE powtarzamy
+  tu listy warunków: enumeracja w dwóch miejscach rozjeżdża się przy pierwszej zmianie, a że
+  ta była opisana jako wyczerpująca, pozwalała wypchnąć zmianę bez testu i bez audytu, będąc
+  formalnie w zgodzie z instrukcją.
 - **Czego NIE robisz samodzielnie, nawet przy rytmie „na bieżąco":**
   - `push --force` / `--force-with-lease` na gałąź główną — nadpisuje cudzą pracę;
     przygotuj polecenie i poproś operatora o decyzję,
@@ -417,10 +482,23 @@ Repozytoria są **publiczne**. Przed każdym pushem, wydaniem i publikacją wiki
 
 ## Szybki start (dev)
 
+Środowisko zakładasz zgodnie z uwagą o venv w „Bramki jakości" — jeśli repozytorium bywa
+współdzielone między systemami, venv stoi POZA nim:
+
 ```bash
+# Repo na jednym systemie:
 python -m venv .venv
 # Windows:            .venv\Scripts\python.exe -m pip install -e ".[dev]"
 # Linux / macOS:      .venv/bin/python -m pip install -e ".[dev]"
+
+# Repo współdzielone (dysk przenoszony między systemami) — venv poza repo:
+python3 -m venv ~/.husarz-venv
+~/.husarz-venv/bin/python -m pip install -e ".[dev]"
+```
+
+Dalej używaj TEGO interpretera, którym instalowałeś:
+
+```bash
 python -m husarz.launcher.cli validate --config ./config
 python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
 ```
