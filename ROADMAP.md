@@ -384,9 +384,15 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   wszystkie istniejące ścieżki importu. Testy warstwowania w świeżym procesie.
 - ⬜ Weryfikator `malformed_ratio` — metryki już zbieramy (`husarz.runs`), brakuje zestawów
   zadaniowych uruchamianych na REALNYM modelu (mierzy jakość modelu, nie naszego kodu).
-- ⬜ Budżet okna kontekstu — dziś clampujemy `max_tokens`, ale nie sprawdzamy, czy prompt
-  mieści się w oknie modelu. Przy 7B i pętli narzędziowej to realny problem (zaobserwowany:
-  agent wyczerpał limit iteracji).
+- ✅ Budżet okna kontekstu (`husarz.router.budget`): router sprawdza per kandydat, czy prompt
+  wraz z rezerwą na odpowiedź mieści się w `context_length`. Niezmieszczenie się to POMINIĘCIE
+  kandydata, nie błąd — prompt za duży dla 7B wchodzi do fallbacku o większym oknie. Estymator
+  skalibrowany REALNYM tokenizerem (Ollama, `prompt_eval_count`); dzielnik z najgęstszego
+  zmierzonego przypadku (JSON 1,68 znaku/token), bo wyniki narzędzi są JSON-em. Testy: +14.
+  Docs: `docs/ROUTER.md`. Ograniczenie zapisane: obrazy nie są liczone.
+- ⬜ Liczenie obrazów w budżecie kontekstu — modele wizyjne liczą je osobno i zależnie od
+  rozdzielczości; bez tokenizera modelu nie da się tego odtworzyć. Prompt z obrazami jest
+  dziś niedoszacowany.
 - ⬜ (hipoteza, poza zakresem etapu) Sędzia LLM z relatywnym ocenianiem grupowym. Poprzedzony
   pomiarem, czy grupa przebiegów mieści się w oknie modelu, który startuje na tym sprzęcie.
   Twardy sygnał deterministyczny NIGDY nie jest nadpisywany oceną sędziego.

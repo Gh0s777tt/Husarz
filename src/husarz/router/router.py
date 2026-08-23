@@ -11,6 +11,7 @@ from dataclasses import replace
 
 from husarz.config.schema import HusarzConfig, ModelSpec
 from husarz.config.secrets import NullSecretsProvider, SecretsProvider
+from husarz.router.budget import check_fits
 from husarz.router.client import ModelClient, build_client
 from husarz.router.egress import EgressError, check_endpoint_allowed
 from husarz.router.errors import (
@@ -95,6 +96,20 @@ class ModelRouter:
                 failures.append(
                     (model_id, "model nie obsługuje obrazów (vision:false) — pominięto")
                 )
+                continue
+            # Bramka budżetu okna kontekstu — PER KANDYDAT, bo modele mają różne okna.
+            # Prompt za duży dla modelu 7B może zmieścić się w fallbacku o większym oknie,
+            # więc niezmieszczenie się traktujemy jak każdą inną przyczynę pominięcia,
+            # a nie jak błąd przerywający łańcuch. Bez tej bramki backend zwracał błąd albo
+            # po cichu ucinał kontekst, a agent wypalał limit iteracji, nie wiedząc dlaczego.
+            powod = check_fits(
+                request.messages,
+                context_length=spec.context_length,
+                request_max_tokens=request.max_tokens,
+                model_max_tokens=spec.max_tokens,
+            )
+            if powod is not None:
+                failures.append((model_id, powod))
                 continue
             # Bramka egress (deny-all): nie łączymy się ze zdalnym hostem spoza allowlisty.
             try:

@@ -5,6 +5,31 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 16 — budżet okna kontekstu)
+
+- **Router sprawdza, czy prompt WRAZ Z rezerwą na odpowiedź mieści się w oknie modelu.**
+  Dotąd clampowaliśmy wyłącznie `max_tokens` wg kontroli kosztów, a rozmiar promptu nie był
+  sprawdzany wcale. Przy modelu 7B i pętli narzędziowej to realny problem, zaobserwowany
+  w tym projekcie: rozmowa rośnie o wyniki narzędzi (JSON, gęsty tokenowo), przekracza okno,
+  backend zwraca błąd albo po cichu ucina kontekst, a agent wypala limit iteracji.
+- **Niezmieszczenie się to POMINIĘCIE kandydata, nie błąd** — prompt za duży dla modelu 7B
+  może wejść do fallbacku o większym oknie, więc router próbuje dalej, tak jak przy bramce
+  wizyjnej i egressowej. Dopiero brak okna u wszystkich daje `AllModelsFailedError`
+  z powodem zawierającym liczby i podpowiedzią, co zrobić.
+- Rezerwa na odpowiedź: `max_tokens` żądania → `max_tokens` modelu → 512. Bez niej prompt
+  mógłby wypełnić okno co do tokena, zostawiając model bez miejsca na odpowiedź.
+- **Estymator SKALIBROWANY realnym tokenizerem, nie zgadnięty.** Pomiar przez Ollamę
+  (`qwen2.5-coder:7b`, `prompt_eval_count`): polski ~2,1 znaku/token, kod ~2,9, angielski
+  ~2,7, **JSON 1,68**. Dzielnik bierzemy z JSON-a, bo to najgorszy przypadek dla nas — wyniki
+  narzędzi w pętli agentowej są JSON-em. Doliczony zmierzony narzut szablonu czatu (29 tokenów
+  stałych, ~3 na wiadomość). Szacujemy Z GÓRY: fałszywa odmowa z czytelnym komunikatem jest
+  tańsza niż cicha awaria backendu w środku pętli.
+- **Ograniczenie zapisane wprost:** obrazy NIE są liczone (modele wizyjne liczą je osobno,
+  zależnie od rozdzielczości — nie da się tego odtworzyć bez tokenizera modelu), więc prompt
+  z obrazami jest niedoszacowany. Docs: `docs/ROUTER.md`.
+- Testy: +14, w tym walidacja estymatora wobec ZMIERZONYCH liczb (nie zaniża i nie zawyża
+  absurdalnie). Nośność: 5 mutacji, wszystkie czerwienią zestaw.
+
 ### Zmienione (Etap 17g — ZMIANA ZACHOWANIA: wyłączenie magazynu to kill-switch)
 
 - **`security.secret_store.enabled: false` odcina teraz także ODCZYT.** Dotąd zamykało

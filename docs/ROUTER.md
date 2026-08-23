@@ -13,6 +13,9 @@ ChatRequest ─▶ ModelRouter.complete(agent|model|tags)
                  ├─ RateLimiter.acquire() ── kontrola kosztów (opcjonalna)
                  ├─ _apply_cost_controls() ── clamp max_tokens
                  └─ dla kolejnych kandydatów:
+                        bramka wizyjna    ── obrazy tylko do modelu vision:true
+                        bramka budżetu    ── prompt + rezerwa ≤ context_length
+                        bramka egress     ── host na allowliście
                         build_client(spec) ─▶ ModelClient.chat() ─▶ ChatResponse
                         (błąd backendu → następny kandydat; wszyscy zawiodą → AllModelsFailedError)
 ```
@@ -55,6 +58,54 @@ To kontrola na poziomie aplikacji (defense-in-depth). Pełne wymuszenie sieciowe
   przycinany do limitu (albo ustawiany, gdy nie podano).
 - `routing.cost_controls.max_requests_per_minute` — `RateLimiter` (token bucket)
   z uzupełnianiem w tempie/min. Przekroczenie → `RateLimitExceededError`.
+
+## Budżet okna kontekstu
+
+Router sprawdza dla KAŻDEGO kandydata, czy prompt **razem z rezerwą na odpowiedź** zmieści się
+w jego `context_length`. Bez tego backend zwracał błąd albo po cichu ucinał kontekst, a agent
+w pętli narzędziowej wypalał limit iteracji, nie wiedząc dlaczego — problem zaobserwowany
+przy modelu 7B, gdzie rozmowa rośnie o wyniki narzędzi.
+
+**Niezmieszczenie się jest POMINIĘCIEM kandydata, nie błędem.** Prompt za duży dla modelu 7B
+może wejść do fallbacku o większym oknie, więc router traktuje to jak każdą inną przyczynę
+pominięcia i próbuje dalej. Dopiero gdy nie starczy okna u NIKOGO, leci `AllModelsFailedError`
+z powodem zawierającym liczby.
+
+Rezerwa na odpowiedź bierze się kolejno z: `max_tokens` żądania (już po kontroli kosztów),
+`max_tokens` z rejestru modelu, a na końcu z wartości zapasowej 512. Bez tej rezerwy prompt
+mógłby wypełnić okno co do tokena, zostawiając model bez miejsca na odpowiedź.
+
+### Oszacowanie, nie pomiar — i dlaczego
+
+Dokładne policzenie tokenów wymaga tokenizera KONKRETNEGO modelu, a rdzeń Husarza ma pięć
+zależności runtime i żadna nim nie jest. Dokładanie `transformers` czy `tiktoken` wyłącznie po
+to, by zmierzyć długość, byłoby złą wymianą. Szacujemy więc — ale **zachowawczo i na podstawie
+pomiaru**, nie intuicji.
+
+Kalibracja wykonana realnym tokenizerem (`qwen2.5-coder:7b` przez Ollamę, licznik
+`prompt_eval_count`):
+
+| Rodzaj treści | znaków na token |
+|---|---|
+| polski, proza | 2,19 |
+| polski, techniczny | 2,08 |
+| kod (Python) | 2,88 |
+| angielski | 2,70 |
+| **JSON / wpis dziennika** | **1,68** |
+
+Dzielnik bierzemy z ostatniego wiersza (zaokrąglony do 1,6), bo to najgorszy przypadek dla NAS:
+wyniki narzędzi w pętli agentowej są właśnie JSON-em. Doliczamy też zmierzony narzut szablonu
+czatu — 32 tokeny stałe i 6 na wiadomość.
+
+**Skutek: szacujemy Z GÓRY.** Dla typowej polskiej rozmowy wychodzi ~30% więcej, niż naliczy
+tokenizer, więc odmówimy nieco wcześniej, niż trzeba. To świadomy wybór — fałszywa odmowa
+z czytelnym komunikatem jest tańsza niż cicha awaria backendu w środku pętli narzędziowej.
+
+!!! warning "Obrazy NIE są liczone"
+    Modele wizyjne liczą obrazy osobno i zależnie od rozdzielczości, czego nie da się odtworzyć
+    bez tokenizera modelu. Prompt z obrazami będzie więc **niedoszacowany** — bramka go
+    przepuści, choć może się nie zmieścić. Ograniczenie znane i nieobejściowe bez zależności,
+    której rdzeń świadomie nie ma.
 
 ## Klienci i transport
 

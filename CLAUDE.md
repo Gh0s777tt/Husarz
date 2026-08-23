@@ -350,15 +350,21 @@ przyjęcia.** Może nie działać test, ale równie dobrze może nie działać m
 
 Kontrola nośności celowo psuje kod produkcyjny. Zanim wrócisz do bramek:
 
-```bash
-git diff --stat            # MUSI być puste dla plików, które mutowałeś
-git checkout -- <plik>     # gdy cokolwiek zostało
+Skrypt mutujący ma **sam przywracać oryginał i kończyć się asercją, że treść pliku jest
+identyczna z zapamiętaną przed mutacją**. To jest właściwe sprawdzenie — działa także wtedy,
+gdy plik ma inne, niezacommitowane zmiany (a przy pracy nad funkcją zwykle ma):
+
+```python
+ORYG = plik.read_text(encoding="utf-8")
+...                                   # mutacja, przebieg testu
+plik.write_text(ORYG, encoding="utf-8")
+assert plik.read_text(encoding="utf-8") == ORYG, "plik NIE wrócił do oryginału"
 ```
 
-Dopiero po potwierdzeniu, że drzewo wróciło do stanu sprzed mutacji, przegoń bramki
-i commituj. Skrypt mutujący ma sam przywracać oryginał i **kończyć się asercją, że plik jest
-identyczny** — ale asercja w skrypcie nie zwalnia z obejrzenia `git diff`. Mutacja
-zacommitowana przez przeoczenie to celowo wprowadzona wada w kodzie produkcyjnym.
+Dodatkowo obejrzyj `git diff` mutowanego pliku i upewnij się, że zawiera WYŁĄCZNIE zmiany,
+które sam wprowadziłeś świadomie. Nie „pusty diff" — bo przy pracy nad funkcją pusty nie
+będzie — tylko diff bez śladu mutacji. Mutacja zacommitowana przez przeoczenie to celowo
+wprowadzona wada w kodzie produkcyjnym.
 
 ## Sprostowania — obowiązek, nie uprzejmość
 
