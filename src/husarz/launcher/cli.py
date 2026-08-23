@@ -337,6 +337,47 @@ class _SchemeSecrets:
         return EnvSecretsProvider().resolve(ref)
 
 
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Diagnoza instalacji: co jest nie tak i co z tym zrobić.
+
+    Kod wyjścia 1 przy problemie BLOKUJĄCYM — dzięki temu komenda nadaje się do skryptu
+    startowego. Stan NIEZNANY nie jest błędem, ale też NIE jest sukcesem: kończy się kodem 0
+    z jawnym komunikatem, że części kontroli nie dało się wykonać.
+
+    Args:
+        args: Argumenty CLI (``--config``, ``--host``, ``--port``).
+
+    Returns:
+        Kod wyjścia procesu.
+    """
+    from husarz.launcher.doctor import (  # noqa: PLC0415
+        SondaSystemowa,
+        Stan,
+        Waga,
+        sformatuj,
+        zdiagnozuj,
+    )
+
+    try:
+        config_dir = resolve_config_dir(args.config, os.environ)
+        config = load_config(config_dir)
+    except ConfigError as exc:
+        # Sama konfiguracja jest pierwszą kontrolą — bez niej nie ma czego diagnozować.
+        print(f"[!!] konfiguracja: {exc}", file=sys.stderr, flush=True)
+        print(
+            "     → popraw pliki w katalogu konfiguracji i uruchom `husarz doctor` ponownie.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 1
+
+    ustalenia = zdiagnozuj(config, sonda=SondaSystemowa(config), host=args.host, port=args.port)
+    for linia in sformatuj(ustalenia):
+        print(linia, flush=True)
+    blokujace = [u for u in ustalenia if u.stan is Stan.PROBLEM and u.waga is Waga.BLOKUJACA]
+    return 1 if blokujace else 0
+
+
 def _cmd_up(args: argparse.Namespace) -> int:
     # Ładujemy konfigurację, wymuszając wybrany profil jako nadpisanie runtime.
     try:
@@ -446,6 +487,27 @@ def _cmd_up(args: argparse.Namespace) -> int:
         port_conflicts(config, host=args.host, port=args.port), port=args.port
     ):
         print(line, flush=True)
+
+    # Diagnoza przy starcie: bez niej operator, któremu brakuje silnika modelu, dostawał
+    # w czacie gołe `502 Backend modelu zawiódł`, a w logu startowym NIC. Pokazujemy tylko
+    # ustalenia wymagające uwagi — pełną listę daje `husarz doctor`.
+    from husarz.launcher.doctor import (  # noqa: PLC0415
+        SondaSystemowa,
+        Stan,
+        sformatuj,
+        zdiagnozuj,
+    )
+
+    warte_uwagi = [
+        u
+        for u in zdiagnozuj(config, sonda=SondaSystemowa(config), host=args.host, port=args.port)
+        if u.stan is not Stan.OK
+    ]
+    if warte_uwagi:
+        print("\nDiagnoza startowa (pełna: `husarz doctor`):", flush=True)
+        for linia in sformatuj(warte_uwagi):
+            print(linia, flush=True)
+        print("", flush=True)
     # Launcher: otwórz konsolę w przeglądarce (tylko loopback — sensowne lokalnie).
     if getattr(args, "open", False) and _is_loopback(args.host):
         _open_browser_async(url)
@@ -634,6 +696,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Nie traktuj braku przypadków jako błędu (domyślnie: brak pomiarów = kod 1).",
     )
     p_eval.set_defaults(func=_cmd_eval)
+
+    p_doctor = sub.add_parser(
+        "doctor", help="Zdiagnozuj instalację: co jest nie tak i co z tym zrobić."
+    )
+    p_doctor.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_doctor.add_argument(
+        "--host", default="127.0.0.1", help="Adres nasłuchu (do wykrycia kolizji portu)."
+    )
+    p_doctor.add_argument("--port", type=int, default=8000, help="Port jw.")
+    p_doctor.set_defaults(func=_cmd_doctor)
 
     p_version = sub.add_parser("version", help="Wypisz wersję.")
     p_version.set_defaults(func=_cmd_version)

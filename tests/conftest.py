@@ -94,13 +94,20 @@ def make_config():
         *,
         registry: dict[str, Any],
         default: str,
+        chat: str | None = None,
         agent_models: dict[str, str] | None = None,
         rules: list[dict[str, Any]] | None = None,
         fallbacks_enabled: bool = True,
         cost_controls: dict[str, Any] | None = None,
     ) -> HusarzConfig:
         return HusarzConfig(
-            models={"default": default, "registry": registry},
+            models={
+                "default": default,
+                "registry": registry,
+                # `chat` bywa przedmiotem testu (diagnoza modelu trybu czatu); domyślnie
+                # pada na model domyślny, tak jak w dostarczonej konfiguracji.
+                **({"chat": chat} if chat is not None else {}),
+            },
             routing={
                 "agent_models": agent_models or {},
                 "rules": rules or [],

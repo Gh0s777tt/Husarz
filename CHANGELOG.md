@@ -5,6 +5,42 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 12b — `husarz doctor`, diagnoza instalacji)
+
+- **`husarz doctor` — jedno źródło prawdy dla CLI i konsoli.** Po pobraniu binarki czat
+  odpowiadał `502 Backend modelu zawiódł`, a w logu startowym nie było NIC (odtworzone).
+  Diagnoza zamienia tę ciszę w listę ustaleń z instrukcją naprawy. Kod wyjścia 1 przy
+  problemie blokującym — nadaje się do skryptu startowego.
+- Ta sama diagnoza pokazuje się przy `husarz up` (tylko ustalenia wymagające uwagi).
+- **Trzy stany, nie dwa:** `[ok]`, `[!!]` i **`[??]` (nieznany)**. Ostatni jest osobny celowo —
+  pomiar NIE MOŻE zaokrąglać „nie dało się sprawdzić" do „w porządku". Podsumowanie wymienia
+  stany nieznane osobno i nigdy nie kończy się „wszystkie kontrole przeszły", gdy którejś
+  kontroli nie wykonano.
+- Kontrole wykrywają m.in. **dwie luki, których walidacja schematu NIE łapie** (sprawdzone
+  osobno): `models.chat` wskazujący model z `enabled: false` oraz model bez endpointu. Obie
+  przechodzą walidację i wywracają się dopiero przy pierwszym żądaniu.
+- **Diagnoza NIE jest obejściem bramki egress** — sondowanie endpointu przechodzi tę samą
+  kontrolę co ruch routera; endpoint spoza allowlisty nie jest odpytywany. Bez tego `doctor`
+  wystawiony w konsoli byłby skanerem portów.
+- Sonda jest wstrzykiwana, więc cały zestaw testów działa offline. Testy: +17.
+
+### Poprawione (Etap 12b — trzy wady wykryte NA PIERWSZYM uruchomieniu narzędzia)
+
+Wszystkie trzy polegały na tym samym: diagnoza mówiła nieprawdę o stanie, który miała opisać.
+
+- **Fałszywe „nie ma modelu"** — Ollama zwraca `husarz:latest`, konfiguracja mówi `husarz`.
+  Normalizacja etykiety siedziała w ekstraktorze JEDNEGO z dwóch endpointów, a odpowiadał ten
+  drugi (OpenAI-compat). Normalizacja jest teraz w jednym miejscu — przy porównaniu.
+- **Fałszywe „OK"** — obcinanie etykiety po OBU stronach zrównywało `qwen2.5-coder:7b`
+  z `qwen2.5-coder:1.5b`, więc diagnoza meldowała „model jest", gdy stał tam inny wariant.
+  Fałszywe OK jest gorsze niż fałszywy alarm: operator przestaje szukać. Porównujemy teraz
+  przez kanonizację (brak etykiety = `:latest`), nie przez obcinanie.
+- **Podsumowanie przeczyło liście** — przy problemie NIEBLOKUJĄCYM kończyło się zdaniem
+  „wszystkie kontrole przeszły", mając wypisany problem dwie linie wyżej.
+- **Diagnoza kłamała o przyczynie** — przy zablokowanym egressie mówiła „silnik nie
+  odpowiedział" i radziła `ollama serve`, choć nikt silnika nie pytał. Odmowa sondowania jest
+  teraz osobnym ustaleniem, z instrukcją dotyczącą allowlisty.
+
 ### Poprawione (Etap 17g — magazyn sekretów przy dwóch procesach)
 
 - **Dwa procesy na tym samym pliku gubiły sobie zapisy.** Magazyn zakładał wyłączność jednego

@@ -42,6 +42,64 @@ Binarka zawiera rdzeń, konsolę oraz **domyślne** `config/`+`prompts/` — sta
 dla tagu `v*` dołącza je do GitHub Release. Uruchom ręcznie (`workflow_dispatch`)
 lub przez push tagu wersji.
 
+## Diagnoza: `husarz doctor`
+
+Po pobraniu binarki konsola wstaje, a czat odpowiada `502 Backend modelu zawiódł` — bo nie ma
+silnika ani wag. Wcześniej nie było przy tym ŻADNEJ podpowiedzi: w logu startowym cisza,
+w odpowiedzi jedno zdanie. `husarz doctor` zamienia to w listę konkretnych ustaleń:
+
+```bash
+husarz doctor --config ./config
+```
+
+```
+[!!] model-czatu-u-dostawcy: Silnik odpowiada, ale NIE MA modelu 'husarz'.
+     Dostępne: qwen2.5-coder:7b.
+     → Przygotuj model wg ollama/README.md (`ollama create ...`) albo zmień pole
+       `model` w config/models.yaml na jeden z dostępnych.
+
+Podsumowanie — problemów blokujących: 1.
+```
+
+Kod wyjścia **1** przy problemie blokującym, więc komenda nadaje się do skryptu startowego.
+
+Ta sama diagnoza pojawia się przy `husarz up` — pokazywane są tylko ustalenia wymagające
+uwagi, żeby normalny start nie tonął w komunikatach.
+
+### Trzy stany, nie dwa
+
+Kontrola kończy się jako `[ok]`, `[!!]` (problem) albo **`[??]` (nieznany)**. Ostatni jest
+osobny celowo: projekt ma twardą zasadę, że pomiar NIE MOŻE zaokrąglać „nie dało się
+sprawdzić" do „w porządku". Diagnoza, która przy niedziałającym silniku mówi „model OK",
+jest gorsza niż brak diagnozy — operator przestaje szukać.
+
+Podsumowanie wymienia stany nieznane osobno i **nigdy** nie kończy się zdaniem „wszystkie
+kontrole przeszły", jeśli którakolwiek nie została wykonana.
+
+### Co sprawdza
+
+| Kontrola | Wykrywa |
+|---|---|
+| `model-czatu-wlaczony` | `models.chat` wskazuje model z `enabled: false` — **schemat tego NIE łapie** |
+| `model-czatu-u-dostawcy` | silnik nie odpowiada, nie zna modelu, albo egress zabrania pytać |
+| `katalog-*` | `data_dir`/`artifacts_dir`/`workspace_dir` niezapisywalne (audyt jest fail-closed, więc objawia się to dopiero jako 503) |
+| `kolizja-portu` | endpoint modelu celuje w port, na którym nasłuchuje sam Husarz |
+
+Nazwy modeli porównujemy z kanonizacją etykiety: `husarz` i `husarz:latest` to ten sam model,
+ale **`qwen2.5-coder:7b` i `qwen2.5-coder:1.5b` to NIE** — obcinanie etykiety po obu stronach
+dawałoby fałszywe „OK".
+
+!!! warning "Diagnoza NIE jest obejściem bramki egress"
+    Sondowanie endpointu to połączenie wychodzące, więc przechodzi tę samą kontrolę co ruch
+    routera. Endpoint spoza allowlisty **nie jest odpytywany** — kontrola kończy się stanem
+    nieznanym z podaniem powodu i instrukcją dotyczącą allowlisty, a nie silnika. Bez tego
+    `doctor` wystawiony w konsoli byłby skanerem portów.
+
+!!! note "Czego `doctor` NIE robi"
+    Niczego nie pobiera i nie instaluje. Podaje polecenie do świadomego uruchomienia przez
+    operatora. Nie wysyła też żądania do modelu (nie ładuje wag) — sprawdza katalog silnika,
+    nie jego zdolność do odpowiedzi.
+
 ## Zachowanie
 
 - Domyślny nasłuch **loopback** (`127.0.0.1`) — bezpieczny, lokalny.

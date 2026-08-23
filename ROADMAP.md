@@ -318,12 +318,25 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ `flush=True` na komunikacie startowym — poza terminalem `stdout` jest buforowany
   blokowo i cały komunikat (z ostrzeżeniami) znikał z logów.
 - ⬜ Podpis kodu/notaryzacja (operator); desktop Tauri (auto-update, tray).
-- ⬜ **Bootstrap modelu przy pierwszym uruchomieniu** — dziś po pobraniu binarki czat bez
-  Ollamy zwraca `502 Backend modelu zawiódł` bez żadnej podpowiedzi. Kierunek: `husarz doctor`
-  (jedno źródło dla CLI i konsoli) → pobranie silnika z archiwum standalone → `pull` bazy →
-  `create` modelu, z ekranem zgody podającym liczbę GB PRZED pobraniem, wąską allowlistą
-  `bootstrap.sources` (osobną od `security.egress.allowlist`, żeby nie otwierać domeny
-  narzędziu `web`) i degradacją do trybu offline w profilu `airgap`.
+- 🚧 **Bootstrap modelu przy pierwszym uruchomieniu** — pierwszy krok ZROBIONY:
+  - ✅ `husarz doctor` — diagnoza jako jedno źródło prawdy; trzy stany (OK/problem/NIEZNANY),
+    wstrzykiwana sonda, bramka egress obowiązująca też diagnozę. Widoczna także przy
+    `husarz up`. Docs: `docs/LAUNCHER.md`.
+  - ⬜ Endpoint `GET /api/doctor` + panel w konsoli (ta sama funkcja, inny nośnik).
+  - ⬜ Kontrola CAŁEGO łańcucha kandydatów (dziś tylko model czatu): `models.default`
+    dla orkiestracji i `routing.agent_models` dla agentów — na świeżej instalacji bywają
+    martwe nawet gdy czat działa.
+  - ⬜ Opcjonalna sonda `--probe`, która NAPRAWDĘ pyta model (jedyna kontrola skutku, nie
+    deklaracji katalogu). Ma skutki uboczne: ładuje wagi do pamięci — stąd opt-in.
+  - ⬜ Pobranie silnika i wag z ekranem zgody podającym liczbę GB PRZED pobraniem, wąską
+    allowlistą `bootstrap.sources` (osobną od `security.egress.allowlist`, żeby nie otwierać
+    domeny narzędziu `web`) i degradacją do trybu offline w profilu `airgap`.
+- ⬜ **Rozbieżność wersji Bielika w repo** (wskazana przy rozpoznaniu przestrzeni awarii,
+  potwierdzona): `config/models.yaml` ma `bielik-11b-v3.0-instruct`, a `ollama/Husarz.Modelfile`
+  rekomenduje `SpeakLeash/bielik-11b-v2.3-instruct`. Której wersji dotyczy prawda — nie da się
+  rozstrzygnąć bez sięgnięcia do rejestru modeli, więc zapisane zamiast zgadnięte.
+- ⬜ **`weights_path` w `ModelSpec` wygląda na pole martwe** — jest w schemacie i nigdzie
+  indziej w `src/`. Do sprawdzenia i usunięcia albo wpięcia.
 
 ## ✅ Etap 9 — Integracje Git (GitHub/GitLab) + tworzenie PR
 - ✅ `husarz.git`: klienci GitHub/GitLab nad wstrzykiwalnym transportem (lista repo,
