@@ -144,6 +144,11 @@ bez egressu. Szczegóły: [ollama/README.md](ollama/README.md), [docs/API.md](do
 > w zakładce **Agenci** (kolumna *Model*). Jeden model 7B obsługuje wtedy wszystkie role
 > po kolei, więc orkiestracja trwa wyraźnie dłużej niż czat.
 
+**Coś nie działa?** Zakładka **Diagnoza** w konsoli (albo `python -m husarz.launcher.cli doctor`
+w terminalu — to ta sama funkcja) wymienia, który model, katalog albo port jest problemem
+i co z tym zrobić. Sprawdza cały łańcuch: czat, orkiestrację i każdego agenta osobno.
+Szczegóły: [docs/LAUNCHER.md](docs/LAUNCHER.md).
+
 ## Konfiguracja
 
 | Plik                         | Zawartość |

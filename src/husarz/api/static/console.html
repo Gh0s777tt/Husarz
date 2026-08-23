@@ -8,10 +8,12 @@
     :root {
       --bg: #f6f7f9; --panel: #ffffff; --fg: #1a1d24; --muted: #5b6472;
       --accent: #7a1f2b; --border: #e2e5ea; --ok: #1a7f37; --err: #b3261e;
+      --warn: #8a6100;  /* stan NIEZNANY — ani sukces, ani problem */
     }
     @media (prefers-color-scheme: dark) {
       :root { --bg:#0f1116; --panel:#171a21; --fg:#e6e8ec; --muted:#9aa3b2;
-              --accent:#c8455a; --border:#262b34; --ok:#4ac26b; --err:#ff6b6b; }
+              --accent:#c8455a; --border:#262b34; --ok:#4ac26b; --err:#ff6b6b;
+              --warn:#e0a92b; }
     }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); }
@@ -37,7 +39,7 @@
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
     th { color: var(--muted); font-weight: 600; }
-    .ok { color: var(--ok); } .err { color: var(--err); }
+    .ok { color: var(--ok); } .err { color: var(--err); } .warn { color: var(--warn); }
     .muted { color: var(--muted); font-size: 13px; }
     code { background: var(--bg); padding: 1px 5px; border-radius: 4px;
            font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
@@ -116,6 +118,7 @@
     <button data-tab="plugins">Wtyczki</button>
     <button data-tab="audit">Audyt</button>
     <button data-tab="usage">Monitor</button>
+    <button data-tab="doctor">Diagnoza</button>
   </nav>
   <main>
     <section class="tab active" id="tab-chat">
@@ -229,6 +232,18 @@
 
     <section class="tab" id="tab-usage">
       <div class="card"><h3>Monitor tokenów/kosztów</h3><pre id="usage-out">…</pre></div>
+    </section>
+
+    <section class="tab" id="tab-doctor">
+      <div class="card">
+        <h3>Diagnoza instalacji <span id="doctor-status" class="muted"></span></h3>
+        <p class="muted" style="margin-top:0">
+          To samo, co <code>husarz doctor</code> w terminalu. Sprawdza modele czatu,
+          orkiestracji i agentów, katalogi zapisu oraz kolizję portu.
+        </p>
+        <div id="doctor-out">…</div>
+        <button class="primary" id="doctor-refresh" type="button">Sprawdź ponownie</button>
+      </div>
     </section>
   </main>
 
@@ -516,6 +531,7 @@
       if (tab === "usage") $("usage-out").textContent = JSON.stringify(await api("usage"), null, 2);
       if (tab === "git") { loadGit(); loadSecretStore(); }
       if (tab === "plugins") loadPlugins();
+      if (tab === "doctor") loadDoctor();
       if (tab === "agents") {
         const a = await api("agents");
         if (!Array.isArray(a)) { $("agents-out").innerHTML = `<p class='err'>${esc(a.detail || "Brak dostępu.")}</p>`; return; }
@@ -533,6 +549,66 @@
         $("audit-out").innerHTML = a.entries.length ? "<table><tr><th>Czas</th><th>Aktor</th><th>Zlecił</th><th>Akcja</th><th>Szczegóły</th><th>ROE</th></tr>" +
           a.entries.map((e) => `<tr><td>${esc(e.timestamp)}</td><td>${esc(e.actor)}</td><td>${esc(e.principal) || "—"}</td><td>${esc(e.action)}</td><td>${auditDetail(e.detail)}</td><td>${esc(e.roe_ref) || "—"}</td></tr>`).join("") + "</table>" : "<p class='muted'>Brak wpisów.</p>";
       }
+    }
+
+    // --- Diagnoza instalacji (GET /api/doctor) ---------------------------------
+    // Panel WYŚWIETLA gotowe ustalenia; oceny nie liczy sam. Gdyby liczył, konsola
+    // i `husarz doctor` mogłyby ocenić tę samą instalację inaczej, a operator nie
+    // wiedziałby, któremu wierzyć. Liczniki też przychodzą z API, z tej samej listy.
+    const DOCTOR_ZNAKI = { ok: ["ok", "✓"], problem: ["err", "✕"], nieznany: ["warn", "?"] };
+
+    async function loadDoctor() {
+      $("doctor-out").textContent = "sprawdzam…";
+      $("doctor-status").textContent = "";
+      let r;
+      try { r = await fetch("/api/doctor", { headers: authHeaders() }); }
+      catch (e) { $("doctor-out").innerHTML = `<p class='err'>Błąd sieci: ${esc(e.message || e)}</p>`; return; }
+      const d = await r.json();
+      if (!r.ok || !Array.isArray(d.findings)) {
+        // 403 dla roli bez `diagnostics:read` (m.in. `user` i `viewer`) — mówimy to wprost,
+        // zamiast pokazywać pustą tabelę, którą łatwo wziąć za „wszystko w porządku".
+        $("doctor-out").innerHTML = `<p class='err'>${esc(opisBledu(d))}</p>`;
+        return;
+      }
+      // Liczniki sklejamy zwykłą konkatenacją, nie szablonem: dzięki temu jedyne wstawki
+      // szablonowe w tej funkcji to wartości jawnie przepuszczone przez `esc`, więc kontrola
+      // źródła (`test_kazda_wartosc_z_odpowiedzi_przechodzi_przez_escapowanie`) nie musi
+      // robić wyjątków dla przypadków „tu akurat jest bezpiecznie".
+      const czesci = [];
+      if (d.blocking) czesci.push("problemów blokujących: " + d.blocking);
+      if (d.warnings) czesci.push("ostrzeżeń: " + d.warnings);
+      if (d.unknown) czesci.push("nie dało się sprawdzić: " + d.unknown);
+      const klasaStanu = d.blocking ? "err" : "warn";
+      $("doctor-status").innerHTML = czesci.length
+        ? `<span class="${klasaStanu}">${esc(czesci.join("; "))}</span>`
+        : `<span class="ok">wszystkie kontrole przeszły</span>`;
+      $("doctor-out").innerHTML = "<table><tr><th>Stan</th><th>Kontrola</th><th>Ustalenie</th><th>Co zrobić</th></tr>" +
+        d.findings.map((f) => {
+          // `Object.hasOwn`, a nie samo `DOCTOR_ZNAKI[f.state]`: indeksowanie obiektu
+          // wartością z odpowiedzi sięga też do prototypu, więc stan o nazwie
+          // `constructor` zwróciłby funkcję i wywrócił destrukturyzację — cała tabela
+          // znikłaby zamiast pokazać nieznany stan. Konsola nie ufa żadnemu wejściu.
+          const [klasa, znak] = Object.hasOwn(DOCTOR_ZNAKI, f.state)
+            ? DOCTOR_ZNAKI[f.state] : ["muted", "·"];
+          return `<tr><td class="${klasa}">${znak}</td><td><code>${esc(f.id)}</code></td>` +
+                 `<td>${esc(f.description)}</td><td class="muted">${esc(f.remedy) || "—"}</td></tr>`;
+        }).join("") + "</table>";
+    }
+
+    // Podpowiedź przy błędzie czatu/orkiestracji. Gołe „Backend modelu zawiódł" jest
+    // dokładnie tym komunikatem, dla którego powstała diagnoza — kierujemy operatora
+    // tam, gdzie jest odpowiedź, zamiast zostawiać go z samym kodem błędu.
+    function bladCzatu(d) {
+      const tresc = esc(opisBledu(d));
+      return `<span class="err">Błąd: ${tresc}</span> ` +
+             `<button class="link diag-hint" type="button">Sprawdź diagnozę →</button>`;
+    }
+
+    // Bez atrybutu `onclick` w treści — reszta konsoli też wiąże zdarzenia w kodzie.
+    function wireDiagHint(el) {
+      el.querySelectorAll(".diag-hint").forEach((b) => b.onclick = () => {
+        document.querySelector('nav button[data-tab="doctor"]').click();
+      });
     }
 
     // Szczegóły wpisu audytu jako „klucz=wartość". Wartości pochodzą z allowlisty po stronie
@@ -709,7 +785,7 @@
             if (d.model) $("chat-model").textContent = "model: " + d.model;
           } else {
             history.pop();
-            out.innerHTML = `<span class="err">Błąd: ${esc((d && d.detail) || JSON.stringify(d))}</span>`;
+            out.innerHTML = bladCzatu(d); wireDiagHint(out);
           }
         } else {
           const d = await api("orchestrate", {
@@ -721,7 +797,7 @@
             out.innerHTML = renderMarkdown(d.answer + (obs ? "\n\n*Obserwacje:*\n" + obs : ""));
             wireCopy(out.parentElement);
           } else {
-            out.innerHTML = `<span class="err">Błąd: ${esc((d && d.detail) || JSON.stringify(d))}</span>`;
+            out.innerHTML = bladCzatu(d); wireDiagHint(out);
           }
         }
       } catch (e) {
@@ -730,6 +806,8 @@
       log().scrollTop = log().scrollHeight;
       refreshMe();  // odśwież licznik zużytych tokenów w pasku użytkownika
     }
+
+    $("doctor-refresh").onclick = loadDoctor;
 
     $("send").onclick = send;
     $("chat-clear").onclick = resetChat;

@@ -5,6 +5,50 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 12c — diagnoza w konsoli: `GET /api/doctor` + zakładka Diagnoza)
+
+- **`GET /api/doctor`** — ta sama funkcja, którą wykonuje `husarz doctor`, wystawiona przez
+  API. Zwraca `findings[]` (`id`, `state`, `severity`, `description`, `remedy`) oraz liczniki
+  `blocking`/`warnings`/`unknown` policzone z TEJ SAMEJ listy. Domyka obietnicę „jedno źródło
+  prawdy dla CLI i konsoli", która dotąd była spełniona w połowie.
+- **Zakładka „Diagnoza" w konsoli WWW** — tabela ustaleń z instrukcją naprawy przy każdym,
+  własny kolor dla stanu NIEZNANY (ani sukces, ani problem) i przycisk „Sprawdź ponownie".
+  Panel WYŚWIETLA gotowe ustalenia; oceny nie liczy sam, żeby oba nośniki nie rozjechały się
+  w ocenie tej samej instalacji.
+- **Błąd czatu i orkiestracji kieruje do diagnozy** — `502 Backend modelu zawiódł` to
+  dokładnie ten komunikat, dla którego diagnoza powstała; teraz niesie odnośnik do zakładki.
+- **Nowe uprawnienie RBAC `diagnostics:read`** (`admin`, `operator`). ŚWIADOMIE osobne od
+  `config:read`: to uprawnienie ma rola `user` zakładana samodzielną rejestracją, a odpowiedź
+  diagnozy niesie **endpointy silników** i **ścieżki katalogów operatora**, których warstwa
+  `config:read` celowo nie wystawia (`GET /api/models` podaje backend i tagi, ale nie
+  endpoint). Wywołanie dodatkowo otwiera połączenia wychodzące, więc nie jest zwykłym
+  odczytem — z tego samego powodu uprawnienia nie dostał `viewer`.
+- **Wywołanie jest audytowane** (akcja `doctor`, z referencją wywołującego). W szczególe
+  wyłącznie trzy liczby — żadnych endpointów ani ścieżek, bo dziennik jest niemodyfikowalny.
+  Allowlista `audit_view` działa deny-by-default, więc `GET /api/audit` pokazuje ten wpis
+  z pustym `detail` (sprawdzone testem, nie założone).
+- **Kontrola kolizji portu używa REALNEGO adresu nasłuchu** — `create_app` dostaje
+  `listen_host`/`listen_port` z launchera (`--host`/`--port`). Świadomie NIE czytamy nagłówka
+  `Host` z żądania: pochodzi od klienta, więc kontrola bezpieczeństwa oparta na nim dawałaby
+  wynik sterowany przez pytającego.
+- **Sonda diagnozy jest wstrzykiwalna także przez API** (`create_app(doctor_probe=...)`).
+  Bez tego API zaszywałoby `SondaSystemowa` na sztywno i odebrało modułowi diagnozy pełną
+  testowalność offline — żaden z nowych testów nie dotyka sieci.
+- Zrzut ekranu w dokumentacji (`docs/assets/screenshots/console-diagnoza.png`) i wpis
+  w `scripts/screenshots.py`, żeby odświeżał się razem z pozostałymi.
+- Testy: +22 (RBAC, ślad w audycie, zgodność liczników z listą, przewleczenie portu, panel
+  konsoli). Nośność: 9 mutacji, 9 czerwonych. Notatka weryfikacyjna: `docs/BEZPIECZENSTWO.md`,
+  sekcja „Etap 17h".
+
+### Poprawione (Etap 12c)
+
+- **Konsola nie ufa kluczowi z odpowiedzi API** — mapa stanów była indeksowana wartością
+  `state`, więc stan o nazwie `constructor` sięgnąłby do prototypu, zwrócił funkcję i wywrócił
+  destrukturyzację, usuwając CAŁĄ tabelę. Osłonięte `Object.hasOwn`. Wartość spoza `Stan` nie
+  powstanie przez `zdiagnozuj`, ale konsola nie zakłada niczego o wejściu.
+- Błędy czatu i orkiestracji przechodzą przez `opisBledu`, jak reszta konsoli — dotąd sklejały
+  samo `d.detail`, więc odpowiedź 422 (tablica) gubiła treść.
+
 ### Dodane (Etap 12b — `husarz doctor`, diagnoza instalacji)
 
 - **`husarz doctor` — jedno źródło prawdy dla CLI i konsoli.** Po pobraniu binarki czat

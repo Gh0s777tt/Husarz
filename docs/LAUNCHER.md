@@ -123,6 +123,30 @@ kilka modeli.
     nieznanym z podaniem powodu i instrukcją dotyczącą allowlisty, a nie silnika. Bez tego
     `doctor` wystawiony w konsoli byłby skanerem portów.
 
+### To samo w konsoli WWW — panel **Diagnoza**
+
+Terminal jest właściwym miejscem dla skryptu startowego, ale operator, który pobrał binarkę
+i klika w przeglądarce, nie ma powodu do niego wracać. Ta sama diagnoza jest w konsoli pod
+zakładką **Diagnoza** (`GET /api/doctor`):
+
+![Zakładka Diagnoza — te same ustalenia, co `husarz doctor`](assets/screenshots/console-diagnoza.png){ .shadow loading=lazy }
+
+Panel **wyświetla** gotowe ustalenia i liczniki policzone po stronie API — sam niczego nie
+ocenia. Gdyby liczył po swojemu, konsola i `husarz doctor` mogłyby ocenić tę samą instalację
+inaczej, a operator nie wiedziałby, któremu nośnikowi wierzyć. Przy błędzie czatu lub
+orkiestracji komunikat niesie odnośnik prowadzący wprost tutaj — bo `502 Backend modelu
+zawiódł` jest dokładnie tym zdaniem, dla którego diagnoza powstała.
+
+!!! warning "Diagnoza wymaga uprawnienia `diagnostics:read`, nie `config:read`"
+    Odpowiedź niesie adresy silników i ścieżki katalogów operatora — dane, których
+    `config:read` celowo nie wystawia — a wywołanie otwiera połączenia wychodzące.
+    Rola `user` (zakładana samodzielną rejestracją) MA `config:read`, więc oparcie diagnozy
+    na nim ujawniłoby to publicznie. Uprawnienie mają `admin` i `operator`; `viewer` nie,
+    bo podgląd nie wysyła pakietów. Szczegóły: [API.md](API.md#uwierzytelnianie-i-autoryzacja-rbac).
+
+    Każde wywołanie zostawia wpis w audycie (akcja `doctor`) z identyfikatorem wywołującego
+    i samymi liczbami w szczególe — bez endpointów i ścieżek, bo dziennik jest niemodyfikowalny.
+
 !!! note "Czego `doctor` NIE robi"
     Niczego nie pobiera i nie instaluje. Podaje polecenie do świadomego uruchomienia przez
     operatora. Nie wysyła też żądania do modelu (nie ładuje wag) — sprawdza katalog silnika,
@@ -139,7 +163,9 @@ kilka modeli.
   z loopbackowym endpointem włączonego modelu, launcher wypisuje ostrzeżenie z nazwą modelu
   i podpowiedzią naprawy — żądania do takiego modelu wracałyby do własnego API Husarza.
   Kontrola **ostrzega, nie blokuje**: Husarz w kontenerze legalnie nasłuchuje na
-  `0.0.0.0:8000`, gdy vLLM działa na `:8000` hosta.
+  `0.0.0.0:8000`, gdy vLLM działa na `:8000` hosta. Ta sama kontrola działa w zakładce
+  **Diagnoza** — launcher przekazuje do API REALNY adres nasłuchu (`--host`/`--port`),
+  a nie nagłówek `Host` z żądania, który pochodzi od pytającego.
 
 ## Ograniczenia
 

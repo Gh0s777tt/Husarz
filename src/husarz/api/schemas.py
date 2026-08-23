@@ -455,3 +455,46 @@ class ValidateResponse(BaseModel):
     ok: bool
     summary: ConfigSummary | None = None
     error: str | None = None
+
+
+class DoctorFinding(BaseModel):
+    """Jedno ustalenie diagnozy instalacji (odpowiednik ``launcher.doctor.Ustalenie``).
+
+    Pola są celowo tekstowe i gotowe do pokazania: konsola ma je WYŚWIETLIĆ, a nie
+    interpretować. Interpretacja (co jest problemem, jak to naprawić) należy do jednego
+    miejsca — modułu diagnozy — żeby CLI i konsola nie rozjechały się w ocenie.
+
+    Attributes:
+        id: Stabilny identyfikator kontroli (np. ``model-husarz-local-u-dostawcy``).
+        state: ``ok`` / ``problem`` / ``nieznany``. Stan ``nieznany`` znaczy „nie dało
+            się sprawdzić" i NIGDY nie jest zaokrąglany do ``ok``.
+        severity: ``blokujaca`` / ``ostrzezenie`` / ``informacja``.
+        description: Co ustalono, jednym zdaniem.
+        remedy: Co operator ma zrobić. Pusty dla stanu ``ok``.
+    """
+
+    id: str
+    state: str
+    severity: str
+    description: str
+    remedy: str = ""
+
+
+class DoctorReport(BaseModel):
+    """Wynik diagnozy instalacji dla konsoli WWW.
+
+    Liczniki są policzone po stronie API z TEJ SAMEJ listy, którą zwracamy, więc panel
+    nie może pokazać podsumowania przeczącego swojej własnej tabeli — błąd, który
+    wersja CLI popełniła na pierwszym uruchomieniu.
+
+    Attributes:
+        findings: Ustalenia posortowane wg wagi (najpierw problemy blokujące).
+        blocking: Liczba problemów blokujących.
+        warnings: Liczba problemów nieblokujących.
+        unknown: Liczba kontroli, których NIE DAŁO SIĘ wykonać.
+    """
+
+    findings: list[DoctorFinding]
+    blocking: int
+    warnings: int
+    unknown: int

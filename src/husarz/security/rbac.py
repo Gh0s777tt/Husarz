@@ -27,12 +27,26 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             "git:write",
             "git:pr",
             "plugin:read",
+            # Diagnoza instalacji (`GET /api/doctor`). ŚWIADOMIE osobne uprawnienie,
+            # a nie `config:read`, z dwóch powodów:
+            #   1. Odpowiedź niesie ENDPOINTY modeli i ŚCIEŻKI katalogów operatora —
+            #      dane, których `config:read` celowo NIE wystawia (`/api/models`
+            #      podaje backend i tagi, ale nie adres silnika).
+            #   2. Wywołanie OTWIERA połączenia wychodzące do endpointów z konfiguracji,
+            #      więc nie jest zwykłym odczytem stanu.
+            # Rola `user` (zakładana samodzielną rejestracją) ma `config:read`, więc
+            # oparcie diagnozy na nim wystawiłoby to wszystko publicznie.
+            "diagnostics:read",
         }
     ),
     # Zwykły użytkownik (np. samodzielna rejestracja): może rozmawiać/orkiestrować,
-    # ale NIE ma tool:*, roe:authorize (autoryzacja ofensywy) ani audit:read.
+    # ale NIE ma tool:*, roe:authorize (autoryzacja ofensywy), audit:read ani
+    # diagnostics:read (diagnoza ujawnia endpointy i ścieżki operatora).
     # Najmniejsze uprawnienia dla kont zakładanych publicznie.
     "user": frozenset({"config:read", "agent:run"}),
+    # `viewer` to PODGLĄD: świadomie bez `diagnostics:read`, bo diagnoza nie jest
+    # odczytem — każde wywołanie wysyła zapytania do endpointów z konfiguracji.
+    # Do rozważenia dla roli NOC, gdyby taka powstała (zapisane w ROADMAP).
     "viewer": frozenset({"config:read", "audit:read"}),
 }
 

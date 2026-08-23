@@ -86,6 +86,12 @@ SHOTS: tuple[Shot, ...] = (
     ),
     Shot("audit", "console-audyt.png", "audyt z weryfikacją łańcucha", ready_id="audit-out"),
     Shot("usage", "console-monitor.png", "monitor zużycia tokenów", ready_id="usage-out"),
+    Shot(
+        "doctor",
+        "console-diagnoza.png",
+        "diagnoza instalacji (te same ustalenia, co `husarz doctor`)",
+        ready_id="doctor-out",
+    ),
 )
 
 

@@ -47,6 +47,17 @@ Zakładka **Monitor** — liczniki wywołań i obowiązujące limity (`max_token
 `max_requests_per_minute`).
 ///
 
+![Zakładka Diagnoza — co jest nie tak z instalacją](assets/screenshots/console-diagnoza.png){ .shadow loading=lazy }
+
+/// caption
+Zakładka **Diagnoza** — te same ustalenia, co `husarz doctor` w terminalu, z instrukcją naprawy
+przy każdym. Widoczne trzy stany: problem (✕), **nie dało się sprawdzić** (?) i OK (✓) — stan
+nieznany jest osobny celowo, bo pomiar nie może zaokrąglać „nie wiem" do „w porządku".
+Zrzut z konfiguracji repo: czat działa na lokalnej Ollamie, a orkiestracja i agenci wskazują
+serwery vLLM, których na tej maszynie nikt nie uruchomił
+(zob. [LAUNCHER](LAUNCHER.md#to-samo-w-konsoli-www-panel-diagnoza)).
+///
+
 !!! note "Aktualność zrzutów"
     Zrzuty pochodzą z realnie uruchomionej aplikacji i są odświeżane skryptem
     `scripts/screenshots.py` (patrz [CONTRIBUTING.md](https://github.com/Gh0s777tt/Husarz/blob/main/CONTRIBUTING.md)).

@@ -1953,3 +1953,76 @@ skierowałem ją na test, który tej ścieżki nie dotyka. Po wycelowaniu we wł
 3. Przeładowanie przy odczycie opiera się na czasie modyfikacji i rozmiarze. Zapis, który
    trafiłby w tę samą sekundę i dał identyczny rozmiar, nie zostałby wykryty. W praktyce
    nieosiągalne dla różnych treści (szyfrogram ma losowy nonce), ale to założenie, nie dowód.
+
+## Etap 17h — diagnoza wystawiona przez HTTP (`GET /api/doctor`)
+
+Notatka weryfikacyjna. Zmiana MODYFIKUJE decyzję bramki: dokłada nowe uprawnienie RBAC
+i nową ścieżkę ruchu wychodzącego wyzwalaną żądaniem HTTP — czyli trzeci poziom audytu
+wg tabeli w `CLAUDE.md`.
+
+### Trzy powierzchnie, po kolei
+
+**1. Kto może pytać — nowe uprawnienie `diagnostics:read`.**
+
+Pierwszym odruchem było oparcie diagnozy na `config:read`, bo to „endpoint tylko do odczytu".
+Sprawdzenie `DEFAULT_ROLE_PERMISSIONS` pokazało, że byłby to błąd: `config:read` ma rola
+**`user`**, czyli konto zakładane samodzielną rejestracją. Diagnoza niesie natomiast
+**endpointy silników** i **ścieżki katalogów operatora** — dane, których warstwa `config:read`
+celowo nie wystawia (`GET /api/models` podaje backend, tagi i długość kontekstu, ale **nie**
+`endpoint`). Wywołanie dodatkowo **otwiera połączenia wychodzące**, więc nie jest odczytem
+stanu. Stąd osobne uprawnienie, przyznane `admin` i `operator`.
+
+`viewer` go **nie** dostał: „podgląd" nie powinien wysyłać pakietów. Decyzja jest zapisana
+w komentarzu przy definicji roli, żeby brak wpisu nie wyglądał na przeoczenie; ewentualna
+rola NOC jest w ROADMAP.
+
+**2. Czy to nie jest skaner portów.** Nie: sondowanie idzie przez `SondaSystemowa`, która pyta
+`check_endpoint_allowed` — tę samą funkcję, której używa router. Endpoint spoza allowlisty nie
+jest odpytywany, a kontrola kończy się stanem NIEZNANY z podaniem powodu. Bez tego rola
+z `config:write` mogłaby wpisać dowolny adres jako endpoint modelu i odczytać z diagnozy, czy
+odpowiada. Niezmiennik ma testy w `tests/unit/test_doctor.py`
+(`test_sonda_NIE_odpytuje_endpointu_spoza_allowlisty` oraz jego kontrola nośności
+`test_sonda_odpytuje_endpoint_dozwolony`).
+
+**3. Co trafia do audytu.** Wywołanie zostawia wpis akcji `doctor` z referencją wywołującego.
+W `detail` są **wyłącznie trzy liczby** (`blocking`, `warnings`, `unknown`) — żadnych endpointów
+ani ścieżek, bo dziennik jest niemodyfikowalny. Allowlista `husarz.api.audit_view` działa
+deny-by-default, więc `GET /api/audit` pokazuje ten wpis z pustym `detail`; sprawdzone testem,
+nie założone.
+
+### Kontrola portu bierze REALNY adres nasłuchu
+
+`create_app` dostaje `listen_host`/`listen_port` z launchera. Świadomie **nie** czytamy nagłówka
+`Host` z żądania: nagłówek pochodzi od klienta, więc kontrola bezpieczeństwa oparta na nim
+dawałaby wynik sterowany przez pytającego.
+
+### Sonda jest wstrzykiwana także przez API
+
+`create_app(doctor_probe=...)`. Bez tego API zaszywałoby `SondaSystemowa` na sztywno i odebrało
+modułowi diagnozy własność, dla której powstał — pełną testowalność offline. Żaden test tej
+funkcji nie dotyka sieci.
+
+### Nośność — dziewięć mutacji, dziewięć czerwonych
+
+Mutowano po kolei: odebranie uprawnienia operatorowi, podmianę bramki na `config:read`,
+zignorowanie portu z launchera, policzenie ostrzeżeń jako blokujących, użycie konfiguracji ze
+startu zamiast aktualnej, usunięcie wpisu audytu, wstawienie opisu ustalenia bez escapowania,
+zdjęcie osłony przed sięganiem do prototypu i odpięcie zakładki od przełącznika. Każda
+zaczerwieniła swoje testy. Skrypt sam przywracał oryginał i kończył asercją równości treści;
+`git diff` po przebiegu nie zawierał śladu mutacji.
+
+### Ograniczenia — wprost
+
+1. **Panel konsoli ma kontrolę ŹRÓDŁA, nie skutku.** `tests/unit/test_konsola_diagnoza.py`
+   sprawdza obecność elementów, wiązań i escapowania w `console.html`, ale nie uruchamia
+   przeglądarki. Skutek zweryfikowano **ręcznie**: uruchomiono `husarz up --port 8000`, otwarto
+   konsolę, kliknięto zakładkę i przycisk „Sprawdź ponownie" — dwa `GET /api/doctor` w logu,
+   zero błędów w konsoli przeglądarki, tabela zgodna co do znaku z wyjściem CLI. Zrzut:
+   `docs/assets/screenshots/console-diagnoza.png`.
+2. **Brak limitu tempa dla `/api/doctor`.** Każde wywołanie sonduje endpointy (timeout 3 s,
+   zapytanie raz na endpoint). Uprawnienie mają tylko `admin` i `operator`, którzy dysponują
+   znacznie kosztowniejszym `/api/chat`, więc nie jest to nowa dźwignia — ale limitu nie ma
+   i nie udajemy, że jest.
+3. **Tabela w konsoli nie odróżnia problemu blokującego od ostrzeżenia** (oba jako ✕), tak samo
+   jak CLI (oba jako `[!!]`). Rozróżnienie niesie nagłówek z licznikami. Pole `severity` jest
+   w odpowiedzi API, więc zmiana wymaga poprawienia OBU nośników naraz — zapisane w ROADMAP.

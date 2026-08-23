@@ -322,7 +322,11 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   - ✅ `husarz doctor` — diagnoza jako jedno źródło prawdy; trzy stany (OK/problem/NIEZNANY),
     wstrzykiwana sonda, bramka egress obowiązująca też diagnozę. Widoczna także przy
     `husarz up`. Docs: `docs/LAUNCHER.md`.
-  - ⬜ Endpoint `GET /api/doctor` + panel w konsoli (ta sama funkcja, inny nośnik).
+  - ✅ Endpoint `GET /api/doctor` + zakładka **Diagnoza** w konsoli (ta sama funkcja, inny
+    nośnik). Osobne uprawnienie `diagnostics:read` (admin, operator) — NIE `config:read`,
+    które ma rola `user`: odpowiedź niesie endpointy i ścieżki, a wywołanie otwiera
+    połączenia wychodzące. Panel wyświetla gotowe ustalenia, oceny nie liczy sam.
+    Docs: `docs/API.md`, `docs/LAUNCHER.md`, notatka w `docs/BEZPIECZENSTWO.md`.
   - ✅ Kontrola CAŁEGO łańcucha: `models.chat`, `models.default` (orkiestracja)
     i `routing.agent_models` (agenci). Grupowanie po modelu, silnik pytany raz na endpoint.
     Na dostarczonej konfiguracji ujawnia, że orkiestracja i wszystkich 7 agentów jest martwych,
@@ -332,6 +336,17 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   - ⬜ Pobranie silnika i wag z ekranem zgody podającym liczbę GB PRZED pobraniem, wąską
     allowlistą `bootstrap.sources` (osobną od `security.egress.allowlist`, żeby nie otwierać
     domeny narzędziu `web`) i degradacją do trybu offline w profilu `airgap`.
+- ⬜ **Waga ustalenia niewidoczna w tabeli konsoli i w wyjściu CLI** — problem blokujący
+  i ostrzeżenie mają ten sam znak (✕ / `[!!]`); rozróżnienie niesie dopiero nagłówek
+  z licznikami. Pole `severity` jest już w odpowiedzi API, więc zmiana wymaga poprawienia
+  OBU nośników naraz — inaczej rozjadą się w ocenie tej samej instalacji.
+- ⬜ **Rola „NOC" (podgląd + diagnoza) do rozważenia** — `viewer` świadomie nie dostał
+  `diagnostics:read`, bo podgląd nie powinien wysyłać pakietów. Gdyby powstał scenariusz
+  monitoringu bez uprawnień operatora, właściwą odpowiedzią jest osobna rola, nie
+  rozluźnienie `viewer`.
+- ⬜ **Brak limitu tempa dla `GET /api/doctor`** — każde wywołanie sonduje endpointy.
+  Uprawnienie mają tylko admin i operator, którzy dysponują kosztowniejszym `/api/chat`,
+  więc nie jest to nowa dźwignia; zapisane, żeby nie udawać, że limit istnieje.
 - ⬜ **Rozbieżność wersji Bielika w repo** (wskazana przy rozpoznaniu przestrzeni awarii,
   potwierdzona): `config/models.yaml` ma `bielik-11b-v3.0-instruct`, a `ollama/Husarz.Modelfile`
   rekomenduje `SpeakLeash/bielik-11b-v2.3-instruct`. Której wersji dotyczy prawda — nie da się

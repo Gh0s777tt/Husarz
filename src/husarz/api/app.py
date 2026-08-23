@@ -47,6 +47,8 @@ from husarz.api.schemas import (
     ChatReply,
     ChatRequest,
     ConfigSummary,
+    DoctorFinding,
+    DoctorReport,
     GitConnectionIn,
     GitConnectionView,
     GitConnectionWizardIn,
@@ -82,6 +84,7 @@ from husarz.config.secrets import SecretsProvider
 from husarz.git import GitConnection, GitProviderKind, GitService
 from husarz.git.client import build_ssl_context
 from husarz.git.errors import GitAuthError, GitConnectionError, GitError
+from husarz.launcher.doctor import Sonda, SondaSystemowa, Stan, Waga, zdiagnozuj
 from husarz.orchestrator import Orchestrator, build_orchestrator
 from husarz.plugins import PluginService
 from husarz.plugins.errors import (
@@ -189,6 +192,7 @@ _PERM_GIT_READ = "git:read"
 _PERM_GIT_WRITE = "git:write"
 _PERM_GIT_PR = "git:pr"
 _PERM_PLUGIN_READ = "plugin:read"
+_PERM_DIAGNOSTICS_READ = "diagnostics:read"
 
 
 # Pola, których nadpisanie w runtime NIE MOŻE odnieść skutku, bo odpowiadający im obiekt
@@ -299,6 +303,9 @@ def create_app(
     trusted_hosts: list[str] | None = None,
     secrets: SecretsProvider | None = None,
     secret_store: EncryptedFileSecretStore | None = None,
+    listen_host: str = "127.0.0.1",
+    listen_port: int = 8000,
+    doctor_probe: Sonda | None = None,
 ) -> FastAPI:
     """Buduje aplikację FastAPI dla podanej konfiguracji.
 
@@ -307,6 +314,18 @@ def create_app(
     ``router_factory`` pozwala PRZEBUDOWAĆ router+orkiestrator po nadpisaniu configu
     w runtime — bez niego ``/api/orchestrate`` i ``/api/chat`` działałyby na starej
     konfiguracji. ``chat_model`` nadpisuje model trybu czatu (domyślnie z configu).
+
+    ``listen_host``/``listen_port`` mówią aplikacji, GDZIE faktycznie stanie serwer.
+    Używa tego wyłącznie diagnoza (``GET /api/doctor``), żeby wykryć model celujący
+    w port zajęty przez samego Husarza. Świadomie NIE bierzemy tego z nagłówka ``Host``
+    żądania: nagłówek pochodzi od klienta, więc kontrola bezpieczeństwa oparta na nim
+    dawałaby wynik sterowany przez pytającego.
+
+    ``doctor_probe`` podmienia sondę diagnozy (sieć, system plików). Wstrzykiwalność jest
+    tu wymogiem, nie wygodą: moduł diagnozy jest w całości testowalny offline WŁAŚNIE
+    dlatego, że sonda przychodzi z zewnątrz — API zaszywające ``SondaSystemowa`` na sztywno
+    odebrałoby tę własność wszystkiemu, co idzie przez HTTP. Domyślnie (``None``) sonda jest
+    budowana per żądanie z AKTUALNEJ konfiguracji.
     """
     # Pusty/whitespace token maszynowy traktujemy jak brak — inaczej „Bearer " (pusty)
     # mógłby się zrównać z pustym api_token (compare_digest(b"", b"")==True).
@@ -528,6 +547,7 @@ def create_app(
     dep_git_write = Depends(_require(_PERM_GIT_WRITE))
     dep_git_pr = Depends(_require(_PERM_GIT_PR))
     dep_plugin_read = Depends(_require(_PERM_PLUGIN_READ))
+    dep_diagnostics_read = Depends(_require(_PERM_DIAGNOSTICS_READ))
 
     # /api/health celowo BEZ uwierzytelniania — sonda liveness (minimalne dane).
     @app.get("/api/health", response_model=HealthResponse)
@@ -642,6 +662,67 @@ def create_app(
             failures=state["failures"],
             max_tokens_per_request=cost.max_tokens_per_request,
             max_requests_per_minute=cost.max_requests_per_minute,
+        )
+
+    @app.get("/api/doctor", response_model=DoctorReport)
+    def doctor(principal: Principal | None = dep_diagnostics_read) -> DoctorReport:
+        """Diagnoza instalacji — TA SAMA funkcja, którą wykonuje `husarz doctor`.
+
+        Domykamy obietnicę z docstringa modułu diagnozy: jedno źródło prawdy dla CLI
+        i konsoli. Gdyby panel liczył ustalenia po swojemu, oba nośniki rozjechałyby się
+        w ocenie tej samej instalacji, a operator nie wiedziałby, któremu wierzyć.
+
+        **Dlaczego osobne uprawnienie `diagnostics:read`, a nie `config:read`.**
+        Odpowiedź niesie endpointy silników i ścieżki katalogów operatora, których
+        `config:read` celowo nie wystawia, a samo wywołanie OTWIERA połączenia
+        wychodzące. Rola `user` (zakładana samodzielną rejestracją) ma `config:read`,
+        więc oparcie diagnozy na nim wystawiłoby jedno i drugie publicznie.
+
+        **Dlaczego to nie jest skaner portów.** Sondowanie przechodzi przez tę samą
+        bramkę egress, co ruch routera (:class:`SondaSystemowa`). Endpoint spoza
+        allowlisty nie jest odpytywany — kontrola kończy się stanem `nieznany`
+        z podaniem powodu. Bez tego wystarczyłoby wpisać dowolny adres jako endpoint
+        modelu (`config:write`) i odczytać z diagnozy, czy odpowiada.
+
+        Args:
+            principal: Wywołujący (z RBAC) — do wpisu audytu.
+
+        Returns:
+            Ustalenia posortowane wg wagi wraz z licznikami policzonymi z TEJ SAMEJ listy.
+        """
+        current: HusarzConfig = state["config"]
+        # Sonda budowana z AKTUALNEJ konfiguracji, nie z tej ze startu: po
+        # `POST /api/config/runtime` obowiązuje nowa polityka egress i nowe endpointy.
+        sonda = doctor_probe if doctor_probe is not None else SondaSystemowa(current)
+        ustalenia = zdiagnozuj(current, sonda=sonda, host=listen_host, port=listen_port)
+        blokujace = sum(1 for u in ustalenia if u.stan is Stan.PROBLEM and u.waga is Waga.BLOKUJACA)
+        ostrzezenia = sum(
+            1 for u in ustalenia if u.stan is Stan.PROBLEM and u.waga is not Waga.BLOKUJACA
+        )
+        nieznane = sum(1 for u in ustalenia if u.stan is Stan.NIEZNANY)
+        # Audytujemy ODCZYT, bo ten odczyt wysyła pakiety: bez wpisu ruch wychodzący
+        # wywołany przez API nie miałby śladu. W szczególe wyłącznie liczby — żadnych
+        # endpointów ani ścieżek, bo dziennik audytu jest niemodyfikowalny.
+        audit_log.record(
+            "api",
+            "doctor",
+            {"blocking": blokujace, "warnings": ostrzezenia, "unknown": nieznane},
+            principal=_principal_ref(principal),
+        )
+        return DoctorReport(
+            findings=[
+                DoctorFinding(
+                    id=u.id,
+                    state=u.stan.value,
+                    severity=u.waga.value,
+                    description=u.opis,
+                    remedy=u.naprawa,
+                )
+                for u in ustalenia
+            ],
+            blocking=blokujace,
+            warnings=ostrzezenia,
+            unknown=nieznane,
         )
 
     @app.post("/api/orchestrate", response_model=OrchestrateResponse)

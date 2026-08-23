@@ -29,6 +29,13 @@ opiera się na RBAC (`husarz.security.rbac`):
 | `GET /api/audit`                         | `audit:read`         | ✅ | ✅ | ✅ |
 | `POST /api/orchestrate`                  | `agent:run`          | ✅ | ✅ | ❌ |
 | `POST /api/config/runtime`               | `config:write`       | ✅ | ❌ | ❌ |
+| `GET /api/doctor`                        | `diagnostics:read`   | ✅ | ✅ | ❌ |
+
+Rola `user` (zakładana samodzielną rejestracją, patrz [KONTA.md](KONTA.md)) ma
+`config:read` i `agent:run` — czyli **nie** ma `diagnostics:read`. To celowe: diagnoza
+ujawnia adresy silników i ścieżki katalogów operatora, których `config:read` nie wystawia
+(`GET /api/models` podaje backend i tagi, ale nie endpoint), a samo jej wywołanie otwiera
+połączenia wychodzące. `viewer` też jej nie ma — podgląd nie wysyła pakietów.
 
 Bez skonfigurowanego tokenu (tryb dev) uwierzytelnianie jest wyłączone — dopuszczalne
 **wyłącznie** dla nasłuchu loopback. Token nigdy nie trafia do configu ani logów —
@@ -51,6 +58,7 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 | `POST /api/config/runtime`  | `{overrides}` → walidacja + zastosowanie w pamięci; **przebudowuje orkiestrator** (audytowane) | `config:write` |
 | `POST /api/auth/register` · `login` · `logout` · `GET /api/auth/me` | konta i sesje — patrz [KONTA.md](KONTA.md) | mieszane |
 | `GET/POST/DELETE /api/git/connections` · `…/wizard` · `…/{name}/repos` · `…/{name}/pull-request` | integracje Git — patrz [GIT.md](GIT.md) | `git:*` |
+| `GET /api/doctor`         | diagnoza instalacji: modele czatu/orkiestracji/agentów, katalogi zapisu, kolizja portu. `findings[]` (`id`, `state`, `severity`, `description`, `remedy`) + liczniki `blocking`/`warnings`/`unknown`. **Ta sama funkcja, co `husarz doctor`** | `diagnostics:read` |
 | `GET /api/secrets/store` | stan zapisywalnego magazynu sekretów: `enabled` + nazwy wpisów i daty (NIGDY wartości ani szyfrogramów) | `git:read` |
 | `GET /`                   | konsola WWW (HTML) | — (otwarte) |
 
@@ -83,7 +91,7 @@ Konsola (`/`) przełącza się między nimi w zakładce **Czat**.
 Jednoplikowa konsola (`api/static/console.html`, vanilla JS, theme-aware) z zakładkami:
 **Czat** (dymki, Markdown + bloki kodu z „kopiuj", przełącznik Czat/Orkiestracja),
 **Konfiguracja** (podgląd + walidacja nadpisań), **Agenci**, **Audyt** (status łańcucha),
-**Monitor** (koszty/tokeny). Bez kroku budowania i **bez zależności z CDN** (airgap-safe:
+**Monitor** (koszty/tokeny), **Diagnoza** (patrz [LAUNCHER.md](LAUNCHER.md#diagnoza-husarz-doctor)). Bez kroku budowania i **bez zależności z CDN** (airgap-safe:
 własny mini-renderer Markdown). Wszystkie dane z API są **escapowane HTML** (ochrona przed
 XSS — renderer najpierw escapuje, potem formatuje), a pole „token API" (nagłówek) pozwala
 korzystać z konsoli przy włączonym uwierzytelnianiu. Pełny frontend Next.js pozostaje

@@ -462,6 +462,11 @@ def _cmd_up(args: argparse.Namespace) -> int:
         prompts_dir=prompts,
         secrets=_SchemeSecrets(),  # przewleczenie sekretów: trwała pamięć RAG (klucz at-rest)
         secret_store=_SEKRETY,  # kreator połączeń: zapis tokenu pod referencją `husarz:`
+        # REALNY adres nasłuchu — `GET /api/doctor` wykrywa dzięki temu model celujący
+        # w port zajęty przez samego Husarza. Bez przekazania tu wartości z `args` panel
+        # sprawdzałby port domyślny i przy `--port 9000` przeoczyłby kolizję (albo zmyślił).
+        listen_host=args.host,
+        listen_port=args.port,
     )
     if api_token and accounts is not None:
         auth_note = "auth: token + konta"
