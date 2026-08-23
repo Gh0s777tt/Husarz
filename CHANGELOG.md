@@ -5,6 +5,25 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (Etap 17g — magazyn sekretów przy dwóch procesach)
+
+- **Dwa procesy na tym samym pliku gubiły sobie zapisy.** Magazyn zakładał wyłączność jednego
+  procesu, ale nic jej nie egzekwował: każdy trzymał wpisy w pamięci, więc zapis drugiego
+  nadpisywał plik wersją bez sekretu zapisanego przez pierwszy. Objawiało się to jako „token
+  przestał działać", bez żadnego błędu.
+- Naprawa: **odczyt-modyfikacja-zapis pod blokadą międzyprocesową** (`flock` na POSIX,
+  `msvcrt.locking` na Windowsie) plus przeładowanie przy odczycie, gdy plik zmienił się od
+  ostatniego wczytania. Rozważane i ODRZUCONE: blokada wyłączna na czas życia procesu — byłaby
+  prostsza, ale zamykałaby drogę narzędziom chcącym tylko odczytać magazyn.
+- Blokujemy OSOBNY plik `.lock`, nie sam magazyn: magazyn jest podmieniany przez `os.replace`,
+  więc blokada trzymana na nim dotyczyłaby po chwili i-węzła, którego już nikt nie widzi.
+- Testy: +6, na PRAWDZIWYCH procesach potomnych (`flock` jest per deskryptor, więc test
+  wątkowy mógłby przejść z innego powodu).
+- **Nośność wskazała lukę w moich testach:** mutacja zdejmująca `flock` nie czerwieniła
+  żadnego z pierwszych pięciu, bo wszystkie są sekwencyjne i blokada nigdy nie jest w sporze.
+  Dopisany test, w którym proces potomny TRZYMA blokadę, a my mierzymy, czy zapis zaczekał.
+- Ograniczenie zapisane wprost: ścieżka windowsowa NIE jest zweryfikowana uruchomieniem.
+
 ### Dodane (Etap 16 — budżet okna kontekstu)
 
 - **Router sprawdza, czy prompt WRAZ Z rezerwą na odpowiedź mieści się w oknie modelu.**

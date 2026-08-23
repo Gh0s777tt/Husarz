@@ -92,10 +92,14 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
   `ca_bundle` w 400, obie drogi dodawania pod zamkiem, czytelne błędy walidacji w panelu.
   Jedno zgłoszenie (ścieżki operatora w odpowiedziach) **obalone** — nie potwierdziło się.
   Bilans serii: 18 z 19 sprawdzonych zgłoszeń było realnych.
-- ⬜ **Blokada pliku magazynu między procesami** — dwa procesy Husarza wskazujące ten sam plik
-  mogą się nadpisać. Z założenia niewspierane (jedna instancja na proces), ale nic tego nie
-  egzekwuje. Przenośna blokada wymaga osobnych ścieżek dla POSIX (`fcntl`) i Windows
-  (`msvcrt`), więc to zadanie na osobny krok.
+- ✅ **Blokada pliku magazynu między procesami** (Etap 17g): odczyt-modyfikacja-zapis pod
+  blokadą międzyprocesową (`flock`/`msvcrt.locking`) + przeładowanie przy odczycie, gdy plik
+  zmienił się od ostatniego wczytania. Wybrane zamiast blokady wyłącznej na czas życia procesu,
+  bo tamta zamykałaby drogę narzędziom chcącym tylko odczytać magazyn. Testy: +6, na PRAWDZIWYCH
+  procesach potomnych. **Ścieżka windowsowa napisana, ale NIEZWERYFIKOWANA uruchomieniem** —
+  brak Windowsa w środowisku pracy.
+- ⬜ **Weryfikacja blokady na Windowsie** — `msvcrt.locking` wymaga potwierdzenia na realnym
+  systemie; do wykonania przy najbliższej okazji pracy na tamtej maszynie.
 - ⬜ **Magazyn sekretów — pozostałe** (mniejsza waga): brak limitu liczby wpisów, brak rotacji
   i sygnalizacji wygasania tokenów, niezweryfikowane zachowanie na systemach plików bez
   atomowego `rename` (część udziałów sieciowych).

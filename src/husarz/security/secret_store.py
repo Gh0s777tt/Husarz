@@ -41,8 +41,9 @@ import contextlib
 import json
 import os
 import re
+import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,77 @@ class SecretStoreError(SecurityError):
 
 def _default_clock() -> datetime:
     return datetime.now(UTC)
+
+
+@contextlib.contextmanager
+def _blokada_pliku(sciezka: Path) -> Iterator[None]:
+    """Wyłączna blokada międzyprocesowa na czas modyfikacji magazynu.
+
+    **Po co.** Bez niej dwa procesy Husarza wskazujące ten sam plik gubiły sobie nawzajem
+    zapisy: każdy trzyma wpisy w pamięci, więc zapis drugiego nadpisywał plik wersją bez
+    sekretu zapisanego przez pierwszy. Objawiało się to jako „token przestał działać po
+    restarcie" — bez żadnego błędu.
+
+    Blokujemy OSOBNY plik ``.lock``, a nie sam magazyn: plik magazynu jest podmieniany przez
+    ``os.replace``, więc blokada trzymana na nim dotyczyłaby po chwili i-węzła, którego już
+    nikt nie widzi.
+
+    Blokada jest DORADCZA — chroni przed innym Husarzem, nie przed dowolnym procesem, który
+    zignoruje konwencję. To wystarcza dla scenariusza, który realnie zachodzi.
+
+    Args:
+        sciezka: Ścieżka pliku magazynu (plik blokady powstanie obok, z sufiksem ``.lock``).
+
+    Yields:
+        Nic — blokada obowiązuje w obrębie bloku ``with``.
+
+    Raises:
+        SecretStoreError: Gdy pliku blokady nie da się utworzyć albo zablokować.
+    """
+    plik_blokady = sciezka.with_name(sciezka.name + ".lock")
+    plik_blokady.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        fd = os.open(plik_blokady, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise SecretStoreError(f"Nie można utworzyć blokady {plik_blokady}: {exc}") from exc
+    try:
+        _zajmij(fd, plik_blokady)
+        yield
+    finally:
+        _zwolnij(fd)
+        os.close(fd)
+
+
+def _zajmij(fd: int, plik_blokady: Path) -> None:
+    """Zakłada blokadę wyłączną, czekając na jej zwolnienie."""
+    if sys.platform == "win32":  # pragma: no cover - nieweryfikowane na macOS
+        import msvcrt  # noqa: PLC0415
+
+        try:
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        except OSError as exc:
+            raise SecretStoreError(f"Nie można zająć blokady {plik_blokady}: {exc}") from exc
+        return
+    import fcntl  # noqa: PLC0415
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError as exc:
+        raise SecretStoreError(f"Nie można zająć blokady {plik_blokady}: {exc}") from exc
+
+
+def _zwolnij(fd: int) -> None:
+    """Zwalnia blokadę. Awaria zwolnienia nie może przesłonić właściwego błędu operacji."""
+    if sys.platform == "win32":  # pragma: no cover - nieweryfikowane na macOS
+        import msvcrt  # noqa: PLC0415
+
+        with contextlib.suppress(OSError):
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl  # noqa: PLC0415
+
+    with contextlib.suppress(OSError):
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 class EncryptedFileSecretStore:
@@ -97,7 +169,66 @@ class EncryptedFileSecretStore:
         # Serializuje mutację + zapis: endpointy FastAPI biegną w puli wątków.
         self._lock = threading.Lock()
         self._entries: dict[str, dict[str, Any]] = {}
+        # Znacznik wersji pliku — pozwala wykryć zapis dokonany przez INNY proces.
+        self._znacznik: tuple[float, int] | None = None
         self._load()
+        self._znacznik = self._stan_pliku()
+
+    def _modyfikuj(
+        self,
+        zmiana: Callable[
+            [
+                dict[str, dict[str, Any]],
+            ],
+            dict[str, dict[str, Any]],
+        ],
+    ) -> None:
+        """Odczyt-modyfikacja-zapis magazynu POD BLOKADĄ międzyprocesową.
+
+        Kolejność ma trzy powody, każdy z osobnej awarii:
+
+        1. **Blokada NAJPIERW** — bez niej dwa procesy nadpisywały sobie zapisy, bo każdy
+           startował od SWOJEJ kopii wpisów. Token zapisany przez jeden znikał po zapisie
+           drugiego, bez żadnego błędu.
+        2. **Ponowny odczyt z dysku pod blokadą** — kopia w pamięci mogła się zestarzeć,
+           odkąd inny proces coś dopisał. Modyfikujemy stan FAKTYCZNY, nie zapamiętany.
+        3. **Zapis przed podmianą stanu w pamięci** — nieudany zapis nie może zostawić
+           procesu z przekonaniem, że sekret istnieje, podczas gdy w pliku go nie ma.
+
+        Args:
+            zmiana: Funkcja czysta: bierze wpisy z dysku, zwraca wpisy do zapisania.
+
+        Raises:
+            SecretStoreError: Gdy odczyt albo zapis się nie powiedzie.
+        """
+        with self._lock, _blokada_pliku(self._path):
+            self._load()
+            kandydat = zmiana(self._entries)
+            self._persist(kandydat)
+            self._entries = kandydat
+            self._znacznik = self._stan_pliku()
+
+    def _stan_pliku(self) -> tuple[float, int] | None:
+        """Znacznik wersji pliku (czas modyfikacji, rozmiar) albo ``None``, gdy pliku brak."""
+        try:
+            st = self._path.stat()
+        except OSError:
+            return None
+        return (st.st_mtime, st.st_size)
+
+    def _przeladuj_jesli_zmieniony(self) -> None:
+        """Dociąga wpisy, gdy plik zmienił się od ostatniego odczytu (inny proces).
+
+        Bez tego kopia w pamięci starzeje się w milczeniu: sekret dopisany przez drugi proces
+        byłby dla tego procesu nieistniejący, więc połączenie utworzone tam nie działałoby tu.
+        Sprawdzenie kosztuje jedno ``stat`` — tanio jak na operację i tak dotykającą dysku.
+        """
+        biezacy = self._stan_pliku()
+        if biezacy == self._znacznik:
+            return
+        with self._lock:
+            self._load()
+            self._znacznik = biezacy
 
     # ------------------------------------------------------------------ odczyt
 
@@ -118,6 +249,7 @@ class EncryptedFileSecretStore:
         """
         if not ref.startswith(SCHEME):
             return None
+        self._przeladuj_jesli_zmieniony()
         name = ref[len(SCHEME) :]
         entry = self._entries.get(name)
         if entry is None:
@@ -132,6 +264,7 @@ class EncryptedFileSecretStore:
 
     def names(self) -> list[str]:
         """Zwraca posortowane nazwy wpisów. NIE ujawnia wartości ani szyfrogramów."""
+        self._przeladuj_jesli_zmieniony()
         return sorted(self._entries)
 
     def describe(self, name: str) -> dict[str, str] | None:
@@ -143,6 +276,7 @@ class EncryptedFileSecretStore:
         Returns:
             Słownik ``{"name": ..., "created_at": ...}`` albo ``None``, gdy wpisu brak.
         """
+        self._przeladuj_jesli_zmieniony()
         entry = self._entries.get(name)
         if entry is None:
             return None
@@ -173,19 +307,11 @@ class EncryptedFileSecretStore:
             # Komunikat prymitywu nie zawiera materiału, ale nazwy wpisu też nie dokładamy
             # do niczego, co mogłoby trafić dalej niż do operatora.
             raise SecretStoreError(f"Nie można zaszyfrować sekretu: {exc}") from exc
-        with self._lock:
-            # Kolejność jest ISTOTNA: najpierw utrwalamy na dysku, dopiero potem podmieniamy
-            # stan w pamięci. Odwrotnie (mutacja → zapis) nieudany `_persist` zostawiał
-            # magazyn rozjechany: proces widział sekret, którego w pliku nie było, więc po
-            # restarcie referencja przestawała się rozwiązywać, choć wcześniej „działała".
-            # Pracujemy na KOPII, żeby nieudany zapis nie zostawił śladu.
-            kandydat = dict(self._entries)
-            kandydat[name] = {
-                "sealed": base64.b64encode(sealed).decode("ascii"),
-                "created_at": self._clock().isoformat(),
-            }
-            self._persist(kandydat)
-            self._entries = kandydat
+        wpis = {
+            "sealed": base64.b64encode(sealed).decode("ascii"),
+            "created_at": self._clock().isoformat(),
+        }
+        self._modyfikuj(lambda entries: {**entries, name: wpis})
         return f"{SCHEME}{name}"
 
     def delete(self, name: str) -> bool:
@@ -200,15 +326,15 @@ class EncryptedFileSecretStore:
         Raises:
             SecretStoreError: Gdy zapis pliku się nie uda.
         """
-        with self._lock:
-            if name not in self._entries:
-                return False
-            # Jak w `put`: utrwalamy, potem podmieniamy stan. Nieudany zapis nie może
-            # sprawić, że proces uzna sekret za usunięty, podczas gdy w pliku nadal jest.
-            kandydat = {k: v for k, v in self._entries.items() if k != name}
-            self._persist(kandydat)
-            self._entries = kandydat
-        return True
+        istnial = False
+
+        def bez_wpisu(entries: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+            nonlocal istnial
+            istnial = name in entries
+            return {k: v for k, v in entries.items() if k != name}
+
+        self._modyfikuj(bez_wpisu)
+        return istnial
 
     # ---------------------------------------------------------------- wewnętrzne
 

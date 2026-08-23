@@ -1893,3 +1893,63 @@ razem z handlerem z Etapu 17c.
 wskazujące ten sam plik mogą się nadpisać. Jest to z założenia niewspierane (jedna instancja
 na proces) i zapisane w ROADMAP; przenośna blokada plikowa wymaga osobnych ścieżek dla POSIX
 i Windows, więc to zadanie na osobny krok, nie doklejka.
+
+### Etap 17g — magazyn sekretów przy dwóch procesach (data: 2026-08-23)
+
+Ostatnia pozycja z serii przeglądów. Magazyn zakładał wyłączność jednego procesu, ale **nic
+jej nie egzekwował**. Dwa procesy Husarza wskazujące ten sam plik gubiły sobie zapisy: każdy
+trzyma wpisy w pamięci, więc zapis drugiego nadpisywał plik wersją bez sekretu zapisanego
+przez pierwszy. Objawiało się to jako „token przestał działać" — bez żadnego błędu.
+
+**Rozwiązanie: odczyt-modyfikacja-zapis pod blokadą, nie wykluczanie procesów.** Rozważane
+było zajęcie blokady wyłącznej na czas życia procesu (druga instancja nie wstaje). Odrzucone:
+byłoby prostsze, ale zamykałoby drogę narzędziom, które chcą tylko odczytać magazyn, i psułoby
+testy symulujące restart. Blokada obejmuje więc pojedynczą operację zapisu, a nie cały proces.
+
+Trzy elementy, każdy z osobnej awarii:
+
+1. **Blokada NAJPIERW.** Bez niej dwa procesy nadpisywały sobie zapisy, bo każdy startował od
+   swojej kopii wpisów.
+2. **Ponowny odczyt z dysku POD blokadą.** Kopia w pamięci mogła się zestarzeć, odkąd inny
+   proces coś dopisał — modyfikujemy stan faktyczny, nie zapamiętany.
+3. **Przeładowanie przy odczycie**, gdy zmienił się znacznik pliku (czas modyfikacji +
+   rozmiar). Bez tego sekret dopisany przez drugi proces byłby dla pierwszego nieistniejący,
+   więc połączenie utworzone tam nie działałoby tutaj. Koszt: jedno `stat` na odczyt.
+
+**Blokujemy OSOBNY plik `.lock`**, a nie sam magazyn: plik magazynu jest podmieniany przez
+`os.replace`, więc blokada trzymana na nim dotyczyłaby po chwili i-węzła, którego już nikt nie
+widzi. Plik blokady jest pusty i nigdy nic nie przechowuje — pilnuje tego test.
+
+Blokada jest **doradcza**: chroni przed innym Husarzem, nie przed dowolnym procesem, który
+zignoruje konwencję. To wystarcza dla scenariusza, który realnie zachodzi.
+
+| Niezmiennik | Test |
+|---|---|
+| Zapis drugiego procesu nie kasuje sekretu pierwszego | `test_zapis_drugiego_procesu_nie_kasuje_sekretu_pierwszego` |
+| Pierwszy proces widzi sekret dopisany przez drugi | `test_pierwszy_proces_widzi_sekret_dopisany_przez_drugi` |
+| Własny zapis po obcym nie gubi żadnego | `test_wlasny_zapis_po_zapisie_obcym_nie_gubi_zadnego` |
+| Usuwanie też startuje od stanu z dysku | `test_usuwanie_tez_startuje_od_stanu_z_dysku` |
+| **Zapis CZEKA na zwolnienie blokady** (wzajemne wykluczanie) | `test_zapis_CZEKA_na_zwolnienie_blokady_przez_inny_proces` |
+| Plik blokady jest pusty | `test_plik_blokady_powstaje_obok_i_jest_pusty` |
+
+Testy używają PRAWDZIWYCH procesów potomnych, nie wątków: `flock` jest zakładany per
+deskryptor, więc test wątkowy mógłby przejść z zupełnie innego powodu.
+
+**Kontrola nośności znów wskazała lukę — w moich testach, nie w kodzie.** Mutacja zdejmująca
+`flock` NIE zaczerwieniła żadnego z pierwszych pięciu testów. Przyczyna: wszystkie są
+sekwencyjne (proces potomny kończy się, zanim rodzic zacznie pisać), więc blokada nigdy nie
+jest w sporze — testy sprawdzały poprawność odczytu-modyfikacji-zapisu, a nie wykluczanie.
+Dopisany test, w którym proces potomny TRZYMA blokadę przez sekundę, a my mierzymy, czy zapis
+rodzica na nią zaczekał. Po nim mutacja czerwieni zestaw.
+
+Druga mutacja też nie zaczerwieniła testu, ale to była wada narzędzia, nie pokrycia:
+skierowałem ją na test, który tej ścieżki nie dotyka. Po wycelowaniu we właściwy — czerwony.
+
+**Ograniczenia — wprost.**
+
+1. **Ścieżka windowsowa (`msvcrt.locking`) NIE jest zweryfikowana** — nie ma tu Windowsa.
+   Kod jest napisany i otypowany, ale jego działania nie potwierdzono uruchomieniem.
+2. Blokada nie chroni przed procesem, który jej nie używa (doradcza z definicji).
+3. Przeładowanie przy odczycie opiera się na czasie modyfikacji i rozmiarze. Zapis, który
+   trafiłby w tę samą sekundę i dał identyczny rozmiar, nie zostałby wykryty. W praktyce
+   nieosiągalne dla różnych treści (szyfrogram ma losowy nonce), ale to założenie, nie dowód.

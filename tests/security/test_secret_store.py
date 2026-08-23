@@ -118,13 +118,20 @@ def test_prawa_pliku_i_katalogu_sa_wlasciwe(tmp_path: Path) -> None:
 
 
 def test_po_zapisie_nie_zostaje_plik_tymczasowy(tmp_path: Path) -> None:
-    """Zapis atomowy sprząta po sobie — inaczej szyfrogram leżałby w drugim pliku."""
+    """Zapis atomowy sprząta po sobie — inaczej szyfrogram leżałby w drugim pliku.
+
+    Obok magazynu leży plik blokady międzyprocesowej. Sprawdzamy więc dwie rzeczy: że NIE MA
+    pliku tymczasowego (tam trafiałby szyfrogram) i że plik blokady jest PUSTY — jego rolą
+    jest wyłącznie istnienie i-węzła do zablokowania, nie przechowywanie czegokolwiek.
+    """
     store = _magazyn(tmp_path)
     store.put("git/github", _TOKEN)
     store.put("git/github", "token-po-rotacji")
 
     pozostale = sorted(p.name for p in (tmp_path / "sekrety").iterdir())
-    assert pozostale == ["store.json"], pozostale
+    assert not [n for n in pozostale if n.endswith(".tmp")], pozostale
+    assert pozostale == ["store.json", "store.json.lock"], pozostale
+    assert (tmp_path / "sekrety" / "store.json.lock").stat().st_size == 0
 
 
 def test_obcy_schemat_referencji_jest_ignorowany(tmp_path: Path) -> None:
