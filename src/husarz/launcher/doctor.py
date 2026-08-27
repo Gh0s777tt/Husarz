@@ -247,13 +247,36 @@ def _pasuje(oczekiwany: str, dostepne: Sequence[str]) -> bool:
     return any(_kanoniczna(n) == cel for n in dostepne)
 
 
-def _role_modeli(config: HusarzConfig) -> dict[str, list[str]]:
-    """Mapuje model → role, w których jest używany.
+# Przedrostek roli zapasowej. Model, którego WSZYSTKIE role zaczynają się od tego napisu,
+# nie obsługuje dziś żadnego ruchu — jego awaria nie blokuje niczego teraz, ale odbiera
+# ratunek na moment, w którym będzie potrzebny. Stąd ostrzeżenie zamiast problemu blokującego.
+_ROLA_ZAPASOWA = "zapasowy dla "
 
-    Trzy role, bo trzy niezależne drogi mogą być martwe niezależnie od siebie:
-    tryb czatu (``/api/chat``), orkiestracja (``/api/orchestrate``, model domyślny) oraz
-    poszczególni agenci (``routing.agent_models``). Na świeżej instalacji czat potrafi
-    działać, a orkiestracja być martwa — i odwrotnie.
+
+def _role_modeli(config: HusarzConfig) -> dict[str, list[str]]:
+    """Mapuje model → role, w których router MOŻE go użyć.
+
+    Pięć źródeł, bo każde może być martwe niezależnie od pozostałych:
+
+    * tryb czatu (``/api/chat``) — ``models.chat``,
+    * orkiestracja (``/api/orchestrate``) — ``models.default``,
+    * poszczególni agenci — ``routing.agent_models``,
+    * modele preferowane przez reguły — ``routing.rules[].prefer``,
+    * **łańcuchy fallback** każdego z powyższych.
+
+    Fallbacki dopisano później i to była realna luka: model zapasowy jest tym, który
+    przejmuje ruch, gdy główny padnie, więc diagnoza milcząca na jego temat milczała
+    dokładnie o ratunku. Dokumentacja twierdziła przy tym, że sprawdzany jest „CAŁY łańcuch".
+
+    Przechodzimy łańcuch TAK SAMO jak :func:`husarz.router.selection._expand`: rekurencyjnie
+    (fallback fallbacku też jest osiągalny), z ochroną przed cyklem, i tylko gdy
+    ``routing.fallbacks_enabled``. Model WYŁĄCZONY jest przy tym przechodzony, choć sam nie
+    obsłuży ruchu — bo router robi to samo i sięga po JEGO fallbacki.
+
+    Czego świadomie NIE obejmujemy: modeli wybieranych wyłącznie przez dopasowanie tagów
+    (punkt 4 w ``select_candidates``). Ten warunek spełnia w praktyce dowolny włączony model
+    z pasującym tagiem, więc diagnoza objęłaby cały rejestr — łącznie z modelami, które
+    operator trzyma świadomie nieużywane. Ograniczenie zapisane w `docs/LAUNCHER.md`.
 
     Grupujemy PO MODELU, nie po roli: siedmiu agentów wskazujących ten sam model dałoby
     siedem identycznych ustaleń, co utopiłoby diagnozę w powtórzeniach.
@@ -269,11 +292,55 @@ def _role_modeli(config: HusarzConfig) -> dict[str, list[str]]:
     def dopisz(model_id: str, rola: str) -> None:
         role.setdefault(model_id, []).append(rola)
 
-    dopisz(config.models.chat or config.models.default, "tryb czatu")
-    dopisz(config.models.default, "orkiestracja")
+    def dopisz_z_zapasami(model_id: str, rola: str) -> None:
+        """Dopisuje rolę i schodzi w dół łańcucha fallback (jak robi to router)."""
+        dopisz(model_id, rola)
+        if not config.routing.fallbacks_enabled:
+            return
+        odwiedzone = {model_id}
+        # Kolejka zamiast rekurencji: głębokość łańcucha zależy od konfiguracji operatora,
+        # a diagnoza nie ma prawa przewrócić się na przepełnieniu stosu.
+        do_odwiedzenia = [model_id]
+        while do_odwiedzenia:
+            biezacy = do_odwiedzenia.pop(0)
+            spec = config.models.registry.get(biezacy)
+            if spec is None:
+                continue
+            for zapasowy in spec.fallback:
+                if zapasowy in odwiedzone:
+                    continue
+                odwiedzone.add(zapasowy)
+                dopisz(zapasowy, f"{_ROLA_ZAPASOWA}'{biezacy}'")
+                do_odwiedzenia.append(zapasowy)
+
+    dopisz_z_zapasami(config.models.chat or config.models.default, "tryb czatu")
+    dopisz_z_zapasami(config.models.default, "orkiestracja")
     for agent, model_id in sorted(config.routing.agent_models.items()):
-        dopisz(model_id, f"agent {agent}")
+        if model_id != "auto":
+            dopisz_z_zapasami(model_id, f"agent {agent}")
+    for regula in config.routing.rules:
+        opis = ", ".join(regula.match_tags) or "bez tagów"
+        for preferowany in regula.prefer:
+            dopisz_z_zapasami(preferowany, f"reguła routingu [{opis}]")
     return {m: sorted(set(r)) for m, r in role.items()}
+
+
+def _tylko_zapasowy(role: Sequence[str]) -> bool:
+    """Czy model pełni WYŁĄCZNIE rolę zapasową.
+
+    Rozstrzyga o wadze ustalenia. Niedziałający model zapasowy nie blokuje niczego dzisiaj —
+    blokuje ratunek. Nazwanie tego problemem blokującym zrównałoby go z martwym modelem czatu
+    i podniosło kod wyjścia komendy, przez co `husarz doctor` w skrypcie startowym
+    zatrzymywałby uruchomienie działającej instalacji.
+
+    Args:
+        role: Role modelu (wynik :func:`_role_modeli`).
+
+    Returns:
+        Czy wszystkie role są zapasowe. Pusta lista daje ``False`` (nie mamy podstaw
+        do złagodzenia oceny).
+    """
+    return bool(role) and all(r.startswith(_ROLA_ZAPASOWA) for r in role)
 
 
 def _kontrola_modelu(
@@ -299,6 +366,9 @@ def _kontrola_modelu(
         Ustalenia dotyczące tego modelu.
     """
     gdzie = ", ".join(role)
+    # Model pełniący WYŁĄCZNIE rolę zapasową nie obsługuje dziś ruchu — jego awaria odbiera
+    # ratunek na przyszłość, nie przerywa pracy teraz. Patrz `_tylko_zapasowy`.
+    waga = Waga.OSTRZEZENIE if _tylko_zapasowy(role) else Waga.BLOKUJACA
     spec = config.models.registry.get(model_id)
     if spec is None:
         # Walidacja schematu pilnuje WSZYSTKICH odwołań do modeli — `models.chat`,
@@ -311,7 +381,7 @@ def _kontrola_modelu(
             Ustalenie(
                 id=f"model-{model_id}",
                 stan=Stan.PROBLEM,
-                waga=Waga.BLOKUJACA,
+                waga=waga,
                 opis=f"Model '{model_id}' ({gdzie}) nie istnieje w rejestrze modeli.",
                 naprawa=(
                     f"Dodaj '{model_id}' do `models.registry` albo popraw odwołanie. "
@@ -326,7 +396,7 @@ def _kontrola_modelu(
             Ustalenie(
                 id=f"model-{model_id}-wlaczony",
                 stan=Stan.PROBLEM,
-                waga=Waga.BLOKUJACA,
+                waga=waga,
                 opis=f"Model '{model_id}' ({gdzie}) jest WYŁĄCZONY (`enabled: false`).",
                 naprawa=f"Ustaw `enabled: true` dla '{model_id}' albo wskaż inny model.",
             )
@@ -337,7 +407,7 @@ def _kontrola_modelu(
             Ustalenie(
                 id=f"model-{model_id}-u-dostawcy",
                 stan=Stan.PROBLEM,
-                waga=Waga.BLOKUJACA,
+                waga=waga,
                 opis=(
                     f"Model '{model_id}' ({gdzie}, backend: {spec.backend}) nie ma endpointu "
                     f"— nie ma dokąd wysłać żądania."
@@ -353,7 +423,7 @@ def _kontrola_modelu(
             Ustalenie(
                 id=f"model-{model_id}-u-dostawcy",
                 stan=Stan.NIEZNANY,
-                waga=Waga.BLOKUJACA,
+                waga=waga,
                 opis=(
                     f"Nie sprawdzono modelu '{model_id}' ({gdzie}): polityka egress nie "
                     f"pozwala odpytać {spec.endpoint} ({odmowa})."
@@ -376,7 +446,7 @@ def _kontrola_modelu(
             Ustalenie(
                 id=f"model-{model_id}-u-dostawcy",
                 stan=Stan.NIEZNANY,
-                waga=Waga.BLOKUJACA,
+                waga=waga,
                 opis=(
                     f"Silnik pod {spec.endpoint} nie odpowiedział — nie wiadomo, czy model "
                     f"'{spec.model}' ({gdzie}) jest dostępny."
@@ -402,13 +472,13 @@ def _kontrola_modelu(
         # żądanie skazane na porażkę. Kontrola droga (ładuje wagi) ma dotyczyć przypadku,
         # w którym katalog mówi „jest", a czat i tak zawodzi.
         if gleboka is not None and spec.enabled:
-            ustalenia += _sonduj_glebiej(model_id, spec, gdzie, gleboka)
+            ustalenia += _sonduj_glebiej(model_id, spec, gdzie, gleboka, waga)
     else:
         ustalenia.append(
             Ustalenie(
                 id=f"model-{model_id}-u-dostawcy",
                 stan=Stan.PROBLEM,
-                waga=Waga.BLOKUJACA,
+                waga=waga,
                 opis=(
                     f"Silnik odpowiada, ale NIE MA modelu '{spec.model}' ({gdzie}). "
                     f"Dostępne: {', '.join(sorted(dostepne)) or '(żadnego)'}."
@@ -603,7 +673,7 @@ _NIE_WYSLANO = frozenset(
 
 
 def _sonduj_glebiej(
-    model_id: str, spec: ModelSpec, gdzie: str, gleboka: SondaGleboka
+    model_id: str, spec: ModelSpec, gdzie: str, gleboka: SondaGleboka, waga: Waga
 ) -> list[Ustalenie]:
     """Decyduje, czy modelowi WOLNO zadać prawdziwe pytanie, i zadaje je.
 
@@ -622,6 +692,9 @@ def _sonduj_glebiej(
         spec: Wpis modelu.
         gdzie: Role, w których model jest używany.
         gleboka: Sonda zadająca pytanie.
+        waga: Istotność wyliczona przez wołającego (model wyłącznie zapasowy = ostrzeżenie).
+            Przekazujemy ją, zamiast liczyć drugi raz — dwie reguły w dwóch miejscach
+            rozjechałyby się przy pierwszej zmianie.
 
     Returns:
         Ustalenie z sondy albo informacja, dlaczego jej nie uruchomiono.
@@ -642,11 +715,11 @@ def _sonduj_glebiej(
                 ),
             )
         ]
-    return _kontrola_odpowiedzi(model_id, spec, gdzie, gleboka)
+    return _kontrola_odpowiedzi(model_id, spec, gdzie, gleboka, waga)
 
 
 def _kontrola_odpowiedzi(
-    model_id: str, spec: ModelSpec, gdzie: str, gleboka: SondaGleboka
+    model_id: str, spec: ModelSpec, gdzie: str, gleboka: SondaGleboka, waga: Waga
 ) -> list[Ustalenie]:
     """Zadaje modelowi realne pytanie i zamienia wynik w ustalenie.
 
@@ -664,6 +737,7 @@ def _kontrola_odpowiedzi(
         spec: Wpis modelu (endpoint, klucz, limity).
         gdzie: Role, w których model jest używany — do komunikatu.
         gleboka: Sonda zadająca pytanie.
+        waga: Istotność wyliczona przez wołającego (patrz :func:`_sonduj_glebiej`).
 
     Returns:
         Jedno ustalenie o identyfikatorze ``model-<id>-odpowiada``.
@@ -701,7 +775,7 @@ def _kontrola_odpowiedzi(
                 Ustalenie(
                     id=ident,
                     stan=Stan.PROBLEM,
-                    waga=Waga.BLOKUJACA,
+                    waga=waga,
                     opis=(
                         f"Model '{spec.model}' ({gdzie}) odpowiedział, ale dopiero po {czas} "
                         f"— a {skad}. W czacie żądanie zostanie PRZERWANE."
@@ -748,7 +822,7 @@ def _kontrola_odpowiedzi(
             Ustalenie(
                 id=ident,
                 stan=Stan.PROBLEM,
-                waga=Waga.BLOKUJACA,
+                waga=waga,
                 opis=(
                     f"Model '{spec.model}' ({gdzie}) przyjął żądanie, ale zwrócił PUSTĄ "
                     f"odpowiedź — czat dostanie to samo."
@@ -780,7 +854,7 @@ def _kontrola_odpowiedzi(
         Ustalenie(
             id=ident,
             stan=Stan.NIEZNANY if nieznany else Stan.PROBLEM,
-            waga=Waga.BLOKUJACA,
+            waga=waga,
             opis=opis,
             naprawa=_NAPRAWA_ODMOWY[powod],
         )

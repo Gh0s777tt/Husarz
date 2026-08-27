@@ -5,6 +5,31 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 12e — diagnoza obejmuje modele ZAPASOWE)
+
+- **Łańcuchy `fallback` są diagnozowane.** Model zapasowy przejmuje ruch, gdy główny padnie,
+  więc diagnoza milcząca na jego temat milczała o ratunku — a `docs/LAUNCHER.md` twierdziła
+  przy tym, że sprawdzany jest „CAŁY łańcuch". Przechodzimy je tak samo jak router: **
+  rekurencyjnie** (zapas zapasu też jest osiągalny), z ochroną przed cyklem i tylko gdy
+  `routing.fallbacks_enabled`. Etykieta mówi, czyim zapasem model jest: `zapasowy dla 'glowny'`.
+- **Modele z `routing.rules[].prefer`** też są diagnozowane — to jawne przypisanie operatora.
+- **Nowa waga dla zapasów: ostrzeżenie, nie blokada.** Model pełniący WYŁĄCZNIE rolę zapasową
+  nie obsługuje dziś ruchu, więc jego awaria nie przerywa pracy. Ma to skutek praktyczny:
+  `husarz doctor` zwraca kod 1 tylko przy problemie blokującym, a komenda bywa w skrypcie
+  startowym — zrównanie zepsutego zapasu z martwym modelem czatu zatrzymywałoby uruchomienie
+  DZIAŁAJĄCEJ instalacji. Model wskazany i jako zapasowy, i w roli głównej pozostaje blokujący.
+- Ograniczenie zapisane wprost: modele wybierane wyłącznie przez **dopasowanie tagów** nie są
+  diagnozowane — ten warunek spełnia dowolny włączony model z pasującym tagiem, więc diagnoza
+  objęłaby cały rejestr, łącznie z modelami trzymanymi świadomie nieużywanymi.
+
+### Poprawione (Etap 12e)
+
+- **`agent_models: {x: auto}` dawało zmyślony problem blokujący.** `auto` znaczy „wybierz sam"
+  i jest poprawną wartością (schemat ją dopuszcza, `resolve_agent_model` ją obsługuje), ale
+  diagnoza brała ją za identyfikator modelu i zgłaszała „Model 'auto' nie istnieje w rejestrze
+  modeli" — problem, którego operator nie miałby jak naprawić. Wada sprzed tej zmiany,
+  zauważona przy rozszerzaniu mapy ról.
+
 ### Poprawione (higiena repozytorium — `git fsck` znów czytelny)
 
 - **`scripts/clean_sidecars.py --include-git`.** Dysk z repozytorium odłączył się w trakcie

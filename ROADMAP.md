@@ -352,11 +352,14 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ⬜ **Brak limitu tempa dla `GET /api/doctor`** — każde wywołanie sonduje endpointy.
   Uprawnienie mają tylko admin i operator, którzy dysponują kosztowniejszym `/api/chat`,
   więc nie jest to nowa dźwignia; zapisane, żeby nie udawać, że limit istnieje.
-- ⬜ **Modele wskazywane wyłącznie jako `fallback` nie są w ogóle diagnozowane** —
-  `_role_modeli` mapuje czat, orkiestrację i `routing.agent_models`, a łańcuch `fallback`
-  pomija. Dotyczy to obu poziomów kontroli (katalogu i sondy głębokiej), więc model, który
-  przejmuje ruch po awarii głównego, jest tym, o którym diagnoza nie mówi NIC. Stan sprzed
-  sondy głębokiej, zauważony przy jej przeglądzie.
+- ✅ **Modele z łańcucha `fallback` są diagnozowane** — rekurencyjnie, z ochroną przed cyklem,
+  tylko przy `routing.fallbacks_enabled`; obejmuje też `routing.rules[].prefer`. Model wyłącznie
+  zapasowy dostaje OSTRZEŻENIE, nie blokadę (nie przerywa pracy dziś, więc nie może zatrzymywać
+  skryptu startowego). Przy okazji: `agent_models: {x: auto}` przestało dawać zmyślony problem.
+- ⬜ **Modele wybierane wyłącznie przez dopasowanie TAGÓW nie są diagnozowane** — warunek
+  spełnia dowolny włączony model z pasującym tagiem, więc kontrola objęłaby cały rejestr,
+  łącznie z modelami trzymanymi świadomie nieużywanymi. Sensowne dopiero z jawnym sygnałem
+  od operatora, które modele są „w użyciu".
 - ⬜ **Sonda głęboka w konsoli WWW** — wymaga limitu tempa dla `GET /api/doctor` i osobnej
   zgody w konfiguracji (`diagnostics.allow_probe`), bo wczytywanie wag na żądanie HTTP jest
   dźwignią zasobową. Dziś nie ma ani jednego, ani drugiego — stąd świadoma decyzja z ADR-0024.

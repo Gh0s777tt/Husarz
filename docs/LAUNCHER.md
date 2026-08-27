@@ -91,11 +91,14 @@ dawałoby fałszywe „OK".
 
 ### Sprawdzany jest CAŁY łańcuch, nie tylko czat
 
-Diagnoza obejmuje trzy niezależne drogi, bo każda może być martwa osobno:
+Diagnoza obejmuje wszystkie drogi, którymi router może pójść — każda może być martwa osobno:
 
 - **tryb czatu** (`/api/chat`) — `models.chat`,
 - **orkiestracja** (`/api/orchestrate`) — `models.default`,
-- **poszczególni agenci** — `routing.agent_models`.
+- **poszczególni agenci** — `routing.agent_models` (wpis `auto` znaczy „wybierz sam"
+  i nie jest identyfikatorem modelu),
+- **modele preferowane przez reguły** — `routing.rules[].prefer`,
+- **modele ZAPASOWE** — całe łańcuchy `fallback`, rekurencyjnie.
 
 Na dostarczonej konfiguracji to nie jest teoria. Czat działa na lokalnej Ollamie, a orkiestracja
 i wszyscy agenci wskazują na serwery vLLM, których na świeżej maszynie nikt nie uruchomił:
@@ -116,6 +119,33 @@ konfiguracji zdaniem „ostrzeżeń: 1" — obraz prawdziwy co do litery, a myl�
 Ustalenia są grupowane **po modelu**, nie po roli: siedmiu agentów wskazujących ten sam model
 daje jeden wpis z listą ról. Silnik jest pytany **raz na endpoint**, nawet gdy korzysta z niego
 kilka modeli.
+
+### Modele zapasowe: ostrzeżenie, nie blokada
+
+Model zapasowy przejmuje ruch, gdy główny padnie — więc diagnoza, która o nim milczy, milczy
+o ratunku. Łańcuch przechodzimy tak samo jak router: rekurencyjnie (zapas zapasu też jest
+osiągalny), z ochroną przed cyklem, i tylko gdy `routing.fallbacks_enabled`.
+
+```
+[!!] model-zapasowy-u-dostawcy: Silnik odpowiada, ale NIE MA modelu 'nie-ma-takiego'
+     (zapasowy dla 'glowny'). Dostępne: husarz:latest, qwen2.5-coder:7b.
+[??] model-ostatnia-deska-u-dostawcy: Silnik pod http://localhost:9999/v1 nie odpowiedział
+     — nie wiadomo, czy model 'cokolwiek' (zapasowy dla 'zapasowy') jest dostępny.
+[ok] model-glowny-u-dostawcy: Model 'husarz' (orkiestracja, tryb czatu) jest dostępny.
+
+Podsumowanie — ostrzeżeń: 1; kontroli NIE DAŁO SIĘ wykonać: 1.
+```
+
+Model pełniący **wyłącznie** rolę zapasową dostaje **ostrzeżenie**, nie problem blokujący —
+jego awaria nie przerywa pracy dzisiaj. Ma to skutek praktyczny: `husarz doctor` zwraca kod 1
+tylko przy problemie blokującym, a komenda nadaje się do skryptu startowego, więc zepsuty
+zapas nie zatrzyma uruchomienia działającej instalacji. Model wskazany **i** jako zapasowy,
+**i** w roli głównej pozostaje blokujący.
+
+!!! note "Czego diagnoza NIE obejmuje"
+    Modeli wybieranych wyłącznie przez **dopasowanie tagów** (punkt 4 w `select_candidates`).
+    Ten warunek spełnia w praktyce dowolny włączony model z pasującym tagiem, więc diagnoza
+    objęłaby cały rejestr — łącznie z modelami, które operator trzyma świadomie nieużywane.
 
 !!! warning "Diagnoza NIE jest obejściem bramki egress"
     Sondowanie endpointu to połączenie wychodzące, więc przechodzi tę samą kontrolę co ruch
