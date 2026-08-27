@@ -331,8 +331,13 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
     i `routing.agent_models` (agenci). Grupowanie po modelu, silnik pytany raz na endpoint.
     Na dostarczonej konfiguracji ujawnia, że orkiestracja i wszystkich 7 agentów jest martwych,
     choć czat działa.
-  - ⬜ Opcjonalna sonda `--probe`, która NAPRAWDĘ pyta model (jedyna kontrola skutku, nie
-    deklaracji katalogu). Ma skutki uboczne: ładuje wagi do pamięci — stąd opt-in.
+  - ✅ Opcjonalna sonda `--probe`, która NAPRAWDĘ pyta model (jedyna kontrola skutku, nie
+    deklaracji katalogu). Opt-in jest STRUKTURALNY: osobny protokół `SondaGleboka`, więc bez
+    przekazanego obiektu diagnoza nie ma czym zapytać. Używa `build_client` z routera (ta sama
+    droga, co czat: pin IP, `api_key_ref`, bramka egress), ale NIE `ModelRouter` — fallbacki
+    dałyby odpowiedź z innego modelu. 12 kategorii przyczyny, każda z własną naprawą.
+    ŚWIADOMIE poza `GET /api/doctor` (wczytywanie wag na żądanie HTTP = dźwignia zasobowa).
+    Docs: `docs/LAUNCHER.md`, ADR-0024, notatka w `docs/BEZPIECZENSTWO.md` (17i).
   - ⬜ Pobranie silnika i wag z ekranem zgody podającym liczbę GB PRZED pobraniem, wąską
     allowlistą `bootstrap.sources` (osobną od `security.egress.allowlist`, żeby nie otwierać
     domeny narzędziu `web`) i degradacją do trybu offline w profilu `airgap`.
@@ -347,6 +352,17 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ⬜ **Brak limitu tempa dla `GET /api/doctor`** — każde wywołanie sonduje endpointy.
   Uprawnienie mają tylko admin i operator, którzy dysponują kosztowniejszym `/api/chat`,
   więc nie jest to nowa dźwignia; zapisane, żeby nie udawać, że limit istnieje.
+- ⬜ **Modele wskazywane wyłącznie jako `fallback` nie są w ogóle diagnozowane** —
+  `_role_modeli` mapuje czat, orkiestrację i `routing.agent_models`, a łańcuch `fallback`
+  pomija. Dotyczy to obu poziomów kontroli (katalogu i sondy głębokiej), więc model, który
+  przejmuje ruch po awarii głównego, jest tym, o którym diagnoza nie mówi NIC. Stan sprzed
+  sondy głębokiej, zauważony przy jej przeglądzie.
+- ⬜ **Sonda głęboka w konsoli WWW** — wymaga limitu tempa dla `GET /api/doctor` i osobnej
+  zgody w konfiguracji (`diagnostics.allow_probe`), bo wczytywanie wag na żądanie HTTP jest
+  dźwignią zasobową. Dziś nie ma ani jednego, ani drugiego — stąd świadoma decyzja z ADR-0024.
+- ⬜ **Sonda pyta o odpowiedź, nie o jej jakość** — „odpowiedział" znaczy tyle, że backend
+  zwrócił niepustą treść w formacie OpenAI. Model odpowiadający bez sensu przejdzie kontrolę.
+  Sensowna kontrola jakości wymagałaby ewaluacji, czyli innego narzędzia (`husarz eval`).
 - ⬜ **Rozbieżność wersji Bielika w repo** (wskazana przy rozpoznaniu przestrzeni awarii,
   potwierdzona): `config/models.yaml` ma `bielik-11b-v3.0-instruct`, a `ollama/Husarz.Modelfile`
   rekomenduje `SpeakLeash/bielik-11b-v2.3-instruct`. Której wersji dotyczy prawda — nie da się

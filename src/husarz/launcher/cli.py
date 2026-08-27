@@ -337,6 +337,32 @@ class _SchemeSecrets:
         return EnvSecretsProvider().resolve(ref)
 
 
+def _dodatnie_sekundy(wartosc: str) -> int:
+    """Waliduje limit czasu podany w CLI: liczba całkowita >= 1.
+
+    Bez tego `--probe-timeout 0` (albo wartość ujemna) trafiał do `model_copy`, które
+    OMIJA walidację schematu (`ge=1`), i sonda przerywała każde żądanie natychmiast —
+    diagnozując sprawny silnik jako awarię. Narzędzie pomiarowe musi odmówić pomiaru,
+    którego nie da się wykonać, zamiast zmyślać wynik.
+
+    Args:
+        wartosc: Surowy argument z wiersza poleceń.
+
+    Returns:
+        Liczba sekund.
+
+    Raises:
+        argparse.ArgumentTypeError: Gdy wartość nie jest liczbą całkowitą >= 1.
+    """
+    try:
+        sekundy = int(wartosc)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{wartosc}' nie jest liczbą całkowitą sekund.") from None
+    if sekundy < 1:
+        raise argparse.ArgumentTypeError(f"limit musi wynosić co najmniej 1 s (podano {sekundy}).")
+    return sekundy
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     """Diagnoza instalacji: co jest nie tak i co z tym zrobić.
 
@@ -344,8 +370,14 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     startowego. Stan NIEZNANY nie jest błędem, ale też NIE jest sukcesem: kończy się kodem 0
     z jawnym komunikatem, że części kontroli nie dało się wykonać.
 
+    Flaga ``--probe`` włącza sondę GŁĘBOKĄ: każdy model potwierdzony w katalogu dostaje
+    prawdziwe żądanie uzupełnienia. To jedyna kontrola SKUTKU — reszta sprawdza deklarację
+    („silnik wymienia ten model"). Jest opcjonalna, bo ma skutki uboczne: pierwsze żądanie
+    wczytuje wagi do pamięci i potrafi trwać minuty.
+
     Args:
-        args: Argumenty CLI (``--config``, ``--host``, ``--port``).
+        args: Argumenty CLI (``--config``, ``--host``, ``--port``, ``--probe``,
+            ``--probe-timeout``).
 
     Returns:
         Kod wyjścia procesu.
@@ -371,7 +403,43 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         )
         return 1
 
-    ustalenia = zdiagnozuj(config, sonda=SondaSystemowa(config), host=args.host, port=args.port)
+    # Dostawca sekretów jest potrzebny WYŁĄCZNIE sondzie głębokiej (rozwiązanie
+    # `api_key_ref` modelu). Kontrola katalogu go nie używa.
+    #
+    # `magazyn_dostepny` przekazujemy JAWNIE, tak jak robi to `_build_git`. Domyślne `True`
+    # obchodziłoby kill-switch `security.secret_store.enabled`: operator, który wyłączył
+    # magazyn po incydencie, oczekuje, że przestanie on wydawać materiał — także diagnozie.
+    if args.probe:
+        global _SEKRETY  # noqa: PLW0603 - korzeń kompozycji, uzasadnienie przy deklaracji
+        try:
+            _SEKRETY = _zbuduj_magazyn_sekretow(config)
+        except ConfigError as exc:
+            # Magazyn niedostępny NIE MOŻE przerwać diagnozy — narzędzie ma diagnozować,
+            # nie odmawiać. Mówimy o tym wprost; referencje `husarz:` zgłoszą się same
+            # jako `brak-sekretu`.
+            print(f"[??] magazyn sekretów niedostępny: {exc}", file=sys.stderr, flush=True)
+    sonda = SondaSystemowa(
+        config,
+        timeout_zapytania=args.probe_timeout,
+        secrets=_SchemeSecrets(magazyn_dostepny=config.security.secret_store.enabled),
+        postep=lambda mid: print(f"  … pytam model '{mid}'", flush=True),
+    )
+    if args.probe:
+        print(
+            f"Sonda głęboka włączona — każdy model potwierdzony w katalogu dostanie realne "
+            f"żądanie (limit CO NAJMNIEJ {args.probe_timeout} s; model z wyższym "
+            f"`request_timeout_seconds` dostanie tyle, ile ma w konfiguracji). "
+            f"Pierwsze żądanie wczytuje wagi i może potrwać.",
+            flush=True,
+        )
+    ustalenia = zdiagnozuj(
+        config,
+        sonda=sonda,
+        host=args.host,
+        port=args.port,
+        # Opt-in STRUKTURALNY: bez tego obiektu diagnoza nie ma czym zapytać modelu.
+        sonda_gleboka=sonda if args.probe else None,
+    )
     for linia in sformatuj(ustalenia):
         print(linia, flush=True)
     blokujace = [u for u in ustalenia if u.stan is Stan.PROBLEM and u.waga is Waga.BLOKUJACA]
@@ -436,7 +504,17 @@ def _cmd_up(args: argparse.Namespace) -> int:
         # Router budowany z aktualnej konfiguracji — po nadpisaniu runtime router
         # i orkiestrator są przebudowywane (create_app), więc /api/orchestrate i
         # /api/chat używają NOWYCH ustawień (nie starych).
-        return ModelRouter(cfg)
+        #
+        # `secrets` przekazujemy JAWNIE. Bez tego `ModelRouter` podstawiał
+        # `NullSecretsProvider`, więc KAŻDY model z `api_key_ref` (model za bramą API,
+        # zdalny vLLM z tokenem) był w produkcji nieużywalny: `build_client` zgłaszał
+        # „Nie udało się rozwiązać sekretu klucza API" i żądanie nie wychodziło. Wada
+        # istniała, zanim powstała sonda głęboka — ujawniła ją dopiero ona, bo sonda
+        # rozwiązywała klucz i meldowała OK dla drogi, której router nie potrafił przejść.
+        # Dostarczona konfiguracja nie używa `api_key_ref`, więc nic tego nie wywoływało.
+        return ModelRouter(
+            cfg, secrets=_SchemeSecrets(magazyn_dostepny=cfg.security.secret_store.enabled)
+        )
 
     # TrustedHost tylko dla loopbacku (obrona przed DNS-rebindingiem na localhost).
     trusted = ["localhost", "127.0.0.1"] if _is_loopback(args.host) else None
@@ -710,6 +788,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--host", default="127.0.0.1", help="Adres nasłuchu (do wykrycia kolizji portu)."
     )
     p_doctor.add_argument("--port", type=int, default=8000, help="Port jw.")
+    p_doctor.add_argument(
+        "--probe",
+        action="store_true",
+        help=(
+            "Zadaj modelom PRAWDZIWE pytanie zamiast sprawdzać sam katalog. Kontrola skutku, "
+            "nie deklaracji — ale wczytuje wagi do pamięci i potrafi trwać minuty."
+        ),
+    )
+    p_doctor.add_argument(
+        "--probe-timeout",
+        type=_dodatnie_sekundy,
+        default=60,
+        help=(
+            "Sekundy na odpowiedź modelu w sondzie głębokiej (domyślnie 60). Pierwsze żądanie "
+            "wczytuje wagi, więc bywa o rząd wielkości wolniejsze od kolejnych."
+        ),
+    )
     p_doctor.set_defaults(func=_cmd_doctor)
 
     p_version = sub.add_parser("version", help="Wypisz wersję.")

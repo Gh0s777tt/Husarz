@@ -149,8 +149,68 @@ zawiódł` jest dokładnie tym zdaniem, dla którego diagnoza powstała.
 
 !!! note "Czego `doctor` NIE robi"
     Niczego nie pobiera i nie instaluje. Podaje polecenie do świadomego uruchomienia przez
-    operatora. Nie wysyła też żądania do modelu (nie ładuje wag) — sprawdza katalog silnika,
-    nie jego zdolność do odpowiedzi.
+    operatora. **Bez flagi `--probe` nie wysyła też żądania do modelu** (nie ładuje wag) —
+    sprawdza katalog silnika, nie jego zdolność do odpowiedzi. Z flagą — patrz niżej.
+
+### `--probe`: jedyna kontrola SKUTKU
+
+Wszystko powyżej sprawdza **deklarację**: czy silnik wymienia model w swoim katalogu.
+To za mało, i nie jest to teoria. Realny przypadek, odtworzony na działającej instalacji —
+endpoint bez przyrostka `/v1`:
+
+```
+[ok] model-bez-v1-u-dostawcy: Model 'husarz' (orkiestracja, tryb czatu) jest dostępny
+     pod http://localhost:11434.
+```
+
+Katalog się zgadza (`/api/tags` odpowiada), a czat zwraca 502, bo `POST /chat/completions`
+daje 404. Kontrola katalogu **nie może** tego zobaczyć, bo pyta o co innego.
+
+```bash
+husarz doctor --config ./config --probe
+```
+
+```
+Sonda głęboka włączona — każdy model potwierdzony w katalogu dostanie realne żądanie
+(limit CO NAJMNIEJ 60 s; model z wyższym `request_timeout_seconds` dostanie tyle, ile ma
+w konfiguracji). Pierwsze żądanie wczytuje wagi i może potrwać.
+  … pytam model 'husarz-local'
+[!!] model-bez-v1-odpowiada: Silnik wymienia model 'husarz' (...), ale NIE odpowiedział
+     na żądanie (nie-znaleziono).
+     → Endpoint odpowiedział 404 na `/chat/completions`. Najczęściej `endpoint` wskazuje
+       na bazę BEZ `/v1` albo na serwer, który wystawia sam katalog modeli.
+[ok] model-husarz-local-odpowiada: Model 'husarz' (tryb czatu) ODPOWIEDZIAŁ po 8.7 s:
+     „Pong! Jak mogę Ci pomóc dzisiaj?".
+```
+
+**Dlaczego opt-in.** Pierwsze żądanie wczytuje wagi. Zmierzone na modelu 7B: **18,9 s przy
+zimnym starcie, 0,9 s zaraz potem** — różnica dwudziestokrotna. Dlatego domyślny limit to
+60 s, a `--probe-timeout` pozwala go podnieść (wartość musi być liczbą całkowitą ≥ 1).
+
+**Czego sonda NIE zrobi:**
+
+| Sytuacja | Zachowanie |
+|---|---|
+| model nieobecny w katalogu, silnik milczy, egress zabrania | nie jest pytany (żądanie skazane na porażkę) |
+| model `enabled: false` | nie jest pytany — to byłoby sprzeczne z ustaleniem obok |
+| `backend: mock` | **pomijany**; `MockClient` odpowiada z pamięci, więc „OK" nic by nie znaczyło |
+| endpoint nieosiągalny przez API | sonda głęboka **nie jest wystawiona** przez `GET /api/doctor` |
+
+**Odpowiedź szybka ≠ odpowiedź na czas.** Sonda jest cierpliwsza od routera, więc porównuje
+zmierzony czas z limitem, którego użyje czat — a gdy `request_timeout_seconds` nie jest
+ustawione, z **domyślnymi 60 s klienta**, nie z niczym. Model odpowiadający po 90 s dostaje
+problem blokujący, nie „OK": w czacie jego żądanie zostanie przerwane.
+
+!!! warning "Sonda głęboka wysyła prawdziwe żądania"
+    Przechodzi tę samą drogę, co czat: ten sam klient, ten sam pin IP (ADR-0020), to samo
+    rozwiązywanie `api_key_ref`, ta sama bramka egress. To celowe — sonda ma sprawdzać drogę,
+    która realnie zawodzi, a nie „prostszą", której nikt nie używa. Kill-switch
+    `security.secret_store.enabled` obowiązuje ją tak samo jak resztę systemu.
+
+    Świadomie **nie** używa `ModelRouter`: router ma fallbacki, więc przy modelu, który nie
+    odpowiada, dostalibyśmy odpowiedź z INNEGO modelu i uznali ją za dowód sprawności tego.
+
+    Decyzje i uzasadnienia: [ADR-0024](adr/0024-sonda-gleboka-diagnozy.md).
 
 ## Zachowanie
 

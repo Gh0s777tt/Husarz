@@ -5,6 +5,82 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 12d — `husarz doctor --probe`: jedyna kontrola SKUTKU)
+
+- **Sonda głęboka.** Dotąd diagnoza pytała silnik, czy WYMIENIA model w katalogu — to
+  deklaracja. `husarz doctor --probe` wysyła do modelu prawdziwe żądanie uzupełnienia.
+  Realny przypadek, który kontrola katalogu przepuszczała: endpoint bez `/v1` odpowiada na
+  `GET /api/tags` (więc katalog się zgadza), ale `POST /chat/completions` daje 404 i czat
+  zwraca 502. Sonda to wyłapuje i podaje przyczynę.
+- **Opt-in STRUKTURALNY, nie flaga.** Sonda to osobny protokół (`SondaGleboka`) — bez
+  przekazanego obiektu diagnoza nie ma czym zapytać modelu. Flaga logiczna działałaby tylko
+  dopóty, dopóki nikt jej nie przeoczy, a kontrola ma skutki uboczne: wczytuje wagi do
+  pamięci. Zmierzone na modelu 7B: **18,9 s przy zimnym starcie, 0,9 s zaraz potem**.
+- **Ta sama droga, co czat.** Sonda używa `build_client` z routera: ten sam klient, ten sam
+  pin IP (ADR-0020), to samo rozwiązywanie `api_key_ref`, ta sama bramka egress. Świadomie
+  NIE używa `ModelRouter` — router ma fallbacki, więc przy modelu, który nie odpowiada,
+  dostalibyśmy odpowiedź z INNEGO modelu i uznali ją za dowód sprawności tego.
+- **Dwanaście kategorii przyczyny**, każda z własną instrukcją naprawy: timeout,
+  uwierzytelnienie, brak endpointu, błąd silnika, rozwiązanie nazwy (pin IP), zła odpowiedź,
+  brak sekretu, egress, budżet sondy i inne. Komunikat transportu jest celowo generyczny, więc
+  diagnoza sięga po przyczynę przez `__cause__` — ale **nigdy nie przepisuje jej treści**
+  do wyjścia, tylko mapuje na kategorię.
+- `--probe-timeout` (domyślnie 60 s, wartość ≥ 1). Limit sondy nigdy nie jest NIŻSZY od
+  produkcyjnego: model z `request_timeout_seconds: 120` dostaje 120 s, choćby flaga mówiła 60.
+- Ślad postępu podczas sondowania — narzędzie do diagnozowania zawieszeń nie może samo
+  wyglądać na zawieszone.
+- **Sonda głęboka jest ŚWIADOMIE poza `GET /api/doctor`** — wczytywanie wag na żądanie HTTP
+  byłoby dźwignią do wyczerpania zasobów. Niezmiennik ma test SKUTKU, nie deklarację w docs.
+  Decyzje: [ADR-0024](docs/adr/0024-sonda-gleboka-diagnozy.md).
+
+### Poprawione (Etap 12d — 13 wad z przeglądu adwersaryjnego, wszystkie w kodzie tej zmiany)
+
+Cztery niezależne perspektywy, każde zgłoszenie weryfikowane przez agenta mającego je OBALIĆ.
+**Z 36 zgłoszeń 33 potwierdzono uruchomieniem, 3 obalono** — po odjęciu duplikatów 13 wad,
+wszystkie przy komplecie zielonych testów. Pełny opis: `docs/BEZPIECZENSTWO.md`, sekcja 17i.
+
+- **Fałszywe OK dla modelu wolniejszego, niż czat czeka.** Kontrola porównywała czas
+  z `request_timeout_seconds`, a to pole jest `None` w KAŻDYM modelu dostarczonej
+  konfiguracji — i `None` nie znaczy „bez limitu", tylko `DEFAULT_TIMEOUT_SECONDS = 60`.
+  Warunek nie odpalał się nigdy, a droga do fałszywego OK prowadziła przez radę SAMEGO
+  narzędzia („powtórz z dłuższym `--probe-timeout`").
+- **Wstrzyknięcie ANSI z odpowiedzi modelu.** Treść modelu szła na terminal po samym
+  spłaszczeniu białych znaków, a `\x1b[2J\x1b[H` białych znaków nie zawiera — model mógł
+  wyczyścić ekran i domalować własne „[ok] wszystkie kontrole przeszły" nad wypisanymi
+  problemami. Usuwamy znaki kategorii Unicode `C*`.
+- **`backend: mock` dawał „ODPOWIEDZIAŁ" w kilka mikrosekund** — czyli jedyna kontrola skutku
+  nie sprawdzała żadnego skutku. Mock jest pomijany ze stanem NIEZNANY i wyjaśnieniem.
+- **Blokada anty-SSRF raportowana jako „zły format odpowiedzi"** — `EgressError` nie jest
+  wyjątkiem httpx, więc wpadał do złej kategorii i operator dostawał radę o zgodności
+  z OpenAI zamiast o DNS.
+- **`--probe-timeout` bez walidacji**: `model_copy(update=...)` OMIJA `ge=1` ze schematu, więc
+  `0` docierało do klienta i diagnozowało sprawny silnik jako awarię.
+- **Sonda obcinała limit PONIŻEJ produkcyjnego** — fałszywy timeout dla modelu, na który
+  router by poczekał.
+- **Opis mówił „silnik nie odpowiedział" tam, gdzie nic nie wysłano** (egress, brak sekretu,
+  brak endpointu) — ta sama klasa błędu, którą naprawiono wcześniej dla kontroli katalogu.
+- **Sonda strzelała do modelu `enabled: false`**, obok ustalenia, że jest wyłączony.
+- **Pusta odpowiedź przy `finish_reason: length` obwiniana na model** — to skutek NASZEGO
+  limitu 32 tokenów sondy, więc stan NIEZNANY z wyjaśnieniem, nie problem blokujący.
+- **Nieoczekiwany wyjątek z `build_client` wywracał CAŁĄ diagnozę.** Komentarz „jedyny powód,
+  dla którego build_client zawodzi" był nieuprawniony — fabryka woła kod dostawcy sekretów.
+- **Kill-switch `security.secret_store.enabled` obchodzony przez sondę** (domyślne
+  `magazyn_dostepny=True`).
+- **Brak endpointu kategoryzowany jako „404 z endpointu"** — instrukcja twierdziła, że
+  endpoint odpowiedział, choć nic nie wysłano.
+- **`docs/LAUNCHER.md` twierdził nieprawdę** („nie wysyła żądania do modelu") — sprostowane.
+
+### Poprawione (Etap 12d — wada SPRZED tej zmiany, ujawniona przez sondę)
+
+- **Router w `husarz up` nie potrafił rozwiązać `api_key_ref` ŻADNEGO modelu.**
+  `_router_factory` budował `ModelRouter(cfg)` bez dostawcy sekretów, więc router dostawał
+  `NullSecretsProvider` i `build_client` zgłaszał „Nie udało się rozwiązać sekretu klucza API".
+  Każdy model za bramą API (zdalny vLLM z tokenem, usługa komercyjna) był w produkcji
+  nieużywalny. Dostarczona konfiguracja nie używa `api_key_ref`, więc nic tego nie wywoływało.
+  Ujawniła to sonda: rozwiązywała klucz i meldowała OK dla drogi, której router nie potrafił
+  przejść — fałszywe OK wynikające z tego, że narzędzie pomiarowe było SPRAWNIEJSZE od
+  mierzonego systemu. Test regresyjny: `test_up_przekazuje_sekrety_do_routera`.
+
 ### Dodane (Etap 12c — diagnoza w konsoli: `GET /api/doctor` + zakładka Diagnoza)
 
 - **`GET /api/doctor`** — ta sama funkcja, którą wykonuje `husarz doctor`, wystawiona przez

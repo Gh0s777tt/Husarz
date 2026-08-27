@@ -147,7 +147,10 @@ bez egressu. Szczegóły: [ollama/README.md](ollama/README.md), [docs/API.md](do
 **Coś nie działa?** Zakładka **Diagnoza** w konsoli (albo `python -m husarz.launcher.cli doctor`
 w terminalu — to ta sama funkcja) wymienia, który model, katalog albo port jest problemem
 i co z tym zrobić. Sprawdza cały łańcuch: czat, orkiestrację i każdego agenta osobno.
-Szczegóły: [docs/LAUNCHER.md](docs/LAUNCHER.md).
+
+Jeśli diagnoza mówi, że wszystko jest, a czat i tak zawodzi — dodaj `--probe`. Wtedy zamiast
+sprawdzać katalog silnika, zadaje modelom **prawdziwe pytanie**. Wczytuje wagi, więc trwa;
+dlatego jest opcjonalna. Szczegóły: [docs/LAUNCHER.md](docs/LAUNCHER.md).
 
 ## Konfiguracja
 

@@ -143,3 +143,67 @@ def test_szczegol_w_dzienniku_to_same_liczby(repo_config_dir: Path) -> None:
     detail = next(e for e in audyt.entries if e.action == "doctor").detail
     assert set(detail) == {"blocking", "warnings", "unknown"}, detail
     assert all(isinstance(v, int) for v in detail.values()), detail
+
+
+# ------------------------------------------- sonda głęboka NIE jest wystawiona przez HTTP
+
+
+class _SondaZObiemaRolami:
+    """Sonda katalogu, która POTWIERDZA obecność modeli i zapisuje pytania głębokie.
+
+    Potwierdzenie jest tu warunkiem sensowności testu, nie ozdobą. Pierwsza wersja używała
+    zwykłej `_SondaCicha` i mutacja wystawiająca sondę głęboką przez API **nie zaczerwieniła
+    testu**: w środowisku testowym DNS jest zablokowany, więc każda kontrola katalogu kończyła
+    się stanem NIEZNANY, a sonda głęboka nie była w ogóle osiągana. Test nie mógł niczego
+    wykryć — przechodził z niewłaściwego powodu.
+    """
+
+    def __init__(self) -> None:
+        self.zapytane: list[str] = []
+
+    def powod_odmowy_sondowania(self, endpoint: str) -> str | None:
+        """Wolno pytać."""
+        return None
+
+    def modele_u_dostawcy(self, endpoint: str) -> list[str] | None:
+        """Potwierdza KAŻDY model z dostarczonej konfiguracji — kontrola katalogu kończy się OK."""
+        return ["husarz", "glm-5.2", "hermes-3", "bielik-11b-v3.0-instruct"]
+
+    def czy_zapisywalny(self, katalog: Path) -> bool | None:
+        """Katalogi w porządku."""
+        return True
+
+    def zapytaj_model(self, model_id: str, spec: object) -> object:
+        """Zapisuje, że ktoś zadał modelowi PRAWDZIWE pytanie. Nie powinno się zdarzyć."""
+        self.zapytane.append(model_id)
+        raise AssertionError("endpoint API zapytał model — sonda głęboka wyciekła do HTTP")
+
+
+def test_endpoint_API_NIE_zadaje_pytania_modelowi(repo_config_dir: Path) -> None:
+    """Sonda głęboka (`husarz doctor --probe`) jest ŚWIADOMIE poza API.
+
+    Zapytanie modelu wczytuje wagi do pamięci i potrafi trwać minuty (zmierzone na realnej
+    instalacji: 18,9 s przy zimnym starcie modelu 7B, 0,9 s zaraz potem). Wystawienie tego
+    przez HTTP bez limitu tempa byłoby dźwignią do wyczerpania zasobów, a odpowiedź i tak
+    musiałaby czekać na wagi. Diagnoza przez API zostaje przy kontroli katalogu; głęboka
+    jest operacją terminala.
+
+    Test sprawdza SKUTEK: sonda potwierdza obecność modeli, więc gdyby endpoint przekazał ją
+    jako `sonda_gleboka`, pytanie POLECIAŁOBY i test by padł.
+    """
+    sonda = _SondaZObiemaRolami()
+    app = create_app(
+        load_config(repo_config_dir),
+        config_dir=repo_config_dir,
+        audit=AuditLog(),
+        doctor_probe=sonda,
+    )
+
+    odp = TestClient(app).get("/api/doctor")
+
+    assert odp.status_code == 200
+    stany = {u["id"]: u["state"] for u in odp.json()["findings"]}
+    assert any(
+        s == "ok" for s in stany.values()
+    ), f"test byłby pusty: żadna kontrola katalogu nie przeszła — {stany}"
+    assert sonda.zapytane == [], "endpoint API zapytał model"

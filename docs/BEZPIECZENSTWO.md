@@ -2026,3 +2026,127 @@ zaczerwieniła swoje testy. Skrypt sam przywracał oryginał i kończył asercj�
 3. **Tabela w konsoli nie odróżnia problemu blokującego od ostrzeżenia** (oba jako ✕), tak samo
    jak CLI (oba jako `[!!]`). Rozróżnienie niesie nagłówek z licznikami. Pole `severity` jest
    w odpowiedzi API, więc zmiana wymaga poprawienia OBU nośników naraz — zapisane w ROADMAP.
+
+## Etap 17i — sonda głęboka diagnozy (`husarz doctor --probe`)
+
+Notatka weryfikacyjna. Zmiana dokłada **nową drogę wychodzącą** wyzwalaną poleceniem
+operatora, dotyka rozwiązywania sekretów i wpuszcza treść od modelu do wyjścia narzędzia —
+trzeci poziom audytu wg tabeli w `CLAUDE.md`.
+
+### Bilans przeglądu adwersaryjnego
+
+Cztery niezależne perspektywy (poprawność, bezpieczeństwo, przestrzeń awarii, spójność),
+każde zgłoszenie weryfikowane osobno przez agenta, którego zadaniem było je **obalić**.
+**Z 36 zgłoszeń 33 potwierdzono uruchomieniem, 3 obalono.** Po odjęciu duplikatów między
+perspektywami zostało **13 odrębnych wad** — wszystkie w kodzie, który przed chwilą
+napisałem i uznałem za sprawdzony, przy komplecie zielonych testów.
+
+Jeden werdykt sprostował samo zgłoszenie: scenariusz podany jako „odtworzone" był zmyślony
+(2 s odpowiedzi przy limicie 60 s to NIE jest naruszenie), choć teza okazała się prawdziwa
+z innego powodu. Potwierdza to zasadę z `CLAUDE.md`: nie przyjmować na wiarę ANI zgłoszenia,
+ANI jego obalenia — każde sprawdziłem własnym uruchomieniem.
+
+### Wady, które naprawiono
+
+**1. Fałszywe OK dla modelu odpowiadającego dłużej, niż czat czeka (krytyczna).**
+Kontrola porównywała czas z `spec.request_timeout_seconds`. To pole jest `None` w **każdym**
+modelu dostarczonej konfiguracji, a `None` NIE znaczy „bez limitu": klient podstawia
+`DEFAULT_TIMEOUT_SECONDS = 60`. Warunek nie odpalał się więc nigdy. Droga do fałszywego OK
+prowadziła przez radę **samego narzędzia**: po pierwszym „timeout" operator podnosił
+`--probe-timeout`, a wtedy model odpowiadający po 200 s dostawał czyste „OK" — mimo że czat
+przerywa go po 60. Naprawione: porównanie z limitem EFEKTYWNYM, a komunikat mówi, skąd ten
+limit pochodzi.
+
+**2. Blokada anty-SSRF raportowana jako „zły format odpowiedzi" (poważna).**
+`EgressError` z pinowania IP (ADR-0020) nie jest wyjątkiem `httpx`, więc wpadał do kategorii
+„zła odpowiedź". Operator dostawał radę o zgodności z OpenAI, gdy naprawdę nazwa wskazała
+zakres zabroniony albo DNS nie odpowiedział — i żądanie w ogóle nie opuściło maszyny. Nowa
+kategoria `rozwiazanie-nazwy` z własną instrukcją.
+
+**3. Wstrzyknięcie sekwencji ANSI z odpowiedzi modelu (poważna).**
+Treść modelu trafiała do terminala po samym spłaszczeniu białych znaków — a `\x1b[2J\x1b[H`
+nie zawiera białych znaków. Model mógł wyczyścić ekran i domalować własne „[ok] wszystkie
+kontrole przeszły" nad wypisanymi wcześniej problemami. Diagnoza bezpieczeństwa, której
+wyjście da się przemalować, jest gorsza niż jej brak. Naprawione: usuwamy wszystkie znaki
+kategorii Unicode `C*`.
+
+**4. `backend: mock` dawał „ODPOWIEDZIAŁ" w kilka mikrosekund (poważna).**
+`MockClient` odpowiada z pamięci, bez sieci i bez modelu — więc JEDYNA kontrola skutku
+w całej diagnozie nie sprawdzała żadnego skutku. Fałszywe OK w mechanizmie stworzonym po to,
+żeby fałszywe OK wykrywać. Model `mock` jest teraz pomijany ze stanem NIEZNANY i wyjaśnieniem.
+
+**5. Sonda strzelała do modelu `enabled: false`** — obok ustalenia, że jest wyłączony.
+
+**6. `--probe-timeout` bez walidacji (poważna).** `model_copy(update=...)` **omija** walidację
+schematu (`ge=1`), więc `0` i wartości ujemne docierały do klienta i przerywały każde żądanie
+natychmiast, diagnozując sprawny silnik jako awarię. Walidacja przeniesiona do argparse.
+
+**7. Sonda obcinała limit PONIŻEJ produkcyjnego (poważna).** Model z
+`request_timeout_seconds: 120` sondowany domyślnymi 60 s dostawał fałszywy timeout, choć
+router by poczekał. Teraz limit sondy to `max(--probe-timeout, limit modelu)`.
+
+**8. Opis mówił „silnik nie odpowiedział" tam, gdzie nic nie wysłano** (egress, brak sekretu,
+brak endpointu) — ta sama klasa błędu, którą naprawiono wcześniej dla kontroli katalogu.
+
+**9. Pusta odpowiedź przy `finish_reason: length` obwiniana na model.** To skutek NASZEGO
+limitu 32 tokenów sondy (model rozumujący zużywa go na preambułę), więc stan NIEZNANY
+z wyjaśnieniem, nie problem blokujący.
+
+**10. Nieoczekiwany wyjątek z `build_client` wywracał CAŁĄ diagnozę.** Komentarz „jedyny
+powód, dla którego build_client zawodzi" był nieuprawniony — fabryka woła kod dostawcy
+sekretów, a ten może zgłosić cokolwiek. Sprostowane i osłonięte.
+
+**11. Kill-switch `security.secret_store.enabled` obchodzony przez sondę** — domyślne
+`magazyn_dostepny=True` sprawiało, że diagnoza wydawałaby materiał z magazynu wyłączonego
+po incydencie. Przekazywane jawnie, jak w `_build_git`.
+
+**12. Brak endpointu kategoryzowany jako „404 z endpointu"** — instrukcja twierdziła, że
+endpoint odpowiedział, choć nic nie wysłano. Własna kategoria.
+
+**13. Brak śladu postępu** — narzędzie do diagnozowania zawieszeń samo milczało
+kilkadziesiąt sekund na model.
+
+### Wada SPRZED tej zmiany, którą sonda ujawniła
+
+`_router_factory` w `husarz up` budował `ModelRouter(cfg)` **bez dostawcy sekretów**, więc
+router dostawał `NullSecretsProvider`. Skutek: **każdy model z `api_key_ref` był w produkcji
+nieużywalny** — `build_client` zgłaszał „Nie udało się rozwiązać sekretu klucza API" i żądanie
+nie wychodziło. Dostarczona konfiguracja nie używa `api_key_ref`, więc nic tego nie wywoływało
+i wada leżała niezauważona.
+
+Ujawniła ją dopiero sonda: rozwiązywała klucz (bo dostała dostawcę) i meldowała OK dla drogi,
+której router nie potrafił przejść — czyli fałszywe OK wynikające z tego, że narzędzie
+pomiarowe było SPRAWNIEJSZE od mierzonego systemu. Naprawione razem z regresyjnym testem
+`test_up_przekazuje_sekrety_do_routera`.
+
+### Niezmienniki potwierdzone testem SKUTKU
+
+| Niezmiennik | Test |
+|---|---|
+| `GET /api/doctor` NIGDY nie pyta modelu | `test_endpoint_API_NIE_zadaje_pytania_modelowi` |
+| Bez `--probe` diagnoza nie ma czym zapytać (opt-in strukturalny) | `test_doctor_bez_probe_NIE_dostaje_sondy_glebokiej` |
+| Bramka egress obowiązuje publiczną metodę sondy | `test_realna_sonda_NIE_wysyla_do_endpointu_spoza_allowlisty` |
+| Sonda nie mutuje współdzielonej konfiguracji | `test_realna_sonda_nie_mutuje_wspoldzielonej_konfiguracji` |
+| Znaki sterujące z odpowiedzi modelu nie trafiają na terminal | `test_sekwencje_sterujace_z_odpowiedzi_modelu_sa_usuwane` |
+| Kill-switch magazynu sekretów obowiązuje diagnozę | `test_probe_respektuje_kill_switch_magazynu_sekretow` |
+| Router produkcyjny potrafi rozwiązać `api_key_ref` | `test_up_przekazuje_sekrety_do_routera` |
+
+Kontrola nośności: **23 mutacje, 23 czerwone** (w dwóch przebiegach). Dwie mutacje trafiły
+najpierw w niewłaściwe wystąpienie wzorca (linie powtarzalne po sformatowaniu przez `black`
+i trzy identyczne wywołania `_SchemeSecrets`) — po wycelowaniu w jednoznaczne sąsiedztwo
+zaczerwieniły się. Jedna mutacja ujawniła wadę w moim WŁASNYM teście: `test_endpoint_API_NIE_
+zadaje_pytania_modelowi` przechodził z niewłaściwego powodu, bo blokada DNS w `conftest`
+sprawiała, że kontrola katalogu kończyła się stanem NIEZNANY i sonda głęboka nie była
+osiągana. Test przepisany tak, żeby katalog się zgadzał — dopiero wtedy jest nośny.
+
+### Ograniczenia — wprost
+
+1. **Modele wskazywane wyłącznie jako `fallback` nie są sondowane** — `_role_modeli` mapuje
+   czat, orkiestrację i `routing.agent_models`, a łańcuch fallbacków pomija. Dotyczy to także
+   kontroli katalogu (stan sprzed tej zmiany). Zapisane w ROADMAP.
+2. **Sonda pyta o odpowiedź, nie o jej jakość.** „Odpowiedział" znaczy tyle, że backend zwrócił
+   niepustą treść w formacie OpenAI. Model odpowiadający bez sensu przejdzie kontrolę.
+3. **Pomiar czasu jest jednorazowy.** Pierwsze żądanie wczytuje wagi, więc zgłoszony czas bywa
+   o rząd wielkości wyższy od ustalonego. Komunikat naprawy mówi wprost, żeby powtórzyć sondę.
+4. **Sonda głęboka nie jest dostępna w konsoli WWW** — świadomie (ADR-0024). Wymagałaby limitu
+   tempa i osobnej zgody w konfiguracji; dziś nie ma ani jednego, ani drugiego.
