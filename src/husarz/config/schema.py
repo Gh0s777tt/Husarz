@@ -184,11 +184,38 @@ class ModelSpec(_StrictModel):
     vision: bool = False
     context_length: int = 8192
     max_tokens: int | None = None
-    # Ścieżka do lokalnych wag (katalog models/ jest w .gitignore).
-    weights_path: Path | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     fallback: list[str] = Field(default_factory=list)
     enabled: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _odrzuc_usuniete_pola(cls, dane: Any) -> Any:
+        """Tłumaczy usunięte pola na czytelny komunikat zamiast „extra fields not permitted".
+
+        ``weights_path`` istniało w schemacie i **nic go nie czytało** — sprawdzone
+        przeszukaniem całego repozytorium: jedyne wystąpienie było w definicji pola.
+        Wyglądało przy tym, jakby wskazywało silnikowi lokalne wagi, więc operator mógł
+        je ustawić i uwierzyć, że coś z tego wynika. Martwe pole, które udaje działające,
+        jest gorsze niż jego brak.
+
+        Args:
+            dane: Surowe dane wejściowe modelu.
+
+        Returns:
+            Dane bez zmian.
+
+        Raises:
+            ValueError: Gdy konfiguracja używa pola usuniętego.
+        """
+        if isinstance(dane, dict) and "weights_path" in dane:
+            raise ValueError(
+                "models.registry[...].weights_path zostało USUNIĘTE: pole nie było przez "
+                "nic czytane, więc nie miało żadnego wpływu na działanie (mimo nazwy "
+                "sugerującej wskazanie wag). Usuń je z konfiguracji. Skąd silnik bierze "
+                "wagi, decyduje sam silnik — patrz ollama/README.md."
+            )
+        return dane
 
 
 class ModelsConfig(_StrictModel):

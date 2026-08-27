@@ -9,7 +9,11 @@
 #   - qwen2.5-coder:7b   — mocne kodowanie, dobry PL (domyślne),
 #   - qwen2.5-coder:14b  — lepsza jakość, większe wymagania (VRAM/RAM),
 #   - llama3.1:8b        — mocniejszy ogólny czat, słabszy kod,
-#   - SpeakLeash/bielik-11b-v2.3-instruct — najlepszy polski (jeśli dostępny w Ollamie).
+# Bielika NIE MA na tej liście świadomie: sprawdzone odpytaniem rejestru Ollamy —
+# ani `bielik-11b-v3.0-instruct`, ani `SpeakLeash/bielik-11b-v2.3-instruct` nie są
+# tam dostępne, więc `FROM` z taką nazwą po prostu nie zadziała. Jeśli chcesz Bielika,
+# zaimportuj wagi GGUF samodzielnie — patrz komentarz przy modelu `bielik`
+# w config/models.yaml.
 # Po zmianie bazy nie ruszasz kodu — config/models.yaml wskazuje model po nazwie "husarz".
 # ============================================================================
 

@@ -372,12 +372,12 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ⬜ **Sonda pyta o odpowiedź, nie o jej jakość** — „odpowiedział" znaczy tyle, że backend
   zwrócił niepustą treść w formacie OpenAI. Model odpowiadający bez sensu przejdzie kontrolę.
   Sensowna kontrola jakości wymagałaby ewaluacji, czyli innego narzędzia (`husarz eval`).
-- ⬜ **Rozbieżność wersji Bielika w repo** (wskazana przy rozpoznaniu przestrzeni awarii,
-  potwierdzona): `config/models.yaml` ma `bielik-11b-v3.0-instruct`, a `ollama/Husarz.Modelfile`
-  rekomenduje `SpeakLeash/bielik-11b-v2.3-instruct`. Której wersji dotyczy prawda — nie da się
-  rozstrzygnąć bez sięgnięcia do rejestru modeli, więc zapisane zamiast zgadnięte.
-- ⬜ **`weights_path` w `ModelSpec` wygląda na pole martwe** — jest w schemacie i nigdzie
-  indziej w `src/`. Do sprawdzenia i usunięcia albo wpięcia.
+- ✅ **Rozbieżność wersji Bielika rozstrzygnięta pomiarem** (`husarz bootstrap` dał narzędzie,
+  którego wcześniej nie było): rejestr Ollamy nie zna ANI `bielik-11b-v3.0-instruct`, ANI
+  `SpeakLeash/bielik-11b-v2.3-instruct`. Problemem nie była zła wersja, tylko obietnica modelu
+  nie do zdobycia — i to złożona dwa razy, na dwa różne sposoby. Oba pliki mówią teraz prawdę.
+- ✅ **`weights_path` usunięte** — potwierdzone martwe (jedyne wystąpienie w repozytorium było
+  w definicji pola). Konfiguracja z tym polem nie wczyta się, z komunikatem wyjaśniającym.
 
 ## ✅ Etap 9 — Integracje Git (GitHub/GitLab) + tworzenie PR
 - ✅ `husarz.git`: klienci GitHub/GitLab nad wstrzykiwalnym transportem (lista repo,

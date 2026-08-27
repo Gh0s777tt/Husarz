@@ -36,7 +36,6 @@ registry:
     endpoint: http://localhost:8000/v1
     tags: [reasoning, code, orchestration, tools, general]
     context_length: 131072
-    weights_path: ./models/glm-5.2
     params:
       temperature: 0.3
     fallback: [hermes]
@@ -55,14 +54,27 @@ registry:
       temperature: 0.3
     fallback: [husarz-local]
 
-  # --- Model polski: Bielik-11B-v3.0-Instruct (język i zadania PL) ---
+  # --- Model polski: Bielik (język i zadania PL) ---
+  #
+  # UWAGA: tego modelu MUSISZ dostarczyć sam. Sprawdzone wprost odpytaniem rejestru
+  # Ollamy (`registry.ollama.ai`): ani `bielik-11b-v3.0-instruct`, ani
+  # `SpeakLeash/bielik-11b-v2.3-instruct` nie są tam dostępne, więc `ollama pull`
+  # i `husarz bootstrap` nie mają skąd go wziąć. Wcześniejsza wersja tego pliku milczała
+  # o tym, a `ollama/Husarz.Modelfile` sugerował jeszcze inną wersję — operator dostawał
+  # dwie różne odpowiedzi i żadna nie działała.
+  #
+  # Do wyboru:
+  #   * zaimportuj wagi GGUF do Ollamy (`ollama create bielik-... -f <Modelfile z FROM ...>`)
+  #     i wpisz tu nazwę, którą nadałeś,
+  #   * albo serwuj model przez vLLM i zmień `backend`/`endpoint` na ten serwer.
+  #
+  # Dopóki tego nie zrobisz, `husarz doctor` będzie zgłaszał brak tego modelu — i słusznie.
   bielik:
     backend: ollama
     model: bielik-11b-v3.0-instruct
     endpoint: http://localhost:11434/v1
     tags: [polish, general, chat]
     context_length: 32768
-    weights_path: ./models/bielik-11b-v3.0-instruct
     params:
       temperature: 0.4
     fallback: [glm-main]
@@ -74,7 +86,6 @@ registry:
     endpoint: http://localhost:8001/v1
     tags: [tools, function-calling, agentic, research]
     context_length: 32768
-    weights_path: ./models/hermes-3
     params:
       temperature: 0.2
     fallback: [glm-main]

@@ -5,6 +5,27 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Usunięte / poprawione (dwie nieprawdy w dostarczonej konfiguracji)
+
+- **`models.registry[...].weights_path` USUNIĘTE.** Pole żyło w schemacie i **nic go nie
+  czytało** — jedyne wystąpienie w całym repozytorium było w jego własnej definicji. Wyglądało
+  przy tym, jakby wskazywało silnikowi lokalne wagi (nazwa, typ `Path`, komentarz „ścieżka do
+  lokalnych wag"), więc operator mógł je ustawić i uwierzyć, że coś z tego wynika. Martwe pole
+  udające działające jest gorsze niż jego brak.
+
+  Konfiguracja używająca tego pola **nie wczyta się** — świadomie, z czytelnym komunikatem
+  wyjaśniającym, co zniknęło i dlaczego, zamiast generycznego „extra fields not permitted".
+  Sam komunikat od razu się przydał: wyłapał dwa wystąpienia w `config/models.yaml`, których
+  przeszukanie `src/` nie widziało.
+- **Rozbieżność wersji Bielika rozstrzygnięta — pomiarem, nie wyborem wersji.** ROADMAP
+  zapisywał ją jako „nie da się rozstrzygnąć bez sięgnięcia do rejestru"; `husarz bootstrap`
+  dał do tego narzędzie. Odpytany rejestr Ollamy nie zna **ani** `bielik-11b-v3.0-instruct`
+  (z `config/models.yaml`), **ani** `SpeakLeash/bielik-11b-v2.3-instruct` (z
+  `ollama/Husarz.Modelfile`). Problemem nie była więc zła wersja, tylko to, że **oba pliki
+  obiecywały model, którego żadną udokumentowaną drogą nie da się zdobyć** — i każdy obiecywał
+  inaczej. Oba mówią teraz to samo i prawdę: model dostarcza operator, a dopóki tego nie zrobi,
+  `husarz doctor` słusznie zgłasza brak.
+
 ### Dodane (Etap 12f — `husarz bootstrap`: pobranie wag za zgodą operatora)
 
 - **Pętla diagnostyczna domknięta.** `husarz doctor` mówi „NIE MA modelu X",
