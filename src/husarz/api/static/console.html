@@ -555,7 +555,22 @@
     // Panel WYŚWIETLA gotowe ustalenia; oceny nie liczy sam. Gdyby liczył, konsola
     // i `husarz doctor` mogłyby ocenić tę samą instalację inaczej, a operator nie
     // wiedziałby, któremu wierzyć. Liczniki też przychodzą z API, z tej samej listy.
-    const DOCTOR_ZNAKI = { ok: ["ok", "✓"], problem: ["err", "✕"], nieznany: ["warn", "?"] };
+    // Klucz to STAN + WAGA, nie sam stan. Wcześniej problem blokujący i ostrzeżenie miały
+    // identyczne czerwone ✕ — a od czasu diagnozowania modeli zapasowych (niedziałający zapas
+    // to ostrzeżenie, nie blokada) mieszana lista zdarza się regularnie. Gdy wszystko krzyczy
+    // tak samo głośno, nic nie jest pilne. Odpowiednik w CLI: `znacznik()` w launcher/doctor.py
+    // — oba nośniki MUSZĄ oceniać tak samo, inaczej rozjadą się na tej samej instalacji.
+    const DOCTOR_ZNAKI = {
+      "ok": ["ok", "✓"],
+      "problem/blokujaca": ["err", "✕"],
+      "problem/ostrzezenie": ["warn", "!"],
+      "problem/informacja": ["warn", "!"],
+      "nieznany": ["warn", "?"],
+    };
+
+    // Stan `ok` i `nieznany` nie zależą od wagi — dla nich klucz to sam stan. Dzięki temu
+    // dołożenie nowej wagi po stronie API nie wymaga tu czterech nowych wpisów.
+    const doctorKlucz = (f) => (f.state === "problem" ? `problem/${f.severity}` : f.state);
 
     async function loadDoctor() {
       $("doctor-out").textContent = "sprawdzam…";
@@ -588,8 +603,9 @@
           // wartością z odpowiedzi sięga też do prototypu, więc stan o nazwie
           // `constructor` zwróciłby funkcję i wywrócił destrukturyzację — cała tabela
           // znikłaby zamiast pokazać nieznany stan. Konsola nie ufa żadnemu wejściu.
-          const [klasa, znak] = Object.hasOwn(DOCTOR_ZNAKI, f.state)
-            ? DOCTOR_ZNAKI[f.state] : ["muted", "·"];
+          const klucz = doctorKlucz(f);
+          const [klasa, znak] = Object.hasOwn(DOCTOR_ZNAKI, klucz)
+            ? DOCTOR_ZNAKI[klucz] : ["muted", "·"];
           return `<tr><td class="${klasa}">${znak}</td><td><code>${esc(f.id)}</code></td>` +
                  `<td>${esc(f.description)}</td><td class="muted">${esc(f.remedy) || "—"}</td></tr>`;
         }).join("") + "</table>";

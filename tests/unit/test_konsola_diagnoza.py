@@ -103,9 +103,52 @@ def test_nieznany_stan_ma_wlasny_kolor() -> None:
     """NIEZNANY nie może dzielić koloru z OK ani z problemem — to trzeci stan."""
     assert "--warn:" in _ZRODLO
     assert ".warn { color: var(--warn); }" in _ZRODLO
-    assert 'nieznany: ["warn"' in _ZRODLO
+    assert '"nieznany": ["warn"' in _ZRODLO
 
 
 def test_indeksowanie_mapy_stanow_nie_siega_do_prototypu() -> None:
     """Stan o nazwie `constructor` wywróciłby destrukturyzację i usunął CAŁĄ tabelę."""
-    assert "Object.hasOwn(DOCTOR_ZNAKI, f.state)" in _ZRODLO
+    assert "Object.hasOwn(DOCTOR_ZNAKI, klucz)" in _ZRODLO
+
+
+def test_konsola_i_CLI_odrozniaja_TE_SAME_przypadki() -> None:
+    """Niezmiennik „jedno źródło prawdy" dotyczy także ODCZYTU, nie tylko liczb.
+
+    Gdyby konsola i `husarz doctor` grupowały ustalenia inaczej — np. terminal odróżniał
+    problem blokujący od ostrzeżenia, a tabela nie — operator dostałby dwie różne oceny tej
+    samej instalacji i nie wiedziałby, której wierzyć. To ten sam błąd, przed którym broni
+    liczenie podsumowania po stronie API, tylko przeniesiony o warstwę wyżej.
+
+    Sprawdzamy ROZRÓŻNIALNOŚĆ, nie identyczność znaków: terminal ma cztery znaki ASCII,
+    tabela — kolor i glif. Wspólne ma być to, KTÓRE przypadki wyglądają inaczej.
+    """
+    import re
+
+    from husarz.launcher.doctor import Stan, Ustalenie, Waga, znacznik
+
+    przypadki = {
+        "ok": Ustalenie(id="x", stan=Stan.OK, waga=Waga.INFORMACJA, opis="."),
+        "problem/blokujaca": Ustalenie(id="x", stan=Stan.PROBLEM, waga=Waga.BLOKUJACA, opis="."),
+        "problem/ostrzezenie": Ustalenie(
+            id="x", stan=Stan.PROBLEM, waga=Waga.OSTRZEZENIE, opis="."
+        ),
+        "nieznany": Ustalenie(id="x", stan=Stan.NIEZNANY, waga=Waga.BLOKUJACA, opis="."),
+    }
+
+    # Terminal: każdy z czterech przypadków ma WŁASNY znacznik.
+    znaczniki = {klucz: znacznik(u) for klucz, u in przypadki.items()}
+    assert len(set(znaczniki.values())) == 4, znaczniki
+
+    # Konsola: mapa musi mieć wpis dla każdego z tych kluczy, a blokujący nie może dzielić
+    # wyglądu z ostrzeżeniem (to jest cała treść tej poprawki).
+    mapa = re.search(r"const DOCTOR_ZNAKI = \{(.*?)\n    \};", _ZRODLO, re.S)
+    assert mapa, "nie znaleziono mapy znaków w konsoli"
+    tresc = mapa.group(1)
+    for klucz in przypadki:
+        assert f'"{klucz}"' in tresc, f"konsola nie zna przypadku {klucz}"
+    assert tresc.count('["err"') == 1, "kolor błędu ma być zarezerwowany dla problemu blokującego"
+
+
+def test_klucz_konsoli_laczy_stan_z_waga() -> None:
+    """Sam stan nie wystarczy — to była przyczyna nierozróżnialności."""
+    assert 'f.state === "problem" ? `problem/${f.severity}`' in _ZRODLO

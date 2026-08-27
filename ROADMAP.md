@@ -347,10 +347,9 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
     systemy, ścieżki instalacyjne, czasem uprawnienia administratora. Osobny obszar ryzyka,
     wymaga własnego ADR-a i własnego przeglądu; dziś instalacja silnika należy do menedżera
     pakietów, a diagnoza podaje `ollama serve` z odnośnikiem.
-- ⬜ **Waga ustalenia niewidoczna w tabeli konsoli i w wyjściu CLI** — problem blokujący
-  i ostrzeżenie mają ten sam znak (✕ / `[!!]`); rozróżnienie niesie dopiero nagłówek
-  z licznikami. Pole `severity` jest już w odpowiedzi API, więc zmiana wymaga poprawienia
-  OBU nośników naraz — inaczej rozjadą się w ocenie tej samej instalacji.
+- ✅ **Waga ustalenia widoczna w obu nośnikach** — terminal: `[!!]` blokujący, `[! ]`
+  ostrzeżenie; konsola: czerwone ✕ zarezerwowane dla blokującego, bursztynowe `!` dla
+  ostrzeżenia. Poprawione NARAZ, z testem pilnującym, że oba odróżniają te same przypadki.
 - ⬜ **Rola „NOC" (podgląd + diagnoza) do rozważenia** — `viewer` świadomie nie dostał
   `diagnostics:read`, bo podgląd nie powinien wysyłać pakietów. Gdyby powstał scenariusz
   monitoringu bez uprawnień operatora, właściwą odpowiedzią jest osobna rola, nie

@@ -199,3 +199,46 @@ def test_agent_ustawiony_na_auto_nie_tworzy_ustalenia_o_modelu_auto(make_config)
     ustalenia = zdiagnozuj(config, sonda=_Sonda(["husarz"]))
 
     assert not [u for u in ustalenia if u.id.startswith("model-auto")]
+
+
+def test_znacznik_odroznia_blokujacy_od_ostrzezenia(make_config) -> None:
+    """Terminal ma pokazywać RÓŻNICĘ, którą diagnoza już zna.
+
+    Do tej pory `sformatuj` kluczował wyłącznie na stanie, więc problem blokujący
+    i ostrzeżenie dostawały identyczne `[!!]`. Dopóki ostrzeżenia były rzadkie, uchodziło
+    to płazem; od czasu diagnozowania modeli zapasowych mieszana lista zdarza się
+    regularnie — a gdy wszystko krzyczy tak samo głośno, nic nie jest pilne.
+    """
+    from husarz.launcher.doctor import sformatuj, znacznik
+
+    rejestr = _rejestr()
+    rejestr["zapasowy"]["fallback"] = []
+    config = make_config(registry=rejestr, default="glowny", chat="glowny")
+
+    ustalenia = zdiagnozuj(config, sonda=_Sonda(["nie-ma-zadnego"]))
+
+    glowny = _ustalenie(ustalenia, "model-glowny-u-dostawcy")
+    zapasowy = _ustalenie(ustalenia, "model-zapasowy-u-dostawcy")
+    assert glowny.waga is Waga.BLOKUJACA and zapasowy.waga is Waga.OSTRZEZENIE, "założenie testu"
+
+    assert znacznik(glowny) == "[!!]"
+    assert znacznik(zapasowy) == "[! ]"
+    assert znacznik(glowny) != znacznik(zapasowy)
+
+    # Znaczniki mają stałą szerokość — listę czyta się wzrokiem po lewej krawędzi.
+    assert len({len(znacznik(u)) for u in ustalenia}) == 1
+
+    # Legenda pojawia się TYLKO wtedy, gdy jest co odróżniać.
+    tekst = "\n".join(sformatuj(ustalenia))
+    assert "Znaczniki:" in tekst
+
+
+def test_legenda_NIE_zasmieca_wyjscia_gdy_nie_ma_czego_odrozniac(make_config) -> None:
+    """Nośność powyższego: stała legenda przy każdym uruchomieniu byłaby szumem."""
+    from husarz.launcher.doctor import sformatuj
+
+    config = make_config(registry=_rejestr(), default="glowny", chat="glowny")
+
+    tekst = "\n".join(sformatuj(zdiagnozuj(config, sonda=_Sonda(["husarz"]))))
+
+    assert "Znaczniki:" not in tekst

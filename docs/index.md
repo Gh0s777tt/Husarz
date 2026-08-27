@@ -51,8 +51,10 @@ Zakładka **Monitor** — liczniki wywołań i obowiązujące limity (`max_token
 
 /// caption
 Zakładka **Diagnoza** — te same ustalenia, co `husarz doctor` w terminalu, z instrukcją naprawy
-przy każdym. Widoczne trzy stany: problem (✕), **nie dało się sprawdzić** (?) i OK (✓) — stan
-nieznany jest osobny celowo, bo pomiar nie może zaokrąglać „nie wiem" do „w porządku".
+przy każdym. Widoczne cztery oznaczenia: problem blokujący (✕), ostrzeżenie (!),
+**nie dało się sprawdzić** (?) i OK (✓). Stan nieznany jest osobny celowo, bo pomiar nie może
+zaokrąglać „nie wiem" do „w porządku"; ostrzeżenie jest osobne, bo gdy wszystko krzyczy tak
+samo głośno, nic nie jest pilne.
 Zrzut z konfiguracji repo: czat działa na lokalnej Ollamie, a orkiestracja i agenci wskazują
 serwery vLLM, których na tej maszynie nikt nie uruchomił
 (zob. [LAUNCHER](LAUNCHER.md#to-samo-w-konsoli-www-panel-diagnoza)).

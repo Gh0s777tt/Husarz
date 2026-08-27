@@ -5,6 +5,23 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (diagnoza odróżnia problem blokujący od ostrzeżenia — w OBU nośnikach)
+
+- **Terminal:** `[!!]` blokujący, **`[! ]` ostrzeżenie**, `[??]` nie wiadomo, `[ok]` w porządku.
+  Dotąd oba rodzaje problemu miały identyczne `[!!]`. Dopóki ostrzeżenia były rzadkie,
+  uchodziło to płazem; od czasu diagnozowania modeli zapasowych (niedziałający zapas to
+  ostrzeżenie, nie blokada) mieszana lista zdarza się regularnie — a gdy wszystko krzyczy
+  tak samo głośno, nic nie jest pilne. Znaczniki mają stałą szerokość, żeby kolumna
+  identyfikatorów była wyrównana.
+- **Konsola:** mapa znaków kluczowana na STANIE **i WADZE**, nie na samym stanie. Kolor
+  błędu (czerwony ✕) jest teraz zarezerwowany dla problemu blokującego; ostrzeżenie dostaje
+  bursztynowy `!`.
+- **Legenda tylko wtedy, gdy jest co odróżniać** — przy liście zawierającej oba rodzaje.
+  Stała legenda przy każdym uruchomieniu byłaby szumem.
+- Poprawka objęła oba nośniki NARAZ i ma test pilnujący, że **odróżniają te same przypadki**:
+  rozjazd w ocenie tej samej instalacji jest tu groźniejszy niż sam wygląd. Zrzut ekranu
+  w dokumentacji odświeżony.
+
 ### Usunięte / poprawione (dwie nieprawdy w dostarczonej konfiguracji)
 
 - **`models.registry[...].weights_path` USUNIĘTE.** Pole żyło w schemacie i **nic go nie

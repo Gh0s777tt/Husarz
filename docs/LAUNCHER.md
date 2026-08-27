@@ -66,9 +66,21 @@ Kod wyjścia **1** przy problemie blokującym, więc komenda nadaje się do skry
 Ta sama diagnoza pojawia się przy `husarz up` — pokazywane są tylko ustalenia wymagające
 uwagi, żeby normalny start nie tonął w komunikatach.
 
-### Trzy stany, nie dwa
+### Trzy stany, nie dwa — i dwa stopnie problemu
 
-Kontrola kończy się jako `[ok]`, `[!!]` (problem) albo **`[??]` (nieznany)**. Ostatni jest
+| Znacznik | Znaczenie |
+|---|---|
+| `[ok]` | w porządku |
+| `[!!]` | problem **blokujący** — bez naprawy funkcja nie zadziała, kod wyjścia 1 |
+| `[! ]` | ostrzeżenie — działa, ale nie tak, jak operator zapewne oczekuje |
+| `[??]` | **nie dało się sprawdzić** — to nie to samo co „OK" |
+
+Rozróżnienie `[!!]` od `[! ]` nie jest kosmetyką. Wcześniej oba dostawały ten sam znacznik,
+a od czasu diagnozowania modeli zapasowych (niedziałający zapas to ostrzeżenie, nie blokada)
+mieszana lista zdarza się regularnie. Gdy wszystko krzyczy tak samo głośno, nic nie jest pilne.
+Legenda pojawia się w wyjściu tylko wtedy, gdy na liście są OBA rodzaje — inaczej byłaby szumem.
+
+Kontrola kończy się jako `[ok]`, `[!!]`/`[! ]` (problem) albo **`[??]` (nieznany)**. Ostatni jest
 osobny celowo: projekt ma twardą zasadę, że pomiar NIE MOŻE zaokrąglać „nie dało się
 sprawdzić" do „w porządku". Diagnoza, która przy niedziałającym silniku mówi „model OK",
 jest gorsza niż brak diagnozy — operator przestaje szukać.
@@ -127,7 +139,7 @@ o ratunku. Łańcuch przechodzimy tak samo jak router: rekurencyjnie (zapas zapa
 osiągalny), z ochroną przed cyklem, i tylko gdy `routing.fallbacks_enabled`.
 
 ```
-[!!] model-zapasowy-u-dostawcy: Silnik odpowiada, ale NIE MA modelu 'nie-ma-takiego'
+[! ] model-zapasowy-u-dostawcy: Silnik odpowiada, ale NIE MA modelu 'nie-ma-takiego'
      (zapasowy dla 'glowny'). Dostępne: husarz:latest, qwen2.5-coder:7b.
 [??] model-ostatnia-deska-u-dostawcy: Silnik pod http://localhost:9999/v1 nie odpowiedział
      — nie wiadomo, czy model 'cokolwiek' (zapasowy dla 'zapasowy') jest dostępny.

@@ -1045,6 +1045,31 @@ def zdiagnozuj(
     return sorted(ustalenia, key=lambda u: (kolejnosc[u.stan], waga_kolejnosc[u.waga], u.id))
 
 
+def znacznik(ustalenie: Ustalenie) -> str:
+    """Zwraca czteroznakowy znacznik ustalenia — zależny od stanu **i od wagi**.
+
+    Pierwsza wersja kluczowała wyłącznie na stanie, więc problem BLOKUJĄCY i zwykłe
+    ostrzeżenie dostawały identyczne ``[!!]``. Dopóki ostrzeżenia były rzadkie, uchodziło
+    to płazem; od czasu diagnozowania modeli zapasowych (niedziałający zapas to ostrzeżenie,
+    nie blokada) operator regularnie widzi listę, na której wszystko krzyczy tak samo głośno.
+    Skutek jest odwrotny do zamierzonego: gdy wszystko jest pilne, nic nie jest.
+
+    Znaczniki mają STAŁĄ szerokość, żeby kolumna identyfikatorów była wyrównana — listę
+    czyta się wzrokiem po lewej krawędzi.
+
+    Args:
+        ustalenie: Pojedyncze ustalenie diagnozy.
+
+    Returns:
+        ``[ok]`` / ``[!!]`` (blokujący) / ``[! ]`` (ostrzeżenie) / ``[??]`` (nie wiadomo).
+    """
+    if ustalenie.stan is Stan.OK:
+        return "[ok]"
+    if ustalenie.stan is Stan.NIEZNANY:
+        return "[??]"
+    return "[!!]" if ustalenie.waga is Waga.BLOKUJACA else "[! ]"
+
+
 def sformatuj(ustalenia: Sequence[Ustalenie]) -> list[str]:
     """Zamienia ustalenia na linie do wypisania w terminalu.
 
@@ -1054,10 +1079,9 @@ def sformatuj(ustalenia: Sequence[Ustalenie]) -> list[str]:
     Returns:
         Linie gotowe do wypisania (bez znaku nowej linii).
     """
-    znaki = {Stan.OK: "[ok]", Stan.PROBLEM: "[!!]", Stan.NIEZNANY: "[??]"}
     linie: list[str] = []
     for u in ustalenia:
-        linie.append(f"{znaki[u.stan]} {u.id}: {u.opis}")
+        linie.append(f"{znacznik(u)} {u.id}: {u.opis}")
         if u.naprawa:
             linie.append(f"     → {u.naprawa}")
     # Podsumowanie MUSI zgadzać się z listą powyżej. Pierwsza wersja liczyła wyłącznie
@@ -1082,6 +1106,8 @@ def sformatuj(ustalenia: Sequence[Ustalenie]) -> list[str]:
         linie.append("\nWszystkie kontrole przeszły.")
     else:
         linie.append("\nPodsumowanie — " + "; ".join(czesci) + ".")
+    if blokujace and inne_problemy:
+        linie.append("Znaczniki: [!!] blokuje działanie, [! ] ostrzeżenie, [??] nie wiadomo.")
     return linie
 
 
