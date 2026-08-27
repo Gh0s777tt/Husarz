@@ -44,6 +44,7 @@ _SINGLE_FILES: dict[str, str] = {
     "security": "security.yaml",
     "chat": "chat.yaml",
     "git": "git.yaml",
+    "bootstrap": "bootstrap.yaml",
 }
 # Sekcje wieloplikowe: nazwa sekcji -> (podkatalog, pole-klucz).
 _MULTI_DIRS: dict[str, tuple[str, str]] = {

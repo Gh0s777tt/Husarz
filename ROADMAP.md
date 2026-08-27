@@ -338,9 +338,15 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
     dałyby odpowiedź z innego modelu. 12 kategorii przyczyny, każda z własną naprawą.
     ŚWIADOMIE poza `GET /api/doctor` (wczytywanie wag na żądanie HTTP = dźwignia zasobowa).
     Docs: `docs/LAUNCHER.md`, ADR-0024, notatka w `docs/BEZPIECZENSTWO.md` (17i).
-  - ⬜ Pobranie silnika i wag z ekranem zgody podającym liczbę GB PRZED pobraniem, wąską
-    allowlistą `bootstrap.sources` (osobną od `security.egress.allowlist`, żeby nie otwierać
-    domeny narzędziu `web`) i degradacją do trybu offline w profilu `airgap`.
+  - ✅ Pobranie WAG z ekranem zgody podającym liczbę GB PRZED pobraniem (rozmiar z manifestu
+    — 857 B metadanych), wąską allowlistą `bootstrap.sources` (osobną od
+    `security.egress.allowlist`) i twardą odmową w profilu `airgap`. Domyślnie wyłączone,
+    domyślna odpowiedź odmowna. `husarz bootstrap`, ADR-0025.
+  - ⬜ Pobranie SILNIKA (binarki Ollamy) — świadomie NIE w tym etapie. Znaczyłoby ściąganie
+    i uruchamianie cudzego kodu wykonywalnego: weryfikacja sum kontrolnych i podpisów, trzy
+    systemy, ścieżki instalacyjne, czasem uprawnienia administratora. Osobny obszar ryzyka,
+    wymaga własnego ADR-a i własnego przeglądu; dziś instalacja silnika należy do menedżera
+    pakietów, a diagnoza podaje `ollama serve` z odnośnikiem.
 - ⬜ **Waga ustalenia niewidoczna w tabeli konsoli i w wyjściu CLI** — problem blokujący
   i ostrzeżenie mają ten sam znak (✕ / `[!!]`); rozróżnienie niesie dopiero nagłówek
   z licznikami. Pole `severity` jest już w odpowiedzi API, więc zmiana wymaga poprawienia

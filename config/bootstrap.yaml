@@ -1,0 +1,22 @@
+# Pobieranie wag modeli przy pierwszym uruchomieniu (`husarz bootstrap`).
+#
+# DOMYŚLNIE WYŁĄCZONE. Husarz nie ściąga niczego, dopóki operator tego nie włączy
+# i nie potwierdzi konkretnego pobrania. Suwerenność danych jest zasadą nadrzędną:
+# domyślny stan platformy to „nic nie wychodzi".
+#
+# Czego ten mechanizm NIE robi: nie pobiera ani nie instaluje SILNIKA. Wagi ściąga
+# silnik operatora (Ollama), a Husarz jedynie o to prosi i pilnuje zgody. Instalacja
+# silnika należy do menedżera pakietów systemu — patrz ollama/README.md.
+enabled: false
+
+# Rejestr, z którego czytamy MANIFEST modelu, żeby podać rozmiar PRZED pobraniem.
+# Manifest to kilkaset bajtów metadanych (zmierzone: 857 B dla qwen2.5-coder:1.5b);
+# wag Husarz nie pobiera. Bez rejestru nie da się podać rozmiaru, a zgoda bez rozmiaru
+# nie jest zgodą — dlatego włączony bootstrap bez tego pola jest błędem konfiguracji.
+registry: https://registry.ollama.ai
+
+# Allowlista hostów dla zapytań o manifest — OSOBNA od security.egress.allowlist.
+# Zgoda na czytanie rozmiaru modelu nie może po cichu otwierać tej domeny narzędziu
+# `web`, wtyczkom MCP ani agentom. Dwie listy = dwie różne decyzje operatora.
+sources:
+  - registry.ollama.ai

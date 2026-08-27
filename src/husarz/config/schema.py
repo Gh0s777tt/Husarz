@@ -985,6 +985,65 @@ class GitConfig(_StrictModel):
     connections_path: Path | None = None  # np. ./data/git-connections.json; None = w pamięci
 
 
+class BootstrapConfig(_StrictModel):
+    """Pobieranie wag modeli przy pierwszym uruchomieniu (config/bootstrap.yaml).
+
+    **Domyślnie WYŁĄCZONE.** Husarz nie ściąga niczego, dopóki operator tego nie włączy
+    i nie potwierdzi konkretnego pobrania — zgodnie z zasadą suwerenności danych.
+
+    **Czego ten mechanizm NIE robi:** nie pobiera ani nie instaluje SILNIKA. Wagi ściąga
+    silnik operatora (``POST /api/pull`` do Ollamy), a Husarz jedynie o to prosi i pilnuje
+    zgody. Dzięki temu nie dotykamy cudzego kodu wykonywalnego, sum kontrolnych binarek ani
+    ścieżek instalacyjnych per system. Instalacja silnika należy do menedżera pakietów.
+
+    **Dlaczego ``sources`` jest OSOBNE od ``security.egress.allowlist``.** Zgoda na czytanie
+    manifestu z rejestru modeli nie może po cichu otwierać tej domeny narzędziu ``web``,
+    wtyczkom MCP ani agentom. Dwie listy = dwie różne decyzje operatora.
+
+    Attributes:
+        enabled: Czy komenda ``husarz bootstrap`` w ogóle działa.
+        registry: Baza URL rejestru, z którego czytamy MANIFEST (rozmiar przed pobraniem).
+            Sam manifest to kilkaset bajtów; wag Husarz nie pobiera. ``None`` = brak
+            możliwości podania rozmiaru, czyli brak zgody opartej na faktach — komenda
+            wtedy odmawia zamiast zgadywać.
+        sources: Allowlista hostów dla zapytań o manifest. Pusta = nic nie wolno.
+    """
+
+    enabled: bool = False
+    registry: str | None = None
+    sources: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate(self) -> BootstrapConfig:
+        # Ta sama kontrola co dla `security.egress.allowlist`: wpis musi być czystą nazwą
+        # hosta. Pusty wpis stałby się częściowym wildcardem (`host.endswith('.')`).
+        normalized: list[str] = []
+        for entry in self.sources:
+            host = entry.strip().lower()
+            if not host:
+                raise ValueError("bootstrap.sources zawiera pusty wpis (usuń go).")
+            if "/" in host or "@" in host or ":" in host or host != entry.strip():
+                raise ValueError(
+                    f"bootstrap.sources['{entry}'] musi być samą nazwą hosta "
+                    f"(bez schematu/portu/ścieżki/poświadczeń)."
+                )
+            normalized.append(host)
+        object.__setattr__(self, "sources", normalized)
+        # Fail-closed: włączony bootstrap bez rejestru albo bez allowlisty jest atrapą,
+        # która odmówi przy pierwszym użyciu. Lepiej powiedzieć to przy starcie.
+        if self.enabled and not self.registry:
+            raise ValueError(
+                "bootstrap.enabled=true wymaga bootstrap.registry — bez rejestru nie da się "
+                "podać rozmiaru PRZED pobraniem, a zgoda bez rozmiaru nie jest zgodą."
+            )
+        if self.enabled and not self.sources:
+            raise ValueError(
+                "bootstrap.enabled=true wymaga bootstrap.sources (allowlista hostów). "
+                'Pusta lista znaczy „nic nie wolno" i komenda i tak by odmówiła.'
+            )
+        return self
+
+
 class HusarzConfig(_StrictModel):
     """Kompletna, zwalidowana konfiguracja platformy Husarz."""
 
@@ -994,6 +1053,7 @@ class HusarzConfig(_StrictModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     chat: ChatConfig = Field(default_factory=ChatConfig)
     git: GitConfig = Field(default_factory=GitConfig)
+    bootstrap: BootstrapConfig = Field(default_factory=BootstrapConfig)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     tools: dict[str, ToolConfig] = Field(default_factory=dict)
     plugins: dict[str, PluginConfig] = Field(default_factory=dict)

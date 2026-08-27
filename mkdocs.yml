@@ -119,3 +119,4 @@ nav:
       - 0022 · Zewnętrzne narzędzia agentowe: adr/0022-zewnetrzne-narzedzia-agentowe.md
       - 0023 · Zapisywalny magazyn sekretów: adr/0023-zapisywalny-magazyn-sekretow.md
       - 0024 · Sonda głęboka diagnozy: adr/0024-sonda-gleboka-diagnozy.md
+      - 0025 · Pobieranie wag za zgodą: adr/0025-pobieranie-wag-za-zgoda.md

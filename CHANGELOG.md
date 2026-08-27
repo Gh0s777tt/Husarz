@@ -5,6 +5,33 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 12f — `husarz bootstrap`: pobranie wag za zgodą operatora)
+
+- **Pętla diagnostyczna domknięta.** `husarz doctor` mówi „NIE MA modelu X",
+  `husarz bootstrap` proponuje go pobrać, `husarz doctor --probe` potwierdza skutek.
+  Braki ustala JEDNA funkcja (`brakujace_modele`), więc bootstrap nie może zaproponować
+  pobrania modelu, o którym diagnoza mówi „jest".
+- **Pobieramy WAGI, nie SILNIK.** Wagi ściąga silnik operatora (`POST /api/pull`); Husarz
+  o to prosi i pilnuje zgody. Nie dotykamy cudzego kodu wykonywalnego, sum kontrolnych
+  binarek ani ścieżek instalacyjnych per system — instalacja silnika należy do menedżera
+  pakietów. Decyzja i odrzucone alternatywy: [ADR-0025](docs/adr/0025-pobieranie-wag-za-zgoda.md).
+- **Rozmiar PRZED pobraniem, z manifestu.** Ekran zgody podający GB byłby fikcją, gdyby
+  liczbę poznawać ze strumienia — bajty już by leciały. Manifest to zmierzone **857 bajtów**
+  metadanych dla `qwen2.5-coder:1.5b`, z których wynika dokładne 0,986 GB. Model o nieustalonym
+  rozmiarze jest POKAZANY z powodem, ale nie pobierany.
+- **Domyślna odpowiedź to odmowa**, a brak terminala (potok, usługa) też znaczy „nie".
+  `--yes` istnieje dla skryptów i jej użycie JEST zgodą.
+- **Dwie allowlisty, nie jedna.** `bootstrap.sources` jest osobne od
+  `security.egress.allowlist`: zgoda na odczyt rozmiaru z rejestru nie może otwierać tej
+  domeny narzędziu `web`, wtyczkom ani agentom — i odwrotnie. Zapytanie o manifest przechodzi
+  dodatkowo pin IP (ADR-0020) z zakazem loopbacku i LAN-u.
+- **Profil `airgap`: twarda odmowa**, sprawdzana PRZED włącznikiem — operator ma usłyszeć,
+  że zabrania profil, a nie że „wystarczy włączyć bootstrap".
+- Nowa sekcja konfiguracji `config/bootstrap.yaml` (domyślnie `enabled: false`). Włączenie
+  bez `registry` albo bez `sources` jest błędem walidacji, a nie atrapą, która odmówi później.
+- Testy: +16 (dopuszczalność, rozmiar przed pobraniem, rozdzielenie allowlist, zgoda).
+  Nośność: 12 mutacji, 12 czerwonych.
+
 ### Dodane (Etap 12e — diagnoza obejmuje modele ZAPASOWE)
 
 - **Łańcuchy `fallback` są diagnozowane.** Model zapasowy przejmuje ruch, gdy główny padnie,

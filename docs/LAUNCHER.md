@@ -242,6 +242,58 @@ problem blokujący, nie „OK": w czacie jego żądanie zostanie przerwane.
 
     Decyzje i uzasadnienia: [ADR-0024](adr/0024-sonda-gleboka-diagnozy.md).
 
+## Pobranie brakujących wag: `husarz bootstrap`
+
+Diagnoza mówi, czego brakuje. Ta komenda proponuje to pobrać — i domyka pętlę, która dotąd
+kończyła się na „napraw to sam".
+
+```bash
+husarz bootstrap --config ./config
+```
+
+```
+Brakuje 2 model(i). Sprawdzam rozmiary w rejestrze…
+[  ] qwen2.5-coder:1.5b (orkiestracja, tryb czatu) — 0.99 GB → http://localhost:11434/v1
+[--] husarz-nieistniejacy (reguła routingu [code]) — NIE DO POBRANIA
+     powód: rejestr nie zna modelu 'husarz-nieistniejacy'. Jeśli powstaje on lokalnie
+     z Modelfile (jak `husarz`), użyj `ollama create` — patrz ollama/README.md
+
+RAZEM: 1 model(e) do pobrania, 0.99 GB. Pobiera SILNIK pod wskazanym adresem, nie Husarz.
+
+Pobrać? [t/N]:
+```
+
+**Domyślnie wyłączone.** `bootstrap.enabled: false` w dostarczonej konfiguracji — Husarz nie
+sięga do sieci, dopóki operator tego nie włączy. Bez włączenia komenda odmawia i mówi dlaczego.
+
+**Rozmiar pochodzi z manifestu, nie ze strumienia.** Manifest to metadane: zmierzone
+**857 bajtów** dla `qwen2.5-coder:1.5b`, z których wynika dokładny rozmiar 0,99 GB. Dopiero po
+zgodzie prosimy silnik o wagi. Model, którego rozmiaru nie da się ustalić, jest **pokazany
+z powodem, ale nie pobierany** — zgoda bez znajomości rozmiaru nie byłaby zgodą.
+
+**Domyślna odpowiedź to odmowa.** Enter naciśnięty odruchowo nie uruchamia transferu
+gigabajtów. Brak terminala (potok, usługa) też znaczy „nie". Do skryptów jest `--yes` i jej
+użycie **jest** zgodą — rozmiar i tak zostaje wypisany.
+
+!!! warning "Dwie allowlisty, nie jedna"
+    Zapytanie o manifest przechodzi przez `bootstrap.sources`, a **nie** przez
+    `security.egress.allowlist`. Gdyby wystarczała ta druga, każda domena otwarta dla
+    narzędzia `web` stawałaby się źródłem, z którego Husarz gotów jest pobierać wagi.
+    Zależność nie działa też w drugą stronę — wpis w `bootstrap.sources` nie otwiera domeny
+    routerowi, wtyczkom ani agentom.
+
+    Zapytanie o manifest przechodzi dodatkowo pin IP (ADR-0020) z zakazem loopbacku i LAN-u:
+    rejestr modeli jest w WAN, więc jego nazwa nie ma prawa rozwiązać się na adres wewnętrzny.
+
+!!! note "Czego `bootstrap` NIE robi"
+    **Nie pobiera ani nie instaluje SILNIKA.** Wagi ściąga silnik operatora; Husarz o to
+    prosi. Dzięki temu nigdy nie dotykamy cudzego kodu wykonywalnego ani ścieżek
+    instalacyjnych per system — instalacja silnika należy do menedżera pakietów.
+    W profilu `airgap` komenda odmawia twardo i podaje drogę ręczną; włączenie
+    `bootstrap.enabled` tego **nie** zmienia.
+
+    Decyzje i uzasadnienia: [ADR-0025](adr/0025-pobieranie-wag-za-zgoda.md).
+
 ## Zachowanie
 
 - Domyślny nasłuch **loopback** (`127.0.0.1`) — bezpieczny, lokalny.

@@ -861,6 +861,74 @@ def _kontrola_odpowiedzi(
     ]
 
 
+@dataclass(frozen=True, slots=True)
+class BrakujacyModel:
+    """Model, który silnik ZNA endpoint, ale nie ma go w swoim katalogu.
+
+    Wyodrębnione z diagnozy, bo z tego stanu wynika jedyna sensowna akcja naprawcza,
+    którą Husarz umie podjąć: poprosić silnik o pobranie wag (`husarz bootstrap`).
+    Stan „silnik nie odpowiedział" celowo TU NIE WCHODZI — wtedy nie wiadomo, czy modelu
+    brakuje, a pobieranie na wszelki wypadek byłoby zgadywaniem za operatora.
+
+    Attributes:
+        model_id: Identyfikator w rejestrze Husarza (klucz w ``models.registry``).
+        nazwa: Nazwa u dostawcy (pole ``model``) — tej używa silnik przy pobieraniu.
+        endpoint: Endpoint silnika, który ma pobrać wagi.
+        role: Role, w których model jest używany (do komunikatu dla operatora).
+        dostepne: Co silnik ma zamiast tego — pomaga wychwycić literówkę w nazwie.
+    """
+
+    model_id: str
+    nazwa: str
+    endpoint: str
+    role: tuple[str, ...]
+    dostepne: tuple[str, ...]
+
+
+def brakujace_modele(config: HusarzConfig, *, sonda: Sonda) -> list[BrakujacyModel]:
+    """Zwraca modele, których silnik NIE MA, choć odpowiada i wolno go pytać.
+
+    JEDNO źródło prawdy dla diagnozy i dla `husarz bootstrap`: obie drogi używają tej samej
+    reguły porównywania nazw (:func:`_pasuje`, znosi brak etykiety, ale nie znosi etykiety
+    różnej) i tego samego zakresu ról (:func:`_role_modeli`, z łańcuchami zapasowych).
+    Gdyby bootstrap liczył braki po swojemu, mógłby zaproponować pobranie modelu, o którym
+    diagnoza mówi „jest" — albo przeoczyć ten, o którym mówi „nie ma".
+
+    Args:
+        config: Wczytana konfiguracja.
+        sonda: Dostęp do katalogu silnika.
+
+    Returns:
+        Braki posortowane po identyfikatorze modelu. Pusta lista znaczy „nie ma czego
+        pobierać" — także wtedy, gdy silnik milczy (wtedy po prostu NIE WIEMY).
+    """
+    pamiec: dict[str, list[str] | None] = {}
+    braki: list[BrakujacyModel] = []
+    for model_id, role in sorted(_role_modeli(config).items()):
+        spec = config.models.registry.get(model_id)
+        if spec is None or not spec.enabled or spec.endpoint is None:
+            continue
+        if sonda.powod_odmowy_sondowania(spec.endpoint) is not None:
+            continue
+        if spec.endpoint not in pamiec:
+            pamiec[spec.endpoint] = sonda.modele_u_dostawcy(spec.endpoint)
+        dostepne = pamiec[spec.endpoint]
+        # `None` = silnik nie odpowiedział. NIE traktujemy tego jak braku modelu:
+        # to stan NIEZNANY, a pobieranie „na wszelki wypadek" byłoby decyzją za operatora.
+        if dostepne is None or _pasuje(spec.model, dostepne):
+            continue
+        braki.append(
+            BrakujacyModel(
+                model_id=model_id,
+                nazwa=spec.model,
+                endpoint=spec.endpoint,
+                role=tuple(role),
+                dostepne=tuple(sorted(dostepne)),
+            )
+        )
+    return braki
+
+
 def _kontrola_modeli(
     config: HusarzConfig, sonda: Sonda, gleboka: SondaGleboka | None = None
 ) -> list[Ustalenie]:

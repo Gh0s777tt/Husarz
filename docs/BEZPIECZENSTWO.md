@@ -2150,3 +2150,89 @@ osiągana. Test przepisany tak, żeby katalog się zgadzał — dopiero wtedy je
    o rząd wielkości wyższy od ustalonego. Komunikat naprawy mówi wprost, żeby powtórzyć sondę.
 4. **Sonda głęboka nie jest dostępna w konsoli WWW** — świadomie (ADR-0024). Wymagałaby limitu
    tempa i osobnej zgody w konfiguracji; dziś nie ma ani jednego, ani drugiego.
+
+## Etap 17j — pobieranie wag (`husarz bootstrap`)
+
+Notatka weryfikacyjna. To **pierwsza droga, którą Husarz z własnej inicjatywy sięga do sieci
+po treść** — w projekcie, którego pierwszą zasadą jest suwerenność danych i deny-all egress.
+Trzeci poziom audytu wg tabeli w `CLAUDE.md`.
+
+### Co dokładnie wychodzi do sieci
+
+Dwa różne żądania, przez dwie różne bramki:
+
+| Żądanie | Kto wykonuje | Bramka | Rozmiar |
+|---|---|---|---|
+| manifest modelu (rozmiar) | **Husarz** | `bootstrap.sources` + pin IP (ADR-0020) | zmierzone 857 B |
+| pobranie wag | **silnik operatora** | `security.egress` (adres silnika) | gigabajty |
+
+Husarz nie pobiera wag — prosi o to silnik. Konsekwencja jest praktyczna, nie retoryczna:
+nie dotykamy plików wykonywalnych, nie weryfikujemy sum kontrolnych binarek, nie znamy
+ścieżek instalacyjnych per system, nie potrzebujemy uprawnień administratora.
+
+### Dlaczego dwie allowlisty
+
+`bootstrap.sources` jest osobne od `security.egress.allowlist` i to jest sedno tej zmiany.
+Gdyby wystarczała druga, **każda domena otwarta dla narzędzia `web` stawałaby się źródłem,
+z którego Husarz gotów jest pobierać wagi** — a to zupełnie inna decyzja operatora.
+Zależność nie działa też w drugą stronę: `check_endpoint_allowed` (router, `web`, wtyczki)
+czyta wyłącznie `security.egress`, więc wpis w `bootstrap.sources` nie rozszczelnia deny-all.
+Oba kierunki mają test.
+
+Zapytanie o manifest przechodzi pin IP z `allow_loopback=False` i `allow_lan=False`. Rejestr
+modeli jest w WAN, więc jego nazwa nie ma prawa rozwiązać się na adres wewnętrzny operatora
+ani na metadane chmury — inaczej wpis w `bootstrap.sources` byłby dźwignią do skanowania
+sieci wewnętrznej.
+
+### Zgoda, która jest zgodą
+
+1. **Rozmiar PRZED, nie w trakcie.** Ekran zgody podający GB byłby fikcją, gdyby liczbę
+   poznawać ze strumienia pobierania — bajty już by leciały. Czytamy manifest (857 B), potem
+   pytamy, dopiero potem prosimy silnik o wagi.
+2. **Bez rozmiaru nie ma pobrania.** Model, którego rozmiaru nie da się ustalić, jest
+   pokazany operatorowi WRAZ Z POWODEM, ale nie wchodzi do pobierania.
+3. **Domyślna odpowiedź odmowna.** Enter naciśnięty odruchowo nie uruchamia transferu
+   gigabajtów; `EOFError`/`KeyboardInterrupt` też znaczą „nie" (potok, usługa systemowa —
+   tam nie ma komu wyrazić zgody).
+4. **Airgap sprawdzany PRZED włącznikiem.** Operator ma usłyszeć, że zabrania profil, a nie
+   że „wystarczy włączyć bootstrap" — ta druga odpowiedź sugerowałaby, że politykę da się
+   obejść ustawieniem.
+5. **Włączenie bez `registry` lub `sources` to błąd walidacji**, nie atrapa, która odmówi
+   przy pierwszym użyciu.
+
+### Weryfikacja SKUTKU
+
+Uruchomione na działającej instalacji, nie tylko w testach:
+
+- odmowa przy domyślnej konfiguracji repo (kod 1),
+- ekran zgody z **realnym** rozmiarem z rejestru (0,99 GB dla `qwen2.5-coder:1.5b`, zgodne
+  z „≈1 GB" w dokumentacji Ollamy) i odpowiedź „n" → nic nie pobrano,
+- model spoza rejestru → komunikat odsyłający do `ollama create` (przypadek `husarz`),
+- **ścieżka powodzenia pobierania** sprawdzona bez ściągania gigabajtów: poproszono silnik
+  o model, który już ma w całości (`qwen2.5-coder:7b`) — strumień, parser i raportowanie
+  postępu przeszły tę samą drogę co przy prawdziwym pobraniu (0,8 s, „100% (4.68 GB)"),
+- błąd silnika (model nieznany rejestrowi) zwrócony jako komunikat, nie wyjątek,
+- endpoint spoza allowlisty egress → odmowa przed wysłaniem czegokolwiek.
+
+Kontrola nośności: **12 mutacji, 12 czerwonych** (zdjęta odmowa airgap, zignorowany
+włącznik, pobieranie bez znajomości rozmiaru, ekran zgody bez sumy GB, ciche pominięcie
+pozycji niepobieralnej, brak kontroli `bootstrap.sources`, błędna przestrzeń `library`,
+każda odpowiedź brana za zgodę, brak terminala wywracający komendę, walidacja przepuszczająca
+włączony bootstrap bez rejestru, `wykonaj()` ignorujące pobieralność).
+
+Jedna mutacja ujawniła pułapkę w moim własnym teście: `model_copy(update=...)` **omija
+walidację**, więc podstawienie profilu łańcuchem `"airgap"` zostawiało napis, a porównanie
+`is Profile.AIRGAP` było fałszywe — test przechodziłby z niewłaściwego powodu. Ta sama
+pułapka co przy `--probe-timeout`. Test podstawia teraz wartość enuma i sprawdza to asercją.
+
+### Ograniczenia — wprost
+
+1. **Nie weryfikujemy sum kontrolnych wag.** Robi to silnik przy pobieraniu (digesty warstw
+   w manifeście). Dublowanie wymagałoby pobierania wag przez Husarza, czego decyzja
+   z ADR-0025 zabrania.
+2. **Modele powstające z Modelfile nie są pobieralne** — rejestr ich nie zna. Komenda mówi
+   to wprost i odsyła do `ollama create`.
+3. **Pobieranie nie ma limitu CAŁKOWITEGO czasu** (wagi legalnie schodzą kwadransami), tylko
+   limit odczytu: 300 s bez ani jednego bajtu = połączenie uznane za zawieszone.
+4. **Bootstrapu nie ma w konsoli WWW ani w API.** Ta sama decyzja co dla sondy głębokiej:
+   operacja trwa i zużywa zasoby, więc jest operacją terminala.

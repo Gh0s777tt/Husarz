@@ -446,6 +446,111 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if blokujace else 0
 
 
+def _cmd_bootstrap(args: argparse.Namespace) -> int:
+    """Pobiera brakujące wagi modeli — po pokazaniu rozmiaru i uzyskaniu zgody.
+
+    Domyka pętlę, którą otwiera diagnoza: `husarz doctor` mówi „NIE MA modelu X",
+    a ta komenda proponuje go pobrać. Wagi ściąga SILNIK operatora; Husarz o to prosi
+    i pilnuje zgody — sam nie dotyka plików wykonywalnych ani binarek silnika.
+
+    Kolejność jest istotna: dopuszczalność → braki → ROZMIAR → zgoda → dopiero pobieranie.
+    Zgoda udzielana bez znajomości rozmiaru nie byłaby zgodą, więc pozycje o nieznanym
+    rozmiarze są pokazywane, ale NIE pobierane.
+
+    Args:
+        args: Argumenty CLI (``--config``, ``--yes``).
+
+    Returns:
+        Kod wyjścia: 0 powodzenie albo brak pracy, 1 odmowa konfiguracji lub błąd pobierania,
+        2 przerwanie przez operatora (nie zgodził się).
+    """
+    from husarz.launcher.bootstrap import (  # noqa: PLC0415
+        OdmowaBootstrapu,
+        RejestrISilnik,
+        sformatuj_plan,
+        sprawdz_dopuszczalnosc,
+        wykonaj,
+        zbuduj_plan,
+    )
+    from husarz.launcher.doctor import SondaSystemowa, brakujace_modele  # noqa: PLC0415
+
+    try:
+        config_dir = resolve_config_dir(args.config, os.environ)
+        config = load_config(config_dir)
+    except ConfigError as exc:
+        print(f"[!!] konfiguracja: {exc}", file=sys.stderr, flush=True)
+        return 1
+
+    try:
+        sprawdz_dopuszczalnosc(config)
+    except OdmowaBootstrapu as exc:
+        print(f"[--] {exc}", file=sys.stderr, flush=True)
+        return 1
+
+    from husarz.security.audit import build_audit_log  # noqa: PLC0415
+
+    audyt = build_audit_log(config.security)
+
+    braki = brakujace_modele(config, sonda=SondaSystemowa(config))
+    if not braki:
+        print(
+            "Nie ma czego pobierać: każdy używany model jest u swojego dostawcy "
+            "(albo silnik nie odpowiedział i wtedy po prostu NIE WIADOMO — sprawdź "
+            "`husarz doctor`).",
+            flush=True,
+        )
+        return 0
+
+    print(f"Brakuje {len(braki)} model(i). Sprawdzam rozmiary w rejestrze…", flush=True)
+    zrodlo = RejestrISilnik(config)
+    plan = zbuduj_plan(braki, zrodlo)
+    for linia in sformatuj_plan(plan):
+        print(linia, flush=True)
+
+    do_pobrania = [p for p in plan if p.pobieralna]
+    audyt.record(
+        "launcher",
+        "bootstrap.plan",
+        {
+            "modeli": len(do_pobrania),
+            "bajtow": sum(p.rozmiar.bajty for p in do_pobrania if p.rozmiar),
+        },
+    )
+    if not do_pobrania:
+        print("\nŻadnej z tych pozycji nie da się pobrać — powody wyżej.", flush=True)
+        return 1
+
+    if not args.yes and not _zgoda_operatora():
+        print("Przerwane — nic nie pobrano.", flush=True)
+        return 2
+
+    audyt.record("launcher", "bootstrap.pull", {"modeli": len(do_pobrania)})
+    bledy = wykonaj(plan, zrodlo, lambda linia: print(linia, flush=True))
+    if bledy:
+        for blad in bledy:
+            print(f"[!!] {blad}", file=sys.stderr, flush=True)
+        return 1
+    print("\nGotowe. Sprawdź `husarz doctor --probe`, żeby potwierdzić SKUTEK.", flush=True)
+    return 0
+
+
+def _zgoda_operatora() -> bool:
+    """Pyta operatora o zgodę na pobranie. Domyślna odpowiedź to ODMOWA.
+
+    Domyślna odmowa nie jest uprzejmością: pytanie dotyczy gigabajtów ruchu i miejsca na
+    dysku, a Enter naciśnięty odruchowo nie może znaczyć „tak". Brak terminala (potok,
+    usługa systemowa) też znaczy „nie" — tam nie ma komu wyrazić zgody.
+
+    Returns:
+        Czy operator wyraził zgodę.
+    """
+    try:
+        odpowiedz = input("\nPobrać? [t/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return odpowiedz in {"t", "tak", "y", "yes"}
+
+
 def _cmd_up(args: argparse.Namespace) -> int:
     # Ładujemy konfigurację, wymuszając wybrany profil jako nadpisanie runtime.
     try:
@@ -806,6 +911,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_doctor.set_defaults(func=_cmd_doctor)
+
+    p_bootstrap = sub.add_parser(
+        "bootstrap",
+        help="Pobierz brakujące wagi modeli (po pokazaniu rozmiaru i za zgodą operatora).",
+    )
+    p_bootstrap.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_bootstrap.add_argument(
+        "--yes",
+        action="store_true",
+        help=(
+            "Nie pytaj o zgodę — użycie tej flagi JEST zgodą. Do skryptów; rozmiar i tak "
+            "zostanie wypisany, a pozycje o nieznanym rozmiarze nadal nie są pobierane."
+        ),
+    )
+    p_bootstrap.set_defaults(func=_cmd_bootstrap)
 
     p_version = sub.add_parser("version", help="Wypisz wersję.")
     p_version.set_defaults(func=_cmd_version)

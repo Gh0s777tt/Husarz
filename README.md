@@ -150,7 +150,12 @@ i co z tym zrobić. Sprawdza cały łańcuch: czat, orkiestrację i każdego age
 
 Jeśli diagnoza mówi, że wszystko jest, a czat i tak zawodzi — dodaj `--probe`. Wtedy zamiast
 sprawdzać katalog silnika, zadaje modelom **prawdziwe pytanie**. Wczytuje wagi, więc trwa;
-dlatego jest opcjonalna. Szczegóły: [docs/LAUNCHER.md](docs/LAUNCHER.md).
+dlatego jest opcjonalna.
+
+Gdy diagnoza zgłasza brakujący model, `husarz bootstrap` proponuje go pobrać — pokazując
+**rozmiar w GB przed pobraniem** i pytając o zgodę (domyślna odpowiedź: nie). Pobiera silnik,
+nie Husarz; domyślnie wyłączone; w profilu `airgap` odmawia twardo.
+Szczegóły: [docs/LAUNCHER.md](docs/LAUNCHER.md).
 
 ## Konfiguracja
 
