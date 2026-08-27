@@ -465,6 +465,11 @@ Po każdym istotnym kroku sprawdź i napraw:
   NTFS, dyski sieciowe) macOS tworzy sidecary `._*`. Blokują `docker build` **jeszcze przed
   zastosowaniem `.dockerignore`** i wpadają w globy `*.md`/`*.py`. Sprzątaj je
   `scripts/clean_sidecars.py`; odrastają przy każdym zapisie, więc to krok do POWTARZANIA.
+  Powstają też **wewnątrz `.git`** i psują tam jedno konkretne narzędzie: `git fsck` tonie
+  wtedy w setkach linii `badRefName` i „zły plik SHA-1" — czyli przestaje być czytelny
+  dokładnie wtedy, gdy jest potrzebny (po nagłym odłączeniu dysku). Same operacje gita
+  działają, więc to szum, nie uszkodzenie. Sprząta je `--include-git`; `objects/pack`
+  zostaje wyłączony, bo git zarządza nim sam.
 - **Każdy pakiet ma sekcję w `docs/`** — brak pokrycia traktuj jak brak testu.
 - **Skrypty operatora w `scripts/`** z docstringiem mówiącym, po co istnieją i kiedy się je
   uruchamia. Nie są zależnością projektu ani częścią CI.

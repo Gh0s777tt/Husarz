@@ -5,6 +5,24 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (higiena repozytorium — `git fsck` znów czytelny)
+
+- **`scripts/clean_sidecars.py --include-git`.** Dysk z repozytorium odłączył się w trakcie
+  pracy. Pierwsze, po co się wtedy sięga, to `git fsck` — a ten zwrócił **539 linii błędów**
+  (`badRefName`, „zły plik SHA-1"), wszystkie o plikach `._*` w `.git`. Narzędzie do
+  sprawdzania spójności przestawało być czytelne dokładnie w sytuacji, dla której istnieje.
+  Po sprzątnięciu 554 sidecarów `fsck` jest czysty: zero błędów, 27 wiszących blobów
+  (normalne). **Repozytorium przetrwało odłączenie bez uszkodzeń.**
+- Katalog `objects/pack` pozostaje wyłączony ze sprzątania — nie „na wszelki wypadek", lecz
+  dlatego, że git zarządza nim sam (zmierzone: `count-objects` zalicza taki plik do `garbage`,
+  a `gc` go usuwa). Wyłączenie sprawdza PARĘ sąsiadujących segmentów ścieżki, więc
+  `assets/pack/._logo.png` w drzewie projektu nadal jest sprzątane.
+- **SPROSTOWANIE.** Skrypt pomijał dotąd `.git` z uzasadnieniem, że kasowanie sidecarów
+  „potrafi uszkodzić indeks paczek (obserwowane: `error: non-monotonic index` po skasowaniu
+  `._pack-*.idx`)". Nie udało się tego odtworzyć, a pomiar pokazuje zależność ODWROTNĄ: to
+  OBECNOŚĆ takiego pliku sprawia, że git zgłasza `warning: no corresponding .pack`, po czym
+  `gc` sam go usuwa. Prawdopodobnie plik zniknął z ręki gita, a skutek przypisano skasowaniu.
+
 ### Dodane (Etap 12d — `husarz doctor --probe`: jedyna kontrola SKUTKU)
 
 - **Sonda głęboka.** Dotąd diagnoza pytała silnik, czy WYMIENIA model w katalogu — to
