@@ -5,6 +5,21 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (wdrożenie: obraz przypięty, wersja pilnowana testem)
+
+- **`deploy/k8s/deployment.yaml` używał `husarz-api:latest`.** W parze
+  z `imagePullPolicy: IfNotPresent` to najgorsze możliwe połączenie: węzeł trzyma obraz,
+  który pobrał jako pierwszy, więc wdrożenie nie jest ani odtwarzalne, ani aktualizowalne.
+  Przypięte do wersji.
+- **Kontrola przypięcia obejmowała tylko compose.** Test `test_compose_images_are_pinned_
+  not_latest` istniał od dawna i sprawdzał JEDNĄ z dwóch powierzchni wdrożenia — przez co
+  manifest k8s przechodził przez lukę w zabezpieczeniu, które powstało dokładnie po to.
+  Zabezpieczenie zastosowane do połowy przypadków jest gorsze niż jego brak, bo usypia.
+- **Nowy test spójności wersji** we wszystkich czterech miejscach wymienionych w CLAUDE.md
+  (`pyproject.toml`, `husarz.__version__`, `deploy/compose`, `deploy/k8s`). Do tej pory
+  pilnowała ich wyłącznie czyjaś pamięć przy wydaniu — a `deploy/k8s` i tak z niej wypadł.
+- `docs/DEPLOY.md` budował obrazy jako `:latest` wbrew tej samej zasadzie — poprawione.
+
 ### Dodane (limit tempa dla `GET /api/doctor`)
 
 - **`security.diagnostics.max_requests_per_minute`** (domyślnie 6/min). Każde wywołanie

@@ -13,9 +13,16 @@ Docker Compose lub Kubernetes. Wszystkie profile trzymają się modelu bezpiecze
 | `husarz-sandbox` | [`docker/husarz-sandbox.Dockerfile`](https://github.com/Gh0s777tt/Husarz/blob/main/docker/husarz-sandbox.Dockerfile) | Sandbox narzędzi (uruchamiany z `--network none`, `--cap-drop ALL`). |
 
 ```bash
-docker build -t husarz-api:latest .
-docker build -f docker/husarz-sandbox.Dockerfile -t husarz-sandbox:latest .
+docker build -t husarz-api:0.14.0 .
+docker build -f docker/husarz-sandbox.Dockerfile -t husarz-sandbox:0.14.0 .
 ```
+
+Tag ma odpowiadać wersji z `pyproject.toml` — tego samego numeru używają
+`deploy/compose` (jako domyślny `HUSARZ_IMAGE_TAG`) i `deploy/k8s`. **Nie buduj jako
+`latest`**: w parze z `imagePullPolicy: IfNotPresent` węzeł trzyma obraz, który pobrał
+jako pierwszy, więc wdrożenie przestaje być odtwarzalne i nie daje się zaktualizować.
+Zgodności numeru we wszystkich czterech miejscach pilnuje
+`test_wersja_zgadza_sie_we_wszystkich_miejscach`.
 
 Obrazy nie zawierają wag, sekretów ani danych (patrz [`.dockerignore`](https://github.com/Gh0s777tt/Husarz/blob/main/.dockerignore)).
 

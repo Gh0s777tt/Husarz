@@ -264,6 +264,55 @@ def test_compose_images_are_pinned_not_latest() -> None:
             assert not image.endswith(":latest"), f"{name}: obraz nieprzypięty ({image})"
 
 
+def test_k8s_images_are_pinned_not_latest() -> None:
+    """Ten sam niezmiennik dla DRUGIEGO nośnika wdrożenia.
+
+    Regresja: kontrola przypięcia istniała od dawna, ale sprawdzała wyłącznie compose —
+    a `deploy/k8s/deployment.yaml` używał `husarz-api:latest`. Zabezpieczenie zastosowane
+    do jednej z dwóch powierzchni jest gorsze niż jego brak, bo usypia: „przecież mamy test".
+
+    `latest` w parze z `imagePullPolicy: IfNotPresent` jest przy tym najgorszym z możliwych
+    połączeń — węzeł trzyma obraz, który pobrał jako pierwszy, więc wdrożenie nie jest ani
+    odtwarzalne, ani aktualizowalne.
+    """
+    tresc = (_K8S / "deployment.yaml").read_text(encoding="utf-8")
+    obrazy = [
+        linia.split("image:", 1)[1].strip()
+        for linia in tresc.splitlines()
+        if linia.strip().startswith("image:")
+    ]
+    assert obrazy, "nie znaleziono żadnego obrazu w manifeście — test byłby pusty"
+    for obraz in obrazy:
+        assert not obraz.endswith(":latest"), f"obraz nieprzypięty w k8s: {obraz}"
+        assert ":" in obraz, f"obraz bez tagu (domyślnie `latest`): {obraz}"
+
+
+def test_wersja_zgadza_sie_we_wszystkich_miejscach() -> None:
+    """Rozjazd wersji jest niewidoczny w testach jednostkowych i ujawnia się na wdrożeniu.
+
+    CLAUDE.md wymienia cztery miejsca, w których numer musi się zgadzać. Do tej pory
+    pilnowała ich wyłącznie czyjaś pamięć przy wydaniu — a `deploy/k8s` i tak wypadł
+    z tej pamięci, bo miał `latest` zamiast numeru.
+    """
+    import re
+
+    pyproject = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    wersja = re.search(r'^version = "([^"]+)"', pyproject, re.M)
+    assert wersja, "nie znaleziono wersji w pyproject.toml"
+    numer = wersja.group(1)
+
+    init = (_ROOT / "src" / "husarz" / "__init__.py").read_text(encoding="utf-8")
+    assert f'__version__ = "{numer}"' in init, f"husarz.__version__ != {numer}"
+
+    compose = (_COMPOSE / "docker-compose.base.yml").read_text(encoding="utf-8")
+    assert (
+        f"husarz-api:${{HUSARZ_IMAGE_TAG:-{numer}}}" in compose
+    ), f"domyślny tag obrazu w compose != {numer}"
+
+    k8s = (_K8S / "deployment.yaml").read_text(encoding="utf-8")
+    assert f"image: husarz-api:{numer}" in k8s, f"tag obrazu w k8s != {numer}"
+
+
 def test_airgap_pins_pull_policy_never_on_all_services() -> None:
     services = _load(_COMPOSE / "docker-compose.airgap.yml")["services"]
     for name, svc in services.items():

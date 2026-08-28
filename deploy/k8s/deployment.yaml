@@ -28,7 +28,14 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: api
-          image: husarz-api:latest
+          # Obraz PRZYPIĘTY do wersji, nie `latest`. `latest` w parze
+          # z `imagePullPolicy: IfNotPresent` jest najgorszym z możliwych połączeń: węzeł
+          # trzyma to, co akurat pobrał jako pierwsze, więc wdrożenie przestaje być
+          # odtwarzalne i nie daje się zaktualizować bez ręcznego czyszczenia cache'u.
+          # Podmiana tagu bez edycji tego pliku:
+          #   kubectl kustomize --load-restrictor=... | ...
+          #   albo: (cd deploy/k8s && kustomize edit set image husarz-api=husarz-api:X.Y.Z)
+          image: husarz-api:0.14.0
           imagePullPolicy: IfNotPresent
           args: ["up", "--profile", "prod", "--host", "0.0.0.0"]
           ports:
