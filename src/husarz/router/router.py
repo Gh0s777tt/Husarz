@@ -6,7 +6,7 @@ klientów jest wstrzykiwalna, więc żaden test nie wykonuje połączeń sieciow
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 
 from husarz.config.schema import HusarzConfig, ModelSpec
@@ -85,30 +85,125 @@ class ModelRouter:
             RateLimitExceededError: przekroczono limit żądań (kontrola kosztów).
             AllModelsFailedError: wszyscy kandydaci (z fallbackami) zawiedli.
         """
+        candidates = self._kandydaci(agent=agent, model=model, tags=tags)
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        request = self._apply_cost_controls(request)
+
+        failures: list[tuple[str, str]] = []
+        for model_id, client in self._zdatni_kandydaci(request, candidates, failures):
+            try:
+                odpowiedz = client.chat(request)
+            except ModelBackendError as exc:
+                # Awarią jest WYŁĄCZNIE błąd realnego wywołania. Pominięcia (brak wizji,
+                # prompt poza oknem, blokada egress) wynikają z właściwości ŻĄDANIA,
+                # nie ze zdrowia modelu — karanie za nie zdegradowałoby model sprawny.
+                if self._zdrowie is not None:
+                    self._zdrowie.odnotuj_awarie(model_id)
+                failures.append((model_id, str(exc)))
+                continue
+            if self._zdrowie is not None:
+                self._zdrowie.odnotuj_sukces(model_id)
+            return odpowiedz
+        raise AllModelsFailedError(failures)
+
+    def complete_stream(
+        self,
+        request: ChatRequest,
+        *,
+        agent: str | None = None,
+        model: str | None = None,
+        tags: list[str] | None = None,
+    ) -> Iterator[str]:
+        """Strumieniuje odpowiedź pierwszego działającego modelu z listy kandydatów.
+
+        **Fallback działa TYLKO do pierwszego fragmentu — i to jest istota tej metody.**
+        Dopóki nic nie poszło do wywołującego, awaria jest zwyczajną przyczyną przejścia do
+        kolejnego kandydata, dokładnie jak w ``complete``. Gdy jednak fragment już wyszedł,
+        przełączenie modelu byłoby SKLEJENIEM dwóch różnych odpowiedzi w jedną — użytkownik
+        zobaczyłby początek jednej myśli i dalszy ciąg innej, bez żadnego sygnału. Milcząca
+        niespójność jest tu gorsza od widocznego błędu, więc awaria w połowie kończy strumień.
+
+        Yields:
+            Fragmenty treści odpowiedzi.
+
+        Raises:
+            NoModelAvailableError: Brak pasującego, włączonego modelu.
+            RateLimitExceededError: Przekroczono limit żądań.
+            ModelBackendError: Model zawiódł PO wysłaniu pierwszego fragmentu.
+            AllModelsFailedError: Wszyscy kandydaci zawiedli, zanim cokolwiek wysłali.
+        """
+        candidates = self._kandydaci(agent=agent, model=model, tags=tags)
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+        request = self._apply_cost_controls(request)
+
+        failures: list[tuple[str, str]] = []
+        for model_id, client in self._zdatni_kandydaci(request, candidates, failures):
+            strumien = getattr(client, "chat_stream", None)
+            if strumien is None:
+                failures.append((model_id, "klient nie obsługuje strumieniowania — pominięto"))
+                continue
+            cokolwiek_wyslano = False
+            try:
+                for fragment in strumien(request):
+                    cokolwiek_wyslano = True
+                    yield fragment
+            except ModelBackendError as exc:
+                if self._zdrowie is not None:
+                    self._zdrowie.odnotuj_awarie(model_id)
+                failures.append((model_id, str(exc)))
+                if cokolwiek_wyslano:
+                    raise
+                continue
+            if self._zdrowie is not None:
+                self._zdrowie.odnotuj_sukces(model_id)
+            return
+        raise AllModelsFailedError(failures)
+
+    def _kandydaci(
+        self, *, agent: str | None, model: str | None, tags: list[str] | None
+    ) -> list[str]:
+        """Zwraca kandydatów po uporządkowaniu wyłącznikiem bezpiecznikowym.
+
+        Raises:
+            NoModelAvailableError: Gdy nie ma żadnego pasującego, włączonego modelu.
+        """
         candidates = self.select(agent=agent, model=model, tags=tags)
         if self._zdrowie is not None:
-            # ODSUNIĘCIE, nie wykluczenie — patrz `husarz.router.zdrowie`. Gdyby padło
-            # wszystko, wykluczanie zostawiłoby pustą listę i twardą odmowę zamiast próby,
-            # która mogłaby się powieść.
             candidates = self._zdrowie.uporzadkuj(candidates)
         if not candidates:
             raise NoModelAvailableError(
                 f"Brak modelu dla żądania (agent={agent}, model={model}, tags={tags})."
             )
+        return candidates
 
-        if self._rate_limiter is not None:
-            self._rate_limiter.acquire()
+    def _zdatni_kandydaci(
+        self,
+        request: ChatRequest,
+        candidates: list[str],
+        failures: list[tuple[str, str]],
+    ) -> Iterator[tuple[str, ModelClient]]:
+        """Filtruje kandydatów przez bramki ŻĄDANIA i buduje klientów.
 
-        request = self._apply_cost_controls(request)
+        Wydzielone, a nie skopiowane do ścieżki strumieniowej: bramki wizyjna, budżetu okna
+        kontekstu i egressu są warunkami bezpieczeństwa, a dwie kopie rozjechałyby się przy
+        pierwszej zmianie jednej z nich.
 
+        Args:
+            request: Żądanie czatu.
+            candidates: Identyfikatory kandydatów w kolejności preferencji.
+            failures: Lista, do której dopisujemy powody pominięcia (mutowana).
+
+        Yields:
+            Pary ``(identyfikator, klient)`` dla kandydatów, którzy przeszli bramki.
+        """
         # Bramka wizyjna na poziomie KANDYDATA (nie tylko modelu wybranego w handlerze):
         # jeśli żądanie niesie obrazy, wykonać je może wyłącznie model z ``vision: true``.
         # Inaczej łańcuch fallbacków wysłałby treść multimodalną do modelu tekstowego
         # (cichy błąd/halucynacja) — patrz ADR-0013. Obraz NIE trafia do modelu bez wizji.
         requires_vision = any(m.images for m in request.messages)
-
         egress = self._config.security.egress
-        failures: list[tuple[str, str]] = []
         for model_id in candidates:
             spec = self._config.models.registry[model_id]
             if requires_vision and not spec.vision:
@@ -136,21 +231,7 @@ class ModelRouter:
             except EgressError as exc:
                 failures.append((model_id, str(exc)))
                 continue
-            client = self._client_factory(spec, model_id)
-            try:
-                odpowiedz = client.chat(request)
-            except ModelBackendError as exc:
-                # Awarią jest WYŁĄCZNIE błąd realnego wywołania. Pominięcia wyżej (brak
-                # wizji, prompt poza oknem, blokada egress) wynikają z właściwości ŻĄDANIA,
-                # nie ze zdrowia modelu — karanie za nie zdegradowałoby model sprawny.
-                if self._zdrowie is not None:
-                    self._zdrowie.odnotuj_awarie(model_id)
-                failures.append((model_id, str(exc)))
-                continue
-            if self._zdrowie is not None:
-                self._zdrowie.odnotuj_sukces(model_id)
-            return odpowiedz
-        raise AllModelsFailedError(failures)
+            yield model_id, self._client_factory(spec, model_id)
 
     def _apply_cost_controls(self, request: ChatRequest) -> ChatRequest:
         """Ogranicza ``max_tokens`` do limitu z ``routing.cost_controls`` (jeśli ustawiony)."""

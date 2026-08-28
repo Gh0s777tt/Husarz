@@ -8,6 +8,8 @@ przez dostawcę sekretów — nigdy nie jest wpisywany na stałe.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from typing import Any, Protocol, runtime_checkable
 
 from husarz.config.schema import ModelBackend, ModelSpec
@@ -35,6 +37,28 @@ class Transport(Protocol):
         payload: dict[str, Any],
         timeout: int,
     ) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class StreamingTransport(Protocol):
+    """Transport strumieniowy — zwraca kolejne ładunki zdarzeń SSE.
+
+    **Dlaczego OSOBNY protokół, a nie metoda w ``Transport``.** Dopisanie metody do
+    istniejącego protokołu unieważniłoby każdą atrapę transportu w testach, a jest ich
+    wiele — i to bez żadnego zysku, bo strumieniowanie jest zdolnością OPCJONALNĄ.
+    Klient sprawdza obecność metody i mówi wprost, gdy transportu nie da się strumieniować.
+
+    Zwracamy SUROWE ładunki ``data:`` (bez prefiksu), a nie gotowe fragmenty tekstu:
+    transport ma pozostać nieświadomy formatu OpenAI, tak jak przy zwykłym wywołaniu.
+    """
+
+    def stream(
+        self,
+        target: PinnedTarget,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        timeout: int,
+    ) -> Iterator[str]: ...
 
 
 @runtime_checkable
@@ -105,6 +129,105 @@ class HttpxTransport:
         except (httpx.HTTPError, ValueError) as exc:
             raise TransportError("Błąd HTTP przy wywołaniu modelu.") from exc
 
+    def stream(
+        self,
+        target: PinnedTarget,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        timeout: int | None = None,
+    ) -> Iterator[str]:
+        """Zwraca kolejne ładunki ``data:`` ze strumienia SSE.
+
+        Zachowuje WSZYSTKIE zabezpieczenia zwykłego wywołania — pin IP, nagłówek ``Host``
+        i SNI po oryginalnej nazwie, brak przekierowań, ``trust_env=False``. To nie jest
+        kopia dla wygody: gdyby ścieżka strumieniowa rozwiązywała nazwę ponownie, otwierałaby
+        okno TOCTOU zamknięte w ADR-0020, i to na połączeniu niosącym klucz API modelu.
+
+        Args:
+            target: Przypięty cel (IP + oryginalna nazwa do TLS).
+            headers: Nagłówki żądania.
+            payload: Ładunek JSON (musi zawierać ``stream: true``).
+            timeout: Limit czasu; ``None`` = wartość z konstruktora albo domyślna.
+
+        Yields:
+            Surowe ładunki po ``data:`` — bez prefiksu, bez pustych linii, bez ``[DONE]``.
+
+        Raises:
+            TransportError: Gdy połączenie albo odpowiedź HTTP zawiodą.
+        """
+        try:
+            import httpx  # noqa: PLC0415
+        except ImportError as exc:  # pragma: no cover - zależność deklarowana w pyproject
+            raise TransportError(
+                "Pakiet 'httpx' nie jest zainstalowany — wymagany przez HttpxTransport."
+            ) from exc
+        effective_timeout = (
+            timeout if timeout is not None else (self._timeout or DEFAULT_TIMEOUT_SECONDS)
+        )
+        sent_headers = dict(headers)
+        if target.host_header is not None:
+            sent_headers["Host"] = target.host_header
+        extensions: dict[str, Any] = {}
+        if target.sni_hostname is not None:
+            extensions["sni_hostname"] = target.sni_hostname
+        try:
+            with (
+                httpx.Client(
+                    timeout=effective_timeout,
+                    follow_redirects=False,
+                    verify=True,
+                    trust_env=False,
+                ) as client,
+                client.stream(
+                    "POST",
+                    target.connect_url,
+                    headers=sent_headers,
+                    json=payload,
+                    extensions=extensions,
+                ) as response,
+            ):
+                response.raise_for_status()
+                for linia in response.iter_lines():
+                    ladunek = _ladunek_sse(linia)
+                    if ladunek is not None:
+                        yield ladunek
+        except httpx.HTTPError as exc:
+            raise TransportError("Błąd HTTP przy strumieniowaniu z modelu.") from exc
+
+
+#: Prefiks pola danych w Server-Sent Events.
+_PREFIKS_SSE = "data:"
+#: Umowny znacznik końca strumienia w API zgodnym z OpenAI.
+ZNACZNIK_KONCA = "[DONE]"
+
+
+def _ladunek_sse(linia: str) -> str | None:
+    """Wyłuskuje ładunek z linii SSE; ``None`` dla linii bez znaczenia.
+
+    Przepuszczamy WYŁĄCZNIE linie ``data:``, więc wszystko inne odpada samo: puste linie
+    (separatory zdarzeń), komentarze SSE zaczynające się od ``:`` (używane jako sygnał
+    utrzymania połączenia), nagłówki ``event:`` i ``id:``. Parsowanie formatu należy do
+    klienta — transport ma pozostać nieświadomy OpenAI.
+
+    Pierwsza wersja sprawdzała komentarze osobnym warunkiem ``startswith(":")``. Kontrola
+    nośności pokazała, że jest ZBĘDNY: linia zaczynająca się od dwukropka i tak nie zaczyna
+    się od ``data:``. Warunek, który nigdy nie rozstrzyga, wygląda na kontrolę i nią nie
+    jest — a to ta sama klasa wady, którą usuwał Etap 17m.
+
+    Args:
+        linia: Pojedyncza linia odpowiedzi.
+
+    Returns:
+        Ładunek bez prefiksu albo ``None``.
+    """
+    tekst = linia.strip()
+    if not tekst.startswith(_PREFIKS_SSE):
+        return None
+    ladunek = tekst[len(_PREFIKS_SSE) :].strip()
+    if not ladunek or ladunek == ZNACZNIK_KONCA:
+        return None
+    return ladunek
+
 
 def _parse_openai_response(data: dict[str, Any], model_id: str) -> ChatResponse:
     """Parsuje odpowiedź w formacie OpenAI chat/completions."""
@@ -174,7 +297,26 @@ class OpenAICompatClient:
         timeout = spec.request_timeout_seconds
         self._timeout = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
 
-    def chat(self, request: ChatRequest) -> ChatResponse:
+    def _przygotuj(
+        self, request: ChatRequest, *, strumien: bool
+    ) -> tuple[PinnedTarget, dict[str, str], dict[str, Any]]:
+        """Buduje cel, nagłówki i ładunek — WSPÓLNIE dla wywołania zwykłego i strumieniowego.
+
+        Wydzielone celowo, a nie skopiowane: ścieżka strumieniowa musi mieć dokładnie ten
+        sam pin IP, tę samą kolejność pierwszeństwa parametrów i te same nagłówki. Dwie
+        kopie rozjechałyby się przy pierwszej zmianie jednej z nich, a rozjazd dotyczyłby
+        połączenia niosącego klucz API modelu.
+
+        Args:
+            request: Żądanie czatu.
+            strumien: Czy dopisać ``stream: true`` do ładunku.
+
+        Returns:
+            Trójka ``(cel, nagłówki, ładunek)``.
+
+        Raises:
+            ModelBackendError: Gdy brak endpointu albo cel nie przechodzi kontroli anty-SSRF.
+        """
         if self.spec.endpoint is None:
             raise ModelBackendError(self.model_id, "Model nie ma skonfigurowanego endpointu.")
 
@@ -202,15 +344,94 @@ class OpenAICompatClient:
         payload["model"] = self.spec.model
         payload["messages"] = [_message_payload(m) for m in request.messages]
 
+        if strumien:
+            payload["stream"] = True
+
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
+        return target, headers, payload
 
+    def chat(self, request: ChatRequest) -> ChatResponse:
+        """Wykonuje żądanie i zwraca pełną odpowiedź.
+
+        Args:
+            request: Żądanie czatu.
+
+        Returns:
+            Odpowiedź modelu.
+
+        Raises:
+            ModelBackendError: Gdy backend zawiedzie albo odpowiedź jest nieprawidłowa.
+        """
+        target, headers, payload = self._przygotuj(request, strumien=False)
         try:
             data = self._transport(target, headers, payload, self._timeout)
         except TransportError as exc:
             raise ModelBackendError(self.model_id, str(exc)) from exc
         return _parse_openai_response(data, self.model_id)
+
+    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+        """Zwraca kolejne FRAGMENTY treści odpowiedzi, w miarę jak przychodzą.
+
+        Args:
+            request: Żądanie czatu.
+
+        Yields:
+            Niepuste fragmenty tekstu (``choices[0].delta.content``).
+
+        Raises:
+            ModelBackendError: Gdy transport nie wspiera strumieniowania albo backend
+                zawiedzie. Awaria PO wysłaniu pierwszego fragmentu też kończy się tym
+                wyjątkiem — router nie może już wtedy sięgnąć po model zapasowy, bo
+                wywołujący widzi już początek innej odpowiedzi (patrz ``complete_stream``).
+        """
+        if not isinstance(self._transport, StreamingTransport):
+            raise ModelBackendError(
+                self.model_id,
+                "Transport nie obsługuje strumieniowania (brak metody `stream`).",
+            )
+        target, headers, payload = self._przygotuj(request, strumien=True)
+        try:
+            for ladunek in self._transport.stream(target, headers, payload, self._timeout):
+                fragment = _fragment_z_delty(ladunek)
+                if fragment:
+                    yield fragment
+        except TransportError as exc:
+            raise ModelBackendError(self.model_id, str(exc)) from exc
+
+
+def _fragment_z_delty(ladunek: str) -> str:
+    """Wyłuskuje tekst z jednego zdarzenia strumienia OpenAI.
+
+    Zdarzenie bez treści (sam ``finish_reason``, sama rola, licznik zużycia) daje pusty
+    napis — to normalny element strumienia, nie błąd. Ładunek NIEPARSOWALNY również
+    pomijamy: pojedyncze uszkodzone zdarzenie nie może wywrócić całej odpowiedzi, a jego
+    treści i tak nie da się odzyskać.
+
+    Args:
+        ladunek: Ładunek ``data:`` jednego zdarzenia SSE.
+
+    Returns:
+        Fragment tekstu albo pusty napis.
+    """
+    try:
+        dane = json.loads(ladunek)
+    except ValueError:
+        return ""
+    if not isinstance(dane, dict):
+        return ""
+    wybory = dane.get("choices")
+    if not isinstance(wybory, list) or not wybory:
+        return ""
+    pierwszy = wybory[0]
+    if not isinstance(pierwszy, dict):
+        return ""
+    delta = pierwszy.get("delta")
+    if not isinstance(delta, dict):
+        return ""
+    tresc = delta.get("content")
+    return tresc if isinstance(tresc, str) else ""
 
 
 class MockClient:
@@ -221,12 +442,24 @@ class MockClient:
         self.spec = spec
 
     def chat(self, request: ChatRequest) -> ChatResponse:
+        """Zwraca deterministyczną odpowiedź echa."""
         last = request.messages[-1].content if request.messages else ""
         return ChatResponse(
             model=self.model_id,
             content=f"[mock:{self.spec.model}] {last}",
             finish_reason="stop",
         )
+
+    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+        """Oddaje tę samą odpowiedź słowo po słowie.
+
+        Istnieje po to, żeby ścieżkę strumieniową dało się uruchomić i obejrzeć BEZ modelu —
+        w testach i na stanowisku bez silnika. Sklejenie fragmentów daje dokładnie treść
+        z ``chat``, więc atrapa nie może po cichu rozjechać się z wersją nierostrumieniową.
+        """
+        tresc = self.chat(request).content
+        for indeks, slowo in enumerate(tresc.split(" ")):
+            yield slowo if indeks == 0 else f" {slowo}"
 
 
 def build_client(

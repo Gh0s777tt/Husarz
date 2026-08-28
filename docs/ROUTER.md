@@ -254,3 +254,48 @@ odsuwałoby model, który przed chwilą został naprawiony.
 
 Stan **nie jest** współdzielony między procesami. Przy wielu instancjach każda uczy się
 osobno — mechanizm jest optymalizacją opóźnienia, nie rozproszonym stanem klastra.
+
+## Strumieniowanie odpowiedzi
+
+`ModelRouter.complete_stream` zwraca kolejne fragmenty treści, zamiast czekać na całość.
+Ścieżka jest równoległa do `complete` i przechodzi przez **te same bramki**: wizyjną, budżetu
+okna kontekstu, egressu, limitu tempa i wyłącznika bezpiecznikowego. Nie jest to kopia —
+wspólny kod siedzi w `_zdatni_kandydaci` i `OpenAICompatClient._przygotuj`, bo dwie kopie
+warunków bezpieczeństwa rozjechałyby się przy pierwszej zmianie jednej z nich.
+
+### Fallback działa TYLKO do pierwszego fragmentu
+
+To jest istota tej metody, nie szczegół.
+
+| Sytuacja | Zachowanie |
+|---|---|
+| model zawiódł, zanim cokolwiek wysłał | przejście do kolejnego kandydata (jak w `complete`) |
+| model zawiódł PO wysłaniu fragmentu | strumień kończy się błędem — **bez** przełączenia |
+| wszyscy zawiedli przed pierwszym fragmentem | `AllModelsFailedError` |
+
+Powód drugiego wiersza: przełączenie modelu w połowie odpowiedzi **skleiłoby dwie różne
+odpowiedzi w jedną**. Użytkownik zobaczyłby początek jednej myśli i dalszy ciąg innej, bez
+żadnego sygnału, że coś się stało. Milcząca niespójność jest gorsza od widocznego błędu.
+
+### Transport zachowuje pin IP
+
+`HttpxTransport.stream` powtarza **wszystkie** zabezpieczenia zwykłego wywołania: pin IP
+(ADR-0020), nagłówek `Host` i SNI po oryginalnej nazwie, brak przekierowań,
+`trust_env=False`. Gdyby ścieżka strumieniowa rozwiązywała nazwę ponownie, otwierałaby okno
+TOCTOU zamknięte w ADR-0020 — i to na połączeniu niosącym klucz API modelu.
+
+Strumieniowanie jest zdolnością **opcjonalną** transportu (osobny protokół
+`StreamingTransport`). Klient sprawdza jej obecność i mówi wprost, gdy jej brak; router
+pomija takiego kandydata zamiast wywracać cały łańcuch.
+
+### Parsowanie SSE
+
+Transport przepuszcza wyłącznie linie `data:` i oddaje surowe ładunki — nie zna formatu
+OpenAI, tak samo jak przy zwykłym wywołaniu. Znacznik `[DONE]`, komentarze utrzymania
+połączenia i nagłówki `event:`/`id:` odpadają na tym jednym warunku. Pojedyncze
+**nieparsowalne zdarzenie jest pomijane**, a nie wywraca całej odpowiedzi: jego treści i tak
+nie da się odzyskać, a reszta odpowiedzi ma dojść.
+
+`MockClient` też strumieniuje — słowo po słowie, dając po sklejeniu dokładnie tę samą treść
+co `chat`. Dzięki temu ścieżkę strumieniową da się uruchomić i obejrzeć **bez modelu**,
+a atrapa nie może po cichu rozjechać się z wersją nierostrumieniową.

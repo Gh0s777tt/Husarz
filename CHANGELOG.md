@@ -54,6 +54,34 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18l — strumieniowanie odpowiedzi: transport, klient, router)
+
+- **`ModelRouter.complete_stream`** zwraca kolejne fragmenty treści zamiast czekać na całość.
+  Ścieżka przechodzi przez TE SAME bramki co `complete` (wizyjna, budżet okna kontekstu,
+  egress, limit tempa, wyłącznik bezpiecznikowy) — wspólny kod, nie kopia, bo dwie kopie
+  warunków bezpieczeństwa rozjechałyby się przy pierwszej zmianie jednej z nich.
+- **Fallback działa TYLKO do pierwszego fragmentu.** Awaria przed wysłaniem czegokolwiek to
+  zwyczajne przejście do kolejnego kandydata; awaria PO wysłaniu kończy strumień błędem.
+  Przełączenie modelu w połowie SKLEIŁOBY dwie różne odpowiedzi w jedną — użytkownik
+  zobaczyłby początek jednej myśli i dalszy ciąg innej, bez żadnego sygnału.
+- **`HttpxTransport.stream`** zachowuje wszystkie zabezpieczenia zwykłego wywołania: pin IP
+  (ADR-0020), nagłówek `Host` i SNI po oryginalnej nazwie, brak przekierowań,
+  `trust_env=False`. Ścieżka strumieniowa rozwiązująca nazwę ponownie otwierałaby okno TOCTOU
+  na połączeniu niosącym klucz API modelu.
+- **Strumieniowanie jest zdolnością OPCJONALNĄ** (osobny protokół `StreamingTransport`) —
+  dopisanie metody do istniejącego `Transport` unieważniłoby każdą atrapę w testach bez
+  żadnego zysku. Klient mówi wprost, gdy transport jej nie ma; router pomija takiego
+  kandydata zamiast wywracać łańcuch.
+- **`MockClient` też strumieniuje**, dając po sklejeniu dokładnie treść z `chat`. Ścieżkę
+  da się więc uruchomić bez modelu, a atrapa nie rozjedzie się po cichu z wersją zwykłą.
+- Nieparsowalne pojedyncze zdarzenie SSE jest pomijane, a nie wywraca całej odpowiedzi.
+
+### Usunięte (wykryte kontrolą nośności Etapu 18l)
+
+- **Zbędny warunek w parserze SSE.** Sprawdzanie komentarzy (`startswith(":")`) nigdy nie
+  rozstrzygało: linia zaczynająca się od dwukropka i tak nie zaczyna się od `data:`.
+  Warunek wyglądał na kontrolę i nią nie był — ta sama klasa wady, którą usuwał Etap 17m.
+
 ### Dodane (Etap 18k — równoległa delegacja kroków planu)
 
 - **`platform.orchestrator.max_parallel_delegations`** — ile kroków planu wykonywać naraz.
