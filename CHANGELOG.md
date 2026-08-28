@@ -5,6 +5,22 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Zmienione (konfiguracja odrzuca `routing.strategy`, którego router nie realizuje)
+
+- **`routing.strategy: cost` / `latency` nie robiło NIC.** `selection.py` nie czyta tego pola
+  ani razu (sprawdzone przeszukaniem `src/`), więc operator ustawiał politykę doboru modelu
+  po koszcie i dostawał po cichu zachowanie `tags`. Ta sama klasa co usunięte `weights_path`,
+  tylko gorsza: nazwa obiecuje POLITYKĘ, a nie ścieżkę.
+- Konfiguracja z taką wartością **nie wczyta się**, a komunikat mówi, co się stało, co
+  ustawić zamiast i dlaczego strategie nie działają (brak danych o cenie i opóźnieniu
+  w `models.registry` — to właściwy powód, nie przeoczenie w routerze).
+- **SPROSTOWANIE w `docs/ROUTER.md`:** akapit nazywał je „placeholderami" i na tym
+  poprzestawał. Były jednak placeholderami PRZYJMOWANYMI. Uczciwa uwaga w dokumentacji to
+  najsłabsza z możliwych kontroli — nie czyta jej ten, kto edytuje YAML.
+- Nowy test wymusza rozstrzygnięcie statusu KAŻDEJ wartości enuma: dopisanie kolejnej
+  strategii musi skończyć się albo implementacją, albo świadomym odrzuceniem — nie cichym
+  placeholderem.
+
 ### Poprawione (budżet kontekstu: obraz przestał kosztować ZERO)
 
 - **Obrazy nie były liczone w budżecie okna kontekstu.** `ChatMessage.images` idzie do modelu

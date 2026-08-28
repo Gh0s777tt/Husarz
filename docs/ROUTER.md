@@ -35,8 +35,19 @@ Do każdego wybranego modelu dołączany jest jego łańcuch `fallback` (o ile
 (`enabled: true`); model wyłączony jest pomijany, ale jego fallbacki nadal
 działają. Rozwijanie fallbacków jest odporne na cykle (każdy model odwiedzany raz).
 
-> Uwaga: pole `routing.strategy` ma obecnie aktywną wyłącznie wartość `tags`
-> (opisany wyżej wybór). Wartości `cost`/`latency` to placeholdery na kolejne etapy.
+> **`routing.strategy` przyjmuje wyłącznie `tags`.** Wartości `cost`/`latency` są zapisanym
+> zamiarem na kolejne etapy — i dopóki nim są, **konfiguracja ich nie przyjmuje**: próba
+> ustawienia kończy się czytelnym błędem walidacji przy starcie.
+>
+> **SPROSTOWANIE.** Poprzednia wersja tej uwagi nazywała je „placeholderami" i na tym
+> poprzestawała. Były jednak placeholderami PRZYJMOWANYMI: `selection.py` nie czyta pola
+> `strategy` ani razu, więc `strategy: cost` dawało po cichu zachowanie `tags`, a operator
+> miał prawo sądzić, że skonfigurował dobór po koszcie. Uczciwy akapit w dokumentacji to
+> najsłabsza z możliwych kontroli — nie czyta go ten, kto edytuje YAML.
+>
+> Dobór po koszcie i opóźnieniu wymaga danych o modelach, których `models.registry` dziś nie
+> przechowuje (cena za token, zmierzone opóźnienie). To jest właściwy powód, dla którego
+> strategie nie działają — nie przeoczenie w routerze.
 
 ## Bramka egress (deny-all)
 

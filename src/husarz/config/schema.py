@@ -272,6 +272,18 @@ class CostControls(_StrictModel):
     max_requests_per_minute: int | None = Field(default=None, ge=1)
 
 
+# Strategie doboru modelu, które router NAPRAWDĘ realizuje. Reszta wartości `RoutingStrategy`
+# to zapisany zamiar na kolejne etapy — i dopóki nim jest, konfiguracja ich NIE PRZYJMUJE.
+#
+# Powód jest ten sam, dla którego usunięto `weights_path`: ustawienie, które wygląda na
+# działające i nie robi nic, jest gorsze niż jego brak. `selection.py` nie czyta pola
+# `strategy` ani razu (sprawdzone przeszukaniem `src/`), więc `strategy: cost` dawało po cichu
+# zachowanie `tags`, a operator miał prawo sądzić, że skonfigurował routing po koszcie.
+# Dokumentacja mówiła o tym uczciwie — ale dokumentacja to najsłabsza z możliwych kontroli:
+# nie czyta jej ten, kto edytuje YAML.
+_ZAIMPLEMENTOWANE_STRATEGIE: frozenset[RoutingStrategy] = frozenset({RoutingStrategy.TAGS})
+
+
 class RoutingConfig(_StrictModel):
     """Konfiguracja routera modeli."""
 
@@ -281,6 +293,28 @@ class RoutingConfig(_StrictModel):
     rules: list[RoutingRule] = Field(default_factory=list)
     cost_controls: CostControls = Field(default_factory=CostControls)
     fallbacks_enabled: bool = True
+
+    @model_validator(mode="after")
+    def _tylko_zaimplementowane_strategie(self) -> RoutingConfig:
+        """Odrzuca strategie, których router nie realizuje — zamiast cicho udawać `tags`.
+
+        Fail-closed: lepiej nie wystartować z czytelnym komunikatem, niż działać inaczej,
+        niż mówi konfiguracja. Wartości `cost`/`latency` zostają w enumie, bo są zapisanym
+        zamiarem — ale ich wybór ma boleć teraz, a nie zaskoczyć przy pierwszym rachunku.
+
+        Raises:
+            ValueError: Gdy wybrano strategię jeszcze niezaimplementowaną.
+        """
+        if self.strategy not in _ZAIMPLEMENTOWANE_STRATEGIE:
+            dostepne = ", ".join(sorted(s.value for s in _ZAIMPLEMENTOWANE_STRATEGIE))
+            raise ValueError(
+                f"routing.strategy='{self.strategy.value}' NIE jest jeszcze zaimplementowane — "
+                f"router nie czyta tego pola i zachowałby się jak '{RoutingStrategy.TAGS.value}'. "
+                f"Ustaw jedną z działających wartości ({dostepne}). Dobór po koszcie i opóźnieniu "
+                f"wymaga danych o modelach, których `models.registry` dziś nie przechowuje — "
+                f"pozycja jest w ROADMAP."
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------

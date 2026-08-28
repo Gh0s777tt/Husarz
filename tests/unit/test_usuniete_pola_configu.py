@@ -53,3 +53,70 @@ def test_dostarczona_konfiguracja_nie_uzywa_usunietego_pola(
     load_config(repo_config_dir)  # rzuciłoby, gdyby pole gdzieś zostało
     tresc = (repo_config_dir / "models.yaml").read_text(encoding="utf-8")
     assert "weights_path" not in tresc
+
+
+# ------------------------------- ustawienia, które NIE ROBIĄ nic, są odrzucane
+
+
+def test_niezaimplementowana_strategia_routingu_jest_ODRZUCANA() -> None:
+    """`routing.strategy: cost` nie robiło NIC — router nie czyta tego pola ani razu.
+
+    Operator ustawiał politykę doboru modelu po koszcie i dostawał po cichu zachowanie
+    `tags`. Ta sama klasa co `weights_path`, tylko gorsza: nazwa obiecuje POLITYKĘ, a nie
+    ścieżkę. Dokumentacja mówiła o tym uczciwie („placeholdery na kolejne etapy") — ale
+    dokumentacja to najsłabsza z możliwych kontroli, bo nie czyta jej ten, kto edytuje YAML.
+    """
+    from husarz.config.schema import RoutingConfig
+
+    for niedziałająca in ["cost", "latency"]:
+        with pytest.raises(ValueError) as exc:
+            RoutingConfig(strategy=niedziałająca)
+        tresc = str(exc.value)
+        assert "NIE jest jeszcze zaimplementowane" in tresc, niedziałająca
+        assert "tags" in tresc, "komunikat musi podać wartość, która DZIAŁA"
+
+
+def test_dzialajaca_strategia_przechodzi() -> None:
+    """Nośność: walidator nie może odrzucać wszystkiego."""
+    from husarz.config.schema import RoutingConfig, RoutingStrategy
+
+    assert RoutingConfig(strategy="tags").strategy is RoutingStrategy.TAGS
+    assert RoutingConfig().strategy is RoutingStrategy.TAGS
+
+
+def test_kazda_wartosc_enuma_ma_ROZSTRZYGNIETY_status() -> None:
+    """Dopisanie wartości do enuma MUSI wymusić decyzję: implementuję czy odrzucam.
+
+    Bez tego nowa strategia weszłaby do schematu jako kolejny cichy placeholder — czyli
+    wróciłaby dokładnie ta wada, którą ten walidator zamyka.
+    """
+    from husarz.config.schema import (
+        _ZAIMPLEMENTOWANE_STRATEGIE,
+        RoutingConfig,
+        RoutingStrategy,
+    )
+
+    assert _ZAIMPLEMENTOWANE_STRATEGIE, "lista zaimplementowanych nie może być pusta"
+    for wartosc in RoutingStrategy:
+        if wartosc in _ZAIMPLEMENTOWANE_STRATEGIE:
+            RoutingConfig(strategy=wartosc)  # musi przejść
+        else:
+            with pytest.raises(ValueError):
+                RoutingConfig(strategy=wartosc)
+
+
+def test_router_faktycznie_NIE_czyta_pola_strategy() -> None:
+    """Kontrola ŹRÓDŁA potwierdzająca przesłankę całej tej odmowy.
+
+    Gdyby ktoś kiedyś wpiął `strategy` w `selection.py`, ten test zaczerwieni się i zmusi
+    do przemyślenia walidatora — zamiast zostawić odmowę, która stała się nieprawdziwa.
+    Świadomie słabszy niż test skutku: sprawdza brak odwołania, nie brak zachowania.
+    """
+    from pathlib import Path
+
+    zrodlo = Path("src/husarz/router/selection.py").read_text(encoding="utf-8")
+
+    assert ".strategy" not in zrodlo, (
+        "selection.py zaczął czytać `routing.strategy` — zweryfikuj walidator "
+        "`_tylko_zaimplementowane_strategie`, bo jego uzasadnienie mogło przestać być prawdziwe"
+    )

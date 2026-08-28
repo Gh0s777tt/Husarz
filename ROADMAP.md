@@ -123,7 +123,11 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - 🚧 Uwierzytelnienie + przypisanie ról: **token Bearer + RBAC wpięte w API (Etap 5)**;
   pełny **OIDC** i **mTLS** — Etap 6.
 - ⬜ Runtime egress deny-all na warstwie sieci + izolacja sandboxa (Etap 6).
-- ⬜ Aktywować strategie routingu `cost`/`latency` (obecnie placeholdery; aktywne `tags`).
+- ⬜ Aktywować strategie routingu `cost`/`latency`. Od teraz konfiguracja ich **nie
+  przyjmuje** (walidacja odrzuca z komunikatem) — wcześniej były przyjmowane i po cichu
+  dawały zachowanie `tags`, czyli operator konfigurował politykę, której nie było.
+  Implementacja wymaga NAJPIERW danych w `models.registry`: ceny za token i zmierzonego
+  opóźnienia. Bez nich nie ma czym routować i to jest właściwy powód opóźnienia.
 
 ## ✅ Etap 5 — API + Launcher + Web
 - ✅ REST API rdzenia (FastAPI): health, config, agents, models, tools, audit,
