@@ -36,6 +36,23 @@ mtls:
   cert_ref: null
   key_ref: null
 
+# Diagnoza instalacji wystawiona przez API (`GET /api/doctor`).
+#
+# Limit tempa NIE jest kosmetyką: każde wywołanie otwiera połączenia wychodzące do KAŻDEGO
+# endpointu z konfiguracji. Bez niego uprawnienie `diagnostics:read` byłoby dźwignią —
+# żądanie tanie dla wywołującego, kosztowne dla instalacji i dla silników, do których
+# Husarz się odzywa.
+#
+# Domyślne 6/min to jedno wywołanie na dziesięć sekund: swobodnie wystarcza człowiekowi
+# klikającemu „Sprawdź ponownie", a nie pozwala robić z endpointu generatora ruchu.
+# UWAGA: limit jest GLOBALNY dla instalacji, nie per konto — konto odpytujące w pętli
+# potrafi odebrać diagnozę operatorowi w trakcie awarii.
+#
+# `null` wyłącza limit. To świadoma REZYGNACJA z zabezpieczenia (sensowna np. przy
+# instalacji jednoosobowej na loopbacku), nie jego brak.
+diagnostics:
+  max_requests_per_minute: 6
+
 auth:
   oidc_enabled: false        # włącz w prod (pełny przepływ tożsamości — Etap 6)
   issuer: null

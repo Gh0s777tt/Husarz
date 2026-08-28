@@ -184,7 +184,9 @@ zawiódł` jest dokładnie tym zdaniem, dla którego diagnoza powstała.
     `config:read` celowo nie wystawia — a wywołanie otwiera połączenia wychodzące.
     Rola `user` (zakładana samodzielną rejestracją) MA `config:read`, więc oparcie diagnozy
     na nim ujawniłoby to publicznie. Uprawnienie mają `admin` i `operator`; `viewer` nie,
-    bo podgląd nie wysyła pakietów. Szczegóły: [API.md](API.md#uwierzytelnianie-i-autoryzacja-rbac).
+    ale nie dlatego, że „podgląd nie wysyła pakietów" — ten argument przestał obowiązywać
+    wraz z limitem tempa. Granica stoi na UJAWNIENIU topologii.
+    Szczegóły: [API.md](API.md#uwierzytelnianie-i-autoryzacja-rbac).
 
     Każde wywołanie zostawia wpis w audycie (akcja `doctor`) z identyfikatorem wywołującego
     i samymi liczbami w szczególe — bez endpointów i ścieżek, bo dziennik jest niemodyfikowalny.

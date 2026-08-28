@@ -37,7 +37,9 @@ def test_zakladka_i_sekcja_istnieja() -> None:
 
 def test_zakladka_jest_wpieta_w_przelacznik_i_w_przycisk_odswiezania() -> None:
     """Dwie drogi do tej samej funkcji: wejście w zakładkę i „Sprawdź ponownie"."""
-    assert 'if (tab === "doctor") loadDoctor();' in _ZRODLO
+    # Przełączenie zakładki celowo NIE odpala sondowania — patrz
+    # `test_przelaczenie_zakladki_NIE_odpytuje_silnikow`.
+    assert 'if (tab === "doctor") pokazDiagnoze();' in _ZRODLO
     assert '$("doctor-refresh").onclick = loadDoctor;' in _ZRODLO
 
 
@@ -52,7 +54,10 @@ def test_kazda_wartosc_z_odpowiedzi_przechodzi_przez_escapowanie() -> None:
     w komentarzu też zostanie zgłoszona. To świadomy kompromis — parsowanie komentarzy JS
     w teście kosztowałoby więcej, niż przeredagowanie komentarza.
     """
-    cialo = _cialo_funkcji("loadDoctor")
+    # Renderowanie tabeli mieszka w `rysujDiagnoze`, nie w `loadDoctor` (rozdzielone, żeby
+    # wejście w zakładkę mogło pokazać ostatni wynik bez odpytywania silników). Kontrola musi
+    # badać funkcję, która NAPRAWDĘ wstawia treść — inaczej przechodziłaby zawsze.
+    cialo = _cialo_funkcji("rysujDiagnoze")
     wstawki = re.findall(r"\$\{([^}]*)\}", cialo)
     assert wstawki, "test byłby pusty, gdyby panel nic nie wstawiał"
 
@@ -71,7 +76,7 @@ def test_panel_NIE_liczy_oceny_sam() -> None:
     tę samą instalację inaczej niż `husarz doctor` — a operator nie wiedziałby, któremu
     nośnikowi wierzyć.
     """
-    cialo = _cialo_funkcji("loadDoctor")
+    cialo = _cialo_funkcji("rysujDiagnoze")
 
     assert "d.blocking" in cialo and "d.warnings" in cialo and "d.unknown" in cialo
     assert ".filter(" not in cialo, "panel filtruje ustalenia zamiast użyć liczników z API"
@@ -173,3 +178,35 @@ def test_konsola_odroznia_LIMIT_TEMPA_od_awarii() -> None:
     poz_bledu = blok.index("""$("doctor-out").innerHTML = `<p class='err'>""")
     assert poz429 < poz_bledu, "gałąź 429 musi wypaść PRZED wypisaniem błędu"
     assert "warn" in blok[poz429:poz_bledu], "limit tempa ma kolor ostrzeżenia, nie błędu"
+
+
+def test_przelaczenie_zakladki_NIE_odpytuje_silnikow() -> None:
+    """Kliknięcie w nawigacji nie jest świadomym żądaniem wysłania pakietów.
+
+    Limit tempa (`security.diagnostics`) jest GLOBALNY dla instalacji, więc konto klikające
+    po zakładkach potrafiłoby wyczerpać pulę i odebrać diagnozę operatorowi w trakcie awarii.
+    Wejście w zakładkę pokazuje ostatni wynik ze znacznikiem czasu; świeży wymaga kliknięcia.
+
+    Wskazane przez panel oceniający decyzję o rolach — jako zmiana obniżająca zużycie wspólnej
+    puli NIEZALEŻNIE od tego, komu ostatecznie przyzna się `diagnostics:read`.
+    """
+    assert 'if (tab === "doctor") pokazDiagnoze();' in _ZRODLO
+    cialo = _cialo_funkcji("pokazDiagnoze")
+    assert "fetch(" not in cialo, "wejście w zakładkę odpytuje API"
+    assert "doctorOstatni" in cialo, "brak pokazania ostatniego wyniku"
+    # Przycisk zostaje JEDYNĄ drogą do świeżego pomiaru.
+    assert '$("doctor-refresh").onclick = loadDoctor;' in _ZRODLO
+
+
+def test_wynik_niesie_znacznik_czasu() -> None:
+    """Pokazujemy stan sprzed chwili, więc operator ma wiedzieć, sprzed której.
+
+    Bez znacznika ostatni wynik wyglądałby jak bieżący — czyli panel twierdziłby coś
+    o teraźniejszości na podstawie pomiaru sprzed kwadransa. To ta sama klasa nieprawdy,
+    co zaokrąglanie „nie wiem" do „w porządku".
+    """
+    cialo = _cialo_funkcji("rysujDiagnoze")
+
+    assert "stan z" in cialo
+    assert "toLocaleTimeString" in cialo
+    assert "esc(" in cialo.split("stempel")[0] or "esc(czesci.join" in cialo

@@ -70,11 +70,31 @@ def test_rola_user_NIE_widzi_diagnozy(repo_config_dir: Path) -> None:
 
 
 def test_rola_viewer_NIE_widzi_diagnozy(repo_config_dir: Path) -> None:
-    """`viewer` to podgląd; diagnoza wysyła pakiety, więc nie jest odczytem."""
-    client = _client(repo_config_dir, rola="viewer")
+    """`viewer` nie dostaje diagnozy — i nie generuje przy tym ANI JEDNEGO zapytania.
+
+    Sam kod 403 jest deklaracją: sprawdza odpowiedź, nie skutek. Gdyby bramka RBAC stała
+    za sondowaniem, odmowa przychodziłaby PO odpytaniu silników — czyli konto bez uprawnienia
+    i tak konsumowałoby globalny limit tempa i generowało ruch wychodzący. Liczymy więc
+    zapytania sondy, tak jak przy limicie tempa.
+
+    Powód samej granicy jest przy tym INNY, niż zapisano pierwotnie: nie „podgląd nie wysyła
+    pakietów" (ten argument zniknął wraz z limitem), tylko ujawnienie aktualnej topologii —
+    adresów silników, ścieżek operatora i katalogu silnika. Patrz komentarz w `rbac.py`.
+    """
+    sonda = _SondaZObiemaRolami()
+    app = create_app(
+        load_config(repo_config_dir),
+        config_dir=repo_config_dir,
+        audit=AuditLog(),
+        api_token="s3cret",
+        api_role="viewer",
+        doctor_probe=sonda,
+    )
+    client = TestClient(app)
 
     assert client.get("/api/audit", headers=_NAGLOWEK).status_code == 200
     assert client.get("/api/doctor", headers=_NAGLOWEK).status_code == 403
+    assert sonda.zapytane == [], "odmowa nastąpiła PO zapytaniu modelu"
 
 
 @pytest.mark.parametrize("rola", ["operator", "admin"])

@@ -2282,3 +2282,81 @@ bloku.
 **Ograniczenie — wprost.** Limit jest GLOBALNY dla instalacji, nie per wywołujący. Przy
 kilku operatorach jeden może wyczerpać pulę drugiemu. Limit per konto wymagałby wiązania
 kubełka z `principal`, co ma sens dopiero przy instalacji wieloosobowej — zapisane w ROADMAP.
+
+## Etap 17l — sprostowanie: limit tempa NIE był przesłanką do rozszerzenia kręgu ról
+
+Notatka powstała po panelu oceniającym decyzję „kto ma widzieć diagnozę". Wniosek panelu
+jest przeciwny do mojej skłonności i to jest jego wartość.
+
+### Skąd pytanie
+
+Rola `viewer` nie ma `diagnostics:read`. Uzasadnienie zapisane przy tej decyzji brzmiało:
+**„podgląd nie wysyła pakietów"**. Po wprowadzeniu limitu tempa (Etap 17k) wyglądało to na
+argument nieaktualny — a sam `viewer` widzi przecież dziennik audytu, więc granica sprawiała
+wrażenie postawionej w złym miejscu.
+
+### Co ustalił panel
+
+Trzy niezależne stanowiska (rozszerzyć `viewer` / utworzyć rolę `noc` / zostawić), każde
+oceniane przez trzy soczewki (bezpieczeństwo, operacyjna, spójność):
+
+| Stanowisko | Średnia | Bezpieczne? |
+|---|---:|---|
+| zostaw jak jest | **7,3/10** | tak |
+| nowa rola `noc` | 7,0/10 | tak |
+| rozszerz `viewer` | 4,7/10 | **nie** |
+
+**Decyzja: granica zostaje.** Ale uzasadnienie było niepełne i wymagało sprostowania
+w czterech miejscach (`rbac.py`, `docs/API.md`, `docs/LAUNCHER.md`, ta notatka).
+
+### Sprostowanie — powody są DWA, nie jeden
+
+1. **Wolumen ruchu** — pierwotny argument. **Ten powód zniknął** wraz z limitem tempa.
+   Sufit ruchu wychodzącego instalacji to `max_requests_per_minute` × liczba endpointów,
+   **niezależnie od tego, ile ról ma uprawnienie**. Dopisanie roli podnosi go o zero pakietów.
+   Argument o pakietach przestał więc rozróżniać role — i to jest właśnie to, co
+   sprawiało wrażenie, że decyzja jest do zmiany.
+2. **Ujawnienie aktualnej topologii** — powód, który **nie zmienił się wcale** i jest dziś
+   jedynym uzasadnieniem granicy. Odpowiedź diagnozy niesie adresy i porty silników, ścieżki
+   katalogów operatora oraz KATALOG silnika — czyli nazwy modeli spoza konfiguracji Husarza,
+   na współdzielonym serwerze wnioskowania także cudzych. Dzieje się to na ścieżce
+   **szczęśliwej**, nie tylko przy awarii. Sprawdzone uruchomieniem: przy wszystkich
+   kontrolach OK odpowiedź nadal zawiera pełne adresy silników.
+
+### Trzeci powód, który POWSTAŁ razem z limitem
+
+Limit jest **globalny** dla instalacji. Konto podglądowe odpytujące co dziesięć sekund trzyma
+kubełek na zerze, a operator klikający „Sprawdź ponownie" w trakcie awarii dostaje 429 — czyli
+traci diagnozę dokładnie wtedy, gdy jest potrzebna. Limit usunął argument o **amplifikacji**
+i stworzył argument o **wygłodzeniu**.
+
+Stąd twardy warunek wstępny: **jakiekolwiek rozszerzenie `diagnostics:read` wymaga NAJPIERW
+kubełka per `principal` z rezerwą dla `operator`/`admin`.** W ROADMAP przestaje to być
+pozycją „do rozważenia" obok innych.
+
+### Sprostowanie do brief-u panelu (moja pomyłka)
+
+Twierdziłem, że `viewer` „widzi PEŁNY dziennik audytu". Nieprawda — `api/audit_view.py` działa
+deny-by-default i przepuszcza wyłącznie wąską allowlistę (`tool.call` → `tool`/`action`/`ok`
+i dwie inne akcje). Asymetria, na którą się powoływałem, jest więc mniejsza, niż napisałem.
+Nadal istnieje (audyt to zapis rozliczalności), ale nie w takiej skali.
+
+### Co zmieniono w tym kroku
+
+| Zmiana | Po co |
+|---|---|
+| Sprostowane uzasadnienie w `rbac.py` i dwóch plikach docs | niepełny powód stał w czterech miejscach |
+| `config/security.yaml` dostał sekcję `diagnostics:` | zabezpieczenie niewidoczne w plikach konfiguracji nie zostanie ani dostrojone, ani świadomie wyłączone |
+| Wejście w zakładkę **nie odpala** sondowania | kliknięcie w nawigacji nie jest świadomym żądaniem wysłania pakietów; obniża zużycie wspólnej puli niezależnie od decyzji o rolach |
+| Wynik niesie znacznik czasu | pokazujemy stan sprzed chwili — operator ma wiedzieć, sprzed której. Stary pomiar udający bieżący to ta sama klasa nieprawdy, co zaokrąglanie „nie wiem" do „w porządku" |
+| `test_rola_viewer_NIE_widzi_diagnozy` liczy zapytania sondy | sam kod 403 jest deklaracją; gdyby bramka RBAC stała ZA sondowaniem, odmowa przychodziłaby po wygenerowaniu ruchu |
+
+Nośność: **3 mutacje, 3 czerwone** (wejście w zakładkę znów odpytuje; wynik bez znacznika
+czasu; bramka diagnozy przestawiona na `config:read`).
+
+### Zapisane do rozważenia, nie zrobione
+
+Zawężenie ŁADUNKU odpowiedzi API (nie CLI): pełne endpointy i ścieżki bezwzględne są
+potrzebne operatorowi w terminalu, ale w odpowiedzi HTTP mogłyby być skracane. Obniżyłoby to
+stawkę całej tej dyskusji i uczyniłoby przyszłą rolę monitoringu bezpieczniejszą z definicji.
+Wymaga własnego testu skutku — w ROADMAP.

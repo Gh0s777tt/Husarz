@@ -5,6 +5,43 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Sprostowane (uzasadnienie granicy `diagnostics:read` było niepełne)
+
+- **`viewer` nadal bez `diagnostics:read` — ale z INNEGO powodu, niż zapisano.** Uzasadnienie
+  „podgląd nie wysyła pakietów" przestało obowiązywać wraz z limitem tempa: sufit ruchu
+  wychodzącego jest ten sam bez względu na to, ile ról ma uprawnienie. Granica stoi dziś
+  wyłącznie na UJAWNIENIU aktualnej topologii — adresy i porty silników, ścieżki katalogów
+  operatora, katalog silnika (nazwy modeli spoza konfiguracji Husarza) — i to na ścieżce
+  SZCZĘŚLIWEJ, nie tylko przy awarii. Sprostowane w `rbac.py`, `docs/API.md`,
+  `docs/LAUNCHER.md` i w notatce `docs/BEZPIECZENSTWO.md` (Etap 17l).
+- **Decyzja poddana panelowi trzech stanowisk** (rozszerzyć `viewer` / rola `noc` / zostawić),
+  każde ocenione przez trzy soczewki. Wynik: status quo 7,3/10, rola `noc` 7,0/10,
+  rozszerzenie `viewer` **4,7/10 i ocenione jako niebezpieczne**. Wniosek był przeciwny do
+  mojej wyjściowej skłonności.
+- **Nowy, twardy warunek wstępny** dla jakiegokolwiek rozszerzenia `diagnostics:read`:
+  kubełek limitu per `principal` z rezerwą dla operatora. Limit jest globalny, więc konto
+  podglądowe odpytujące w pętli odbiera diagnozę operatorowi w trakcie awarii — limit usunął
+  argument o amplifikacji i stworzył argument o wygłodzeniu.
+
+### Dodane / poprawione (konsola i konfiguracja diagnozy)
+
+- **`config/security.yaml` dostał sekcję `diagnostics:`** z komentarzem. Klucza tam nie było,
+  więc jedyne zabezpieczenie tego endpointu było niewidoczne dla operatora czytającego pliki
+  konfiguracji — a zabezpieczenie, o którym nikt nie wie, nie zostanie ani dostrojone, ani
+  świadomie wyłączone.
+- **Wejście w zakładkę „Diagnoza" NIE odpala już sondowania.** Kliknięcie w nawigacji nie jest
+  świadomym żądaniem wysłania pakietów, a limit jest wspólny dla instalacji. Panel pokazuje
+  ostatni wynik; świeży wymaga kliknięcia „Sprawdź ponownie".
+- **Wynik niesie znacznik czasu** („stan z 14:32:05"). Pokazujemy stan sprzed chwili, więc
+  operator ma wiedzieć, sprzed której — stary pomiar udający bieżący to ta sama klasa
+  nieprawdy, co zaokrąglanie „nie wiem" do „w porządku".
+- **`test_rola_viewer_NIE_widzi_diagnozy` sprawdza SKUTEK, nie deklarację** — liczy zapytania
+  sondy i wymaga zera. Sam kod 403 przechodziłby także wtedy, gdyby bramka RBAC stała ZA
+  sondowaniem, czyli gdyby odmowa przychodziła po wygenerowaniu ruchu.
+- **SPROSTOWANIE własnej pomyłki:** twierdziłem, że `viewer` widzi PEŁNY dziennik audytu.
+  Nieprawda — `api/audit_view.py` działa deny-by-default i przepuszcza wąską allowlistę pól.
+  Asymetria, na którą się powoływałem, jest mniejsza, niż napisałem.
+
 ### Poprawione (wdrożenie: obraz przypięty, wersja pilnowana testem)
 
 - **`deploy/k8s/deployment.yaml` używał `husarz-api:latest`.** W parze

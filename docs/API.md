@@ -35,7 +35,7 @@ Rola `user` (zakładana samodzielną rejestracją, patrz [KONTA.md](KONTA.md)) m
 `config:read` i `agent:run` — czyli **nie** ma `diagnostics:read`. To celowe: diagnoza
 ujawnia adresy silników i ścieżki katalogów operatora, których `config:read` nie wystawia
 (`GET /api/models` podaje backend i tagi, ale nie endpoint), a samo jej wywołanie otwiera
-połączenia wychodzące. `viewer` też jej nie ma — podgląd nie wysyła pakietów.
+połączenia wychodzące. `viewer` też jej nie ma, ale **z innego powodu, niż pierwotnie zapisano**: argument „podgląd nie wysyła pakietów" przestał obowiązywać wraz z limitem tempa (sufit ruchu jest ten sam bez względu na liczbę uprawnionych ról). Granica stoi dziś na UJAWNIENIU: diagnoza pokazuje adresy silników, ścieżki operatora i katalog silnika — także na ścieżce szczęśliwej.
 
 Bez skonfigurowanego tokenu (tryb dev) uwierzytelnianie jest wyłączone — dopuszczalne
 **wyłącznie** dla nasłuchu loopback. Token nigdy nie trafia do configu ani logów —

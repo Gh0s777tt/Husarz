@@ -531,7 +531,7 @@
       if (tab === "usage") $("usage-out").textContent = JSON.stringify(await api("usage"), null, 2);
       if (tab === "git") { loadGit(); loadSecretStore(); }
       if (tab === "plugins") loadPlugins();
-      if (tab === "doctor") loadDoctor();
+      if (tab === "doctor") pokazDiagnoze();
       if (tab === "agents") {
         const a = await api("agents");
         if (!Array.isArray(a)) { $("agents-out").innerHTML = `<p class='err'>${esc(a.detail || "Brak dostępu.")}</p>`; return; }
@@ -572,6 +572,26 @@
     // dołożenie nowej wagi po stronie API nie wymaga tu czterech nowych wpisów.
     const doctorKlucz = (f) => (f.state === "problem" ? `problem/${f.severity}` : f.state);
 
+    // Ostatni wynik diagnozy wraz z chwilą pobrania. Trzymamy go, żeby samo WEJŚCIE
+    // w zakładkę nie musiało odpytywać silników.
+    let doctorOstatni = null;
+
+    // Przełączenie zakładki NIE odpala sondowania. Kliknięcie w nawigacji nie jest świadomym
+    // żądaniem wysłania pakietów, a limit tempa (`security.diagnostics`) jest GLOBALNY dla
+    // instalacji — konto klikające po zakładkach potrafiłoby odebrać diagnozę operatorowi
+    // w trakcie awarii. Pokazujemy ostatni wynik ze znacznikiem czasu; świeży wymaga
+    // kliknięcia „Sprawdź ponownie".
+    function pokazDiagnoze() {
+      if (doctorOstatni === null) {
+        $("doctor-status").textContent = "";
+        $("doctor-out").innerHTML =
+          `<p class='muted'>Diagnoza odpytuje silniki, więc nie uruchamia się sama. ` +
+          `Kliknij „Sprawdź ponownie".</p>`;
+        return;
+      }
+      rysujDiagnoze(doctorOstatni.dane, doctorOstatni.kiedy);
+    }
+
     async function loadDoctor() {
       $("doctor-out").textContent = "sprawdzam…";
       $("doctor-status").textContent = "";
@@ -598,14 +618,25 @@
       // szablonowe w tej funkcji to wartości jawnie przepuszczone przez `esc`, więc kontrola
       // źródła (`test_kazda_wartosc_z_odpowiedzi_przechodzi_przez_escapowanie`) nie musi
       // robić wyjątków dla przypadków „tu akurat jest bezpiecznie".
+      doctorOstatni = { dane: d, kiedy: new Date() };
+      rysujDiagnoze(d, doctorOstatni.kiedy);
+    }
+
+    function rysujDiagnoze(d, kiedy) {
       const czesci = [];
       if (d.blocking) czesci.push("problemów blokujących: " + d.blocking);
       if (d.warnings) czesci.push("ostrzeżeń: " + d.warnings);
       if (d.unknown) czesci.push("nie dało się sprawdzić: " + d.unknown);
+      // Znacznik czasu jest częścią uczciwości wyniku, nie ozdobą: pokazujemy stan sprzed
+      // chwili, a operator ma wiedzieć, sprzed której.
+      // Konkatenacja, nie szablon — z tego samego powodu co przy licznikach: jedyne
+      // wstawki szablonowe w tej funkcji mają być wartościami przepuszczonymi przez `esc`,
+      // żeby kontrola źródła nie musiała robić wyjątków „tu akurat jest bezpiecznie".
+      const stempel = " (stan z " + kiedy.toLocaleTimeString() + ")";
       const klasaStanu = d.blocking ? "err" : "warn";
       $("doctor-status").innerHTML = czesci.length
-        ? `<span class="${klasaStanu}">${esc(czesci.join("; "))}</span>`
-        : `<span class="ok">wszystkie kontrole przeszły</span>`;
+        ? `<span class="${klasaStanu}">${esc(czesci.join("; ") + stempel)}</span>`
+        : `<span class="ok">${esc("wszystkie kontrole przeszły" + stempel)}</span>`;
       $("doctor-out").innerHTML = "<table><tr><th>Stan</th><th>Kontrola</th><th>Ustalenie</th><th>Co zrobić</th></tr>" +
         d.findings.map((f) => {
           // `Object.hasOwn`, a nie samo `DOCTOR_ZNAKI[f.state]`: indeksowanie obiektu

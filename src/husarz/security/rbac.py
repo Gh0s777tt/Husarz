@@ -44,9 +44,25 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     # diagnostics:read (diagnoza ujawnia endpointy i ścieżki operatora).
     # Najmniejsze uprawnienia dla kont zakładanych publicznie.
     "user": frozenset({"config:read", "agent:run"}),
-    # `viewer` to PODGLĄD: świadomie bez `diagnostics:read`, bo diagnoza nie jest
-    # odczytem — każde wywołanie wysyła zapytania do endpointów z konfiguracji.
-    # Do rozważenia dla roli NOC, gdyby taka powstała (zapisane w ROADMAP).
+    # `viewer` to PODGLĄD: świadomie bez `diagnostics:read`. Powody są DWA i trzeba je
+    # rozróżniać, bo tylko jeden z nich już nie obowiązuje:
+    #
+    #   1. WOLUMEN RUCHU — pierwotny argument („podgląd nie wysyła pakietów"). Ten powód
+    #      ZNIKNĄŁ wraz z limitem tempa: sufit ruchu wychodzącego instalacji to
+    #      `security.diagnostics.max_requests_per_minute` × liczba endpointów, NIEZALEŻNIE
+    #      od tego, ile ról ma uprawnienie. Dopisanie roli podnosi ten sufit o zero pakietów.
+    #   2. UJAWNIENIE AKTUALNEJ TOPOLOGII — powód, który nie zmienił się wcale i jest
+    #      dziś jedynym uzasadnieniem tej granicy. Odpowiedź diagnozy niesie adresy i porty
+    #      silników, ścieżki katalogów operatora oraz KATALOG silnika, czyli nazwy modeli
+    #      spoza konfiguracji Husarza (na współdzielonym serwerze wnioskowania — także
+    #      cudzych). Dzieje się to na ścieżce SZCZĘŚLIWEJ, nie tylko przy awarii.
+    #      `config:read` celowo tego nie daje: `/api/models` podaje backend i tagi, ale
+    #      nie adres.
+    #
+    # Trzeci powód pojawił się razem z limitem: jest on GLOBALNY, więc konto podglądowe
+    # odpytujące co dziesięć sekund trzyma kubełek na zerze i odbiera diagnozę operatorowi
+    # dokładnie w trakcie awarii. Rozszerzenie kręgu ról wymaga więc NAJPIERW kubełka per
+    # `principal` z rezerwą dla operatora (warunek wstępny zapisany w ROADMAP).
     "viewer": frozenset({"config:read", "audit:read"}),
 }
 

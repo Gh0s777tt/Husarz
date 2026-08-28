@@ -350,13 +350,21 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ **Waga ustalenia widoczna w obu nośnikach** — terminal: `[!!]` blokujący, `[! ]`
   ostrzeżenie; konsola: czerwone ✕ zarezerwowane dla blokującego, bursztynowe `!` dla
   ostrzeżenia. Poprawione NARAZ, z testem pilnującym, że oba odróżniają te same przypadki.
-- ⬜ **Limit tempa diagnozy jest GLOBALNY, nie per wywołujący** — przy kilku operatorach
-  jeden może wyczerpać pulę drugiemu. Kubełek per `principal` ma sens dopiero przy instalacji
-  wieloosobowej; dziś byłby złożonością bez odbiorcy.
-- ⬜ **Rola „NOC" (podgląd + diagnoza) do rozważenia** — `viewer` świadomie nie dostał
-  `diagnostics:read`, bo podgląd nie powinien wysyłać pakietów. Gdyby powstał scenariusz
-  monitoringu bez uprawnień operatora, właściwą odpowiedzią jest osobna rola, nie
-  rozluźnienie `viewer`.
+- ⬜ **Kubełek limitu per `principal` — TWARDY WARUNEK WSTĘPNY dla rozszerzenia
+  `diagnostics:read`.** Limit jest dziś globalny, więc konto podglądowe odpytujące w pętli
+  odbiera diagnozę operatorowi w trakcie awarii. Wymaga też rezerwy (albo osobnego, wyższego
+  limitu) dla `operator`/`admin`. Ustalone panelem oceniającym decyzję o rolach —
+  patrz `docs/BEZPIECZENSTWO.md`, Etap 17l.
+- ⬜ **Zawężenie ładunku odpowiedzi `GET /api/doctor`** (nie CLI): pełne endpointy i ścieżki
+  bezwzględne są potrzebne w terminalu, ale w odpowiedzi HTTP mogłyby być skracane (sam host,
+  logiczna nazwa katalogu). Obniżyłoby stawkę dyskusji o rolach i uczyniło przyszłą rolę
+  monitoringu bezpieczniejszą z definicji.
+- ⬜ **Rola „NOC" (podgląd + diagnoza) — ROZSTRZYGNIĘTE: nie teraz.** Panel trzech stanowisk
+  ocenił rozszerzenie `viewer` na 4,7/10 i uznał je za NIEbezpieczne; nowa rola `noc` dostała
+  7,0, a status quo 7,3. Powód granicy sprostowany: nie „podgląd nie wysyła pakietów" (ten
+  argument zniknął wraz z limitem tempa), tylko ujawnienie aktualnej topologii — na ścieżce
+  szczęśliwej, nie tylko przy awarii. Wrócić do tematu dopiero po kubełku per `principal`
+  i (najlepiej) zawężeniu ładunku odpowiedzi. Szczegóły: `docs/BEZPIECZENSTWO.md`, Etap 17l.
 - ✅ **Limit tempa dla `GET /api/doctor`** — `security.diagnostics.max_requests_per_minute`
   (domyślnie 6/min), sprawdzany PRZED sondowaniem, budowany raz ze startu (żeby nadpisanie
   konfiguracji nie zerowało kubełka). Konsola odróżnia 429 od awarii i nie kasuje wyniku.
