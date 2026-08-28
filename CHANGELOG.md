@@ -54,6 +54,23 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18j — wyłącznik bezpiecznikowy routera)
+
+- **`routing.health`** — model po `failures_to_open` KOLEJNYCH awariach trafia na koniec
+  listy kandydatów na `cooldown_seconds`. Dotąd model, który przed sekundą przekroczył limit
+  czasu, przy następnym żądaniu nadal był PIERWSZYM kandydatem: każde kolejne żądanie płaciło
+  pełny limit czasu, zanim spadło na fallback. Przy padniętym modelu głównym cała platforma
+  zwalniała przy każdym zapytaniu, i to niewytłumaczalnie dla użytkownika — odpowiedzi
+  przychodziły, tylko bardzo wolno.
+- **Odsunięcie, nie wykluczenie.** Gdy padło wszystko (sieć, wspólny host silników),
+  wykluczanie zostawiłoby pustą listę kandydatów i twardą odmowę zamiast próby, która
+  mogłaby się powieść.
+- **Awarią jest wyłącznie błąd realnego wywołania.** Pominięcia wynikające z właściwości
+  ŻĄDANIA — brak `vision` przy obrazie, prompt poza oknem kontekstu, blokada egress — nie
+  liczą się: model pominięty, bo prompt był za długi, jest w pełni zdrowy.
+- **Licznik jest kolejnych awarii, nie sumy** — pojedynczy sukces zeruje go w całości.
+- `cooldown_seconds: null` wyłącza mechanizm i przywraca zachowanie sprzed zmiany.
+
 ### Dodane (Etap 18i — `husarz config explain`)
 
 - **Polecenie odpowiadające na pytanie „skąd ta wartość".** Wypisuje WSZYSTKIE warstwy

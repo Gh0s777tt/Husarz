@@ -374,10 +374,30 @@ class CostControls(_StrictModel):
 _ZAIMPLEMENTOWANE_STRATEGIE: frozenset[RoutingStrategy] = frozenset(RoutingStrategy)
 
 
+class HealthConfig(_StrictModel):
+    """Wyłącznik bezpiecznikowy: model, który właśnie zawiódł, spada na koniec listy.
+
+    **Po co.** Model, który przed sekundą przekroczył limit czasu, był przy następnym
+    żądaniu nadal PIERWSZYM kandydatem — każde kolejne żądanie płaciło więc pełny limit
+    czasu, zanim spadło na fallback. Przy padniętym modelu głównym cała platforma zwalniała
+    o tę wartość przy każdym zapytaniu.
+
+    Attributes:
+        failures_to_open: Ile KOLEJNYCH awarii otwiera wyłącznik. Licznik zeruje pojedynczy
+            sukces — wyłącznik ma łapać awarię trwającą TERAZ, a nie prowadzić statystykę.
+        cooldown_seconds: Jak długo model pozostaje odsunięty. ``null`` WYŁĄCZA mechanizm
+            i przywraca zachowanie sprzed Etapu 18j.
+    """
+
+    failures_to_open: int = Field(default=3, ge=1)
+    cooldown_seconds: int | None = Field(default=30, ge=1)
+
+
 class RoutingConfig(_StrictModel):
     """Konfiguracja routera modeli."""
 
     strategy: RoutingStrategy = RoutingStrategy.TAGS
+    health: HealthConfig = Field(default_factory=HealthConfig)
     # Domyślny model per agent (nazwa agenta -> id modelu lub "auto").
     agent_models: dict[str, str] = Field(default_factory=dict)
     rules: list[RoutingRule] = Field(default_factory=list)

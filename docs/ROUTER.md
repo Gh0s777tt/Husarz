@@ -214,3 +214,43 @@ print(resp.model, resp.content)
 - Test integracyjny — selekcja na realnej konfiguracji repo.
 
 Szczegóły decyzji: [ADR-0003](adr/0003-router-modeli.md).
+
+## Wyłącznik bezpiecznikowy (`routing.health`)
+
+Model, który przed sekundą przekroczył limit czasu, był przy następnym żądaniu **nadal
+pierwszym kandydatem**. Każde kolejne żądanie płaciło więc pełny limit czasu, zanim spadło
+na fallback — a limity bywają liczone w dziesiątkach sekund. Przy padniętym modelu głównym
+cała platforma zwalniała przy każdym zapytaniu, i to w sposób dla użytkownika
+niewytłumaczalny: odpowiedzi przychodziły, tylko bardzo wolno.
+
+Po `failures_to_open` **kolejnych** awariach model trafia na koniec listy kandydatów na
+`cooldown_seconds`. `cooldown_seconds: null` wyłącza mechanizm.
+
+### Trzy rozstrzygnięcia, które decydują o zachowaniu
+
+**Odsunięcie, nie wykluczenie.** Kandydat z otwartym wyłącznikiem spada na koniec listy, ale
+z niej nie znika. Różnica ujawnia się w przypadku, który przy awarii zdarza się najczęściej:
+gdy padło wszystko (sieć, wspólny host silników), wykluczanie zostawiłoby pustą listę
+kandydatów i `NoModelAvailableError` — twardą odmowę zamiast próby, która mogłaby się
+powieść.
+
+**Awarią jest tylko błąd realnego wywołania.** Liczy się `ModelBackendError`: limit czasu,
+brak połączenia, błąd silnika. **Nie liczą się** pominięcia wynikające z właściwości
+ŻĄDANIA — brak `vision` przy obrazie, prompt niemieszczący się w oknie kontekstu, blokada
+egress. Model pominięty, bo prompt był za długi, jest w pełni zdrowy; karanie go
+zdegradowałoby go za cudzy błąd i przy następnym, krótszym żądaniu wysłałoby ruch w gorsze
+miejsce.
+
+**Licznik jest kolejnych awarii, nie sumy.** Pojedynczy sukces zeruje go w całości. Model
+działający z przerwami nie ma się dogrywać do wyłączenia przez tydzień drobnych potknięć —
+wyłącznik łapie awarię trwającą TERAZ.
+
+### Zasięg stanu
+
+Rejestr zdrowia żyje tak długo jak instancja routera, czyli od startu do najbliższego
+nadpisania konfiguracji w runtime (`POST /api/config/runtime`). To świadome: zmiana
+konfiguracji może zmienić endpointy, więc odziedziczenie po niej starych liczników
+odsuwałoby model, który przed chwilą został naprawiony.
+
+Stan **nie jest** współdzielony między procesami. Przy wielu instancjach każda uczy się
+osobno — mechanizm jest optymalizacją opóźnienia, nie rozproszonym stanem klastra.

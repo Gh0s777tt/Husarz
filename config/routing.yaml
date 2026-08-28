@@ -21,6 +21,28 @@
 # zmyślonych byłoby gorsze niż ich brak.
 strategy: tags
 
+# Wyłącznik bezpiecznikowy (Etap 18j). Model, który przed sekundą przekroczył limit czasu,
+# był przy następnym żądaniu NADAL pierwszym kandydatem — każde kolejne żądanie płaciło więc
+# pełny limit czasu, zanim spadło na fallback. Przy padniętym modelu głównym cała platforma
+# zwalniała o tę wartość przy każdym zapytaniu.
+#
+# Model po `failures_to_open` KOLEJNYCH awariach trafia na KONIEC listy kandydatów na
+# `cooldown_seconds`. Odsunięcie, nie wykluczenie: gdyby padło wszystko, wykluczanie
+# zostawiłoby pustą listę i twardą odmowę zamiast próby, która mogłaby się powieść.
+#
+# Awarią jest WYŁĄCZNIE błąd realnego wywołania (limit czasu, brak połączenia, błąd silnika).
+# Pominięcia wynikające z właściwości ŻĄDANIA — brak wizji przy obrazie, prompt poza oknem
+# kontekstu, blokada egress — nie liczą się: model pominięty, bo prompt był za długi, jest
+# w pełni zdrowy.
+#
+# Licznik jest KOLEJNYCH awarii: pojedynczy sukces zeruje go w całości. Wyłącznik ma łapać
+# awarię trwającą TERAZ, a nie prowadzić statystykę.
+#
+# `cooldown_seconds: null` wyłącza mechanizm i przywraca zachowanie sprzed Etapu 18j.
+health:
+  failures_to_open: 3
+  cooldown_seconds: 30
+
 # Domyślny model per agent (nazwa agenta -> id modelu z registry, lub "auto").
 agent_models:
   husarz: glm-main

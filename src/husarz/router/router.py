@@ -22,6 +22,7 @@ from husarz.router.errors import (
 from husarz.router.rate_limit import RateLimiter
 from husarz.router.selection import select_candidates
 from husarz.router.types import ChatRequest, ChatResponse
+from husarz.router.zdrowie import RejestrZdrowia
 
 # Fabryka klientów: (spec, model_id) -> klient.
 ClientFactory = Callable[[ModelSpec, str], ModelClient]
@@ -42,6 +43,19 @@ class ModelRouter:
         self._client_factory = client_factory or self._default_factory
         max_rpm = config.routing.cost_controls.max_requests_per_minute
         self._rate_limiter = RateLimiter(max_rpm) if max_rpm is not None else None
+        # Rejestr zdrowia żyje TAK DŁUGO jak router, czyli od startu do najbliższego
+        # nadpisania konfiguracji w runtime. To świadome: wiedza o awarii jest właściwością
+        # bieżącej instalacji, a zmiana konfiguracji może zmienić endpointy, więc odziedziczenie
+        # po niej starych liczników odsuwałoby model, który przed chwilą został naprawiony.
+        zdrowie = config.routing.health
+        self._zdrowie = (
+            RejestrZdrowia(
+                awarii_do_otwarcia=zdrowie.failures_to_open,
+                odsuniecie_sekund=float(zdrowie.cooldown_seconds),
+            )
+            if zdrowie.cooldown_seconds is not None
+            else None
+        )
 
     def _default_factory(self, spec: ModelSpec, model_id: str) -> ModelClient:
         return build_client(spec, model_id, secrets=self._secrets)
@@ -72,6 +86,11 @@ class ModelRouter:
             AllModelsFailedError: wszyscy kandydaci (z fallbackami) zawiedli.
         """
         candidates = self.select(agent=agent, model=model, tags=tags)
+        if self._zdrowie is not None:
+            # ODSUNIĘCIE, nie wykluczenie — patrz `husarz.router.zdrowie`. Gdyby padło
+            # wszystko, wykluczanie zostawiłoby pustą listę i twardą odmowę zamiast próby,
+            # która mogłaby się powieść.
+            candidates = self._zdrowie.uporzadkuj(candidates)
         if not candidates:
             raise NoModelAvailableError(
                 f"Brak modelu dla żądania (agent={agent}, model={model}, tags={tags})."
@@ -119,10 +138,18 @@ class ModelRouter:
                 continue
             client = self._client_factory(spec, model_id)
             try:
-                return client.chat(request)
+                odpowiedz = client.chat(request)
             except ModelBackendError as exc:
+                # Awarią jest WYŁĄCZNIE błąd realnego wywołania. Pominięcia wyżej (brak
+                # wizji, prompt poza oknem, blokada egress) wynikają z właściwości ŻĄDANIA,
+                # nie ze zdrowia modelu — karanie za nie zdegradowałoby model sprawny.
+                if self._zdrowie is not None:
+                    self._zdrowie.odnotuj_awarie(model_id)
                 failures.append((model_id, str(exc)))
                 continue
+            if self._zdrowie is not None:
+                self._zdrowie.odnotuj_sukces(model_id)
+            return odpowiedz
         raise AllModelsFailedError(failures)
 
     def _apply_cost_controls(self, request: ChatRequest) -> ChatRequest:

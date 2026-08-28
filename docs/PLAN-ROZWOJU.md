@@ -35,7 +35,7 @@ Kolejność jest rekomendacją, nie zobowiązaniem.
 |---|---|---|---|---|
 | 1 | ~~`husarz audit verify`~~ — **zrobione** (Etap 18e) | Launcher | ✅ | S |
 | 2 | ~~Kubełek limitu tempa per `principal`~~ — **zrobione** (Etap 18f) | Bezpieczeństwo | ✅ | M |
-| 3 | Routing świadomy zdrowia modelu (wyłącznik bezpiecznikowy) | Router | 🟢 | M |
+| 3 | ~~Routing świadomy zdrowia modelu~~ — **zrobione** (Etap 18j) | Router | ✅ | M |
 | 4 | ~~Rotacja klucza HMAC audytu~~ — **zrobione** (Etap 18a) | Bezpieczeństwo | ✅ | M |
 | 5 | Równoległa delegacja niezależnych kroków planu | Orkiestrator | 🟢 | L |
 | 6 | ~~`husarz config explain`~~ — **zrobione** (Etap 18i) | Launcher | ✅ | S |
@@ -187,15 +187,16 @@ per model. Pozycja przeszła do ROADMAP z nową, właściwą przyczyną.
 **Kalibracja realnych wartości pozostaje otwarta** 🔴 — dostarczony `config/models.yaml` ma
 pola wykomentowane, bo wpisanie zmyślonych liczb byłoby gorsze niż ich brak.
 
-### 🟢 Routing świadomy zdrowia — wyłącznik bezpiecznikowy (M)
+### ✅ Routing świadomy zdrowia — wyłącznik bezpiecznikowy (M) — ZREALIZOWANE (Etap 18j)
 
-Model, który przed sekundą przekroczył limit czasu, przy następnym żądaniu **nadal jest
-pierwszym kandydatem**. Każde żądanie płaci pełny limit czasu, zanim spadnie na fallback.
-Licznik świeżych awarii per model i czasowe odsunięcie kandydata rozwiązują to bez
-zmiany reguł wyboru.
+Zrealizowane zgodnie z opisem, z jednym rozstrzygnięciem, którego pozycja nie przesądzała:
+kandydat z otwartym wyłącznikiem jest ODSUWANY na koniec, a nie wykluczany. Wykluczanie
+byłoby prostsze, ale w przypadku, który przy awarii zdarza się najczęściej — gdy padło
+wszystko — zostawiałoby pustą listę kandydatów i twardą odmowę zamiast próby.
 
-To jest widoczne dla użytkownika: przy padniętym modelu głównym cała platforma zwalnia
-o wartość limitu czasu przy każdym zapytaniu.
+Drugie rozstrzygnięcie: awarią jest wyłącznie błąd realnego wywołania. Pominięcia wynikające
+z właściwości żądania (brak wizji, prompt poza oknem, blokada egress) nie liczą się, bo model
+pominięty z tych powodów jest w pełni sprawny. Opis: [ROUTER](ROUTER.md).
 
 ### 🟢 Limit współbieżności per model (M)
 
