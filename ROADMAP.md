@@ -371,10 +371,14 @@ Pozycja przechodzi stamtąd tutaj w chwili podjęcia decyzji o realizacji.
 - ⬜ **Sama decyzja o rozszerzeniu `diagnostics:read`** poza administratora pozostaje
   otwarta. Warunek wstępny jest spełniony, ale panel z Etapu 17l odrzucił rozszerzenie
   z KILKU powodów, nie tylko z powodu limitu.
-- ⬜ **Zawężenie ładunku odpowiedzi `GET /api/doctor`** (nie CLI): pełne endpointy i ścieżki
-  bezwzględne są potrzebne w terminalu, ale w odpowiedzi HTTP mogłyby być skracane (sam host,
-  logiczna nazwa katalogu). Obniżyłoby stawkę dyskusji o rolach i uczyniło przyszłą rolę
-  monitoringu bezpieczniejszą z definicji.
+- ✅ **Zawężenie ładunku odpowiedzi `GET /api/doctor`** (Etap 18g) — adresy skracane do
+  `schemat://host:port`, ścieżki bezwzględne do ostatniego segmentu; CLI dostaje treść pełną.
+  **Sprostowanie do treści tej pozycji**: mówiła o „ścieżkach bezwzględnych" jako o rzeczy
+  obecnej, a pomiar pokazał, że diagnoza nie emituje ich wcale przy dostarczonej konfiguracji
+  — pojawiają się wyłącznie w kontroli katalogów zapisywalnych i tylko gdy operator ustawi
+  je bezwzględnie. Zakres zmiany jest więc węższy, niż zapowiadał zapis.
+  Zawężenie **nie zamyka** dyskusji o rolach: host i port zostają, bo bez nich nie wiadomo,
+  którego silnika dotyczy ustalenie.
 - ⬜ **Rola „NOC" (podgląd + diagnoza) — ROZSTRZYGNIĘTE: nie teraz.** Panel trzech stanowisk
   ocenił rozszerzenie `viewer` na 4,7/10 i uznał je za NIEbezpieczne; nowa rola `noc` dostała
   7,0, a status quo 7,3. Powód granicy sprostowany: nie „podgląd nie wysyła pakietów" (ten

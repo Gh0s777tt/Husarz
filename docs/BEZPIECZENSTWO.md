@@ -2956,3 +2956,49 @@ mapy oraz obie kontrole odrzucające limit per osobę większy od globalnego.
 konfigurację przez `model_copy(update=...)`, który OMIJA walidację — i produkował stan
 niemożliwy w produkcji (limit globalny 1 przy per osobę 3). Poprawiony na budowę wprost.
 To już drugi raz, gdy `model_copy(update=...)` w tym projekcie ukrył niepoprawną konfigurację.
+
+## Etap 18g — zawężenie ładunku `GET /api/doctor`
+
+**Co sprawdzano.** Ile o instalacji mówi odpowiedź HTTP diagnozy i co da się z niej usunąć,
+nie odbierając jej użyteczności.
+
+**Sprostowanie do treści zadania.** ROADMAP mówiła o „pełnych endpointach i ścieżkach
+bezwzględnych". Pomiar na dostarczonej konfiguracji pokazał, że **ścieżek bezwzględnych
+diagnoza nie emituje wcale**: jedyne, co pada, to adresy z częścią ścieżkową
+(`http://localhost:8000/v1`) oraz ścieżki względne będące konwencją projektu
+(`config/models.yaml`, `ollama/README.md`), identyczne w każdej instalacji. Ścieżki
+bezwzględne pojawiają się WYŁĄCZNIE w kontroli katalogów zapisywalnych i tylko wtedy, gdy
+operator skonfiguruje je bezwzględnie (domyślnie `./audit`, `./data`). Zakres zmiany jest
+więc węższy, niż zapowiadał zapis — a zapis został poprawiony.
+
+**Co zawężamy.**
+
+| Element | W terminalu (`husarz doctor`) | W odpowiedzi HTTP |
+|---|---|---|
+| adres endpointu | `http://localhost:8000/v1` | `http://localhost:8000` |
+| ścieżka bezwzględna | `/var/lib/husarz/audit` | `…/audit` |
+| ścieżka Windows | `C:\ProgramData\Husarz\audit` | `…\audit` |
+| ścieżka konwencji projektu | `config/models.yaml` | bez zmian |
+| nazwa modelu, agenta, tag reguły | pełna | bez zmian |
+
+**Czego NIE zawężamy — i dlaczego.** Host i port zostają. Bez nich ustalenie „silnik nie
+odpowiedział" nie mówi, KTÓRY silnik, a diagnoza, z której nie wynika, co naprawić, przestaje
+być diagnozą. To znaczy zarazem, że zawężenie **obniża stawkę** dyskusji o rozszerzeniu
+`diagnostics:read` (panel z Etapu 17l odrzucił je m.in. przez ujawnianie topologii), ale
+jej **nie zamyka** — topologia nadal jest widoczna.
+
+**Zawężamy PREZENTACJĘ, nie ocenę.** Identyfikator kontroli, stan i waga są identyczne
+w obu nośnikach; różni się tylko tekst. Utrzymanie jednego źródła interpretacji było
+warunkiem: gdyby CLI i konsola oceniały niezależnie, rozjechałyby się przy pierwszej zmianie.
+
+**Wykryte przy okazji.** Test pilnujący „jednego źródła prawdy" porównywał TREŚĆ ustaleń
+API i CLI. Niezmiennikiem, o który chodziło, nigdy nie była identyczność napisów, lecz
+identyczność OCENY — a porównanie napisów wymuszałoby porzucenie zawężania albo, co gorsza,
+zawężanie także w terminalu. Test rozdzielono na dwa: jeden pilnuje zgodności ocen, drugi
+tego, że odpowiedź HTTP jest faktycznie węższa (bez niego pierwszy przechodziłby również
+wtedy, gdyby zawężania nie było wcale).
+
+**Nośność.** Pięć mutacji, wszystkie czerwienią testy: wyłączenie zawężania adresów, ścieżek
+POSIX i Windows, niewpięcie go w endpoint oraz uczynienie go ZA OSTRYM (ucięcie hosta).
+Ostatnia jest istotna osobno — pilnuje granicy w drugą stronę, czyli tego, żeby zawężanie
+nie odebrało diagnozie sensu.

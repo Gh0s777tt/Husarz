@@ -69,8 +69,16 @@ def test_liczniki_zgadzaja_sie_z_wlasna_lista(repo_config_dir: Path) -> None:
     assert body["warnings"] > 0, "konfiguracja repo ma kolidować portem — inaczej test jest pusty"
 
 
-def test_API_zwraca_TE_SAME_ustalenia_co_funkcja_CLI(repo_config_dir: Path) -> None:
-    """Sedno „jednego źródła prawdy": rozjazd nośnika = dwie różne oceny tej samej instalacji."""
+def test_API_zwraca_TE_SAME_OCENY_co_funkcja_CLI(repo_config_dir: Path) -> None:
+    """Sedno „jednego źródła prawdy": rozjazd nośnika = dwie różne oceny tej samej instalacji.
+
+    Test porównywał wcześniej także TREŚĆ ustaleń. Od Etapu 18g odpowiedź HTTP jest
+    zawężana (adresy bez części ścieżkowej, ścieżki bezwzględne skracane), więc treść
+    RÓŻNI SIĘ celowo. Niezmiennikiem, o który tu chodzi, nigdy nie była identyczność
+    napisów, lecz identyczność OCENY: te same kontrole, te same stany, te same wagi.
+    Gdyby porównanie napisów zostało, wymuszałoby porzucenie zawężania albo — gorzej —
+    zawężanie także w CLI, gdzie nie jest potrzebne i szkodzi.
+    """
     config = load_config(repo_config_dir)
     sonda = _Sonda()
 
@@ -78,7 +86,28 @@ def test_API_zwraca_TE_SAME_ustalenia_co_funkcja_CLI(repo_config_dir: Path) -> N
     wprost = zdiagnozuj(config, sonda=sonda, host="127.0.0.1", port=8000)
 
     assert [u["id"] for u in body["findings"]] == [u.id for u in wprost]
-    assert [u["description"] for u in body["findings"]] == [u.opis for u in wprost]
+    assert [u["state"] for u in body["findings"]] == [u.stan.value for u in wprost]
+    assert [u["severity"] for u in body["findings"]] == [u.waga.value for u in wprost]
+
+
+def test_odpowiedz_HTTP_jest_ZAWEZONA_wobec_CLI(repo_config_dir: Path) -> None:
+    """Druga strona tej samej monety — bez niej test wyżej nie wyklucza braku zawężania.
+
+    Zawężenie obniża stawkę dyskusji o rolach (panel z Etapu 17l odrzucił rozszerzenie
+    `diagnostics:read` m.in. przez ujawnianie topologii). Nie zamyka jej: host i port
+    zostają, bo bez nich ustalenie „silnik nie odpowiedział" nie mówi, który silnik.
+    """
+    sonda = _Sonda()
+    body = _client(repo_config_dir, doctor_probe=sonda, listen_port=8000).get("/api/doctor").json()
+    wprost = zdiagnozuj(load_config(repo_config_dir), sonda=sonda, host="127.0.0.1", port=8000)
+
+    z_http = " ".join(u["description"] + " " + (u["remedy"] or "") for u in body["findings"])
+    z_cli = " ".join(u.opis + " " + (u.naprawa or "") for u in wprost)
+
+    assert "/v1" in z_cli, "założenie testu: CLI niesie pełne endpointy"
+    assert "/v1" not in z_http, "odpowiedź HTTP nadal niesie część ścieżkową adresu"
+    # Host i port ZOSTAJĄ — zawężenie nie może uczynić diagnozy bezużyteczną.
+    assert "localhost:8000" in z_http
 
 
 def test_kontrola_portu_uzywa_REALNEGO_portu_nasluchu(repo_config_dir: Path) -> None:

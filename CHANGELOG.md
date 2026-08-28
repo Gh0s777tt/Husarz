@@ -54,6 +54,30 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Zmienione (Etap 18g — zawężenie ładunku `GET /api/doctor`)
+
+- **Odpowiedź HTTP niesie mniej niż terminal.** Adresy skracane do `schemat://host:port`
+  (bez części ścieżkowej), ścieżki bezwzględne do ostatniego segmentu (`…/audit`). `husarz
+  doctor` w terminalu dostaje treść PEŁNĄ — zawężamy prezentację, nie ocenę, bo interpretacja
+  ma mieszkać w jednym miejscu, a odbiorca jest różny: w terminalu siedzi operator maszyny,
+  odpowiedź HTTP dostaje każdy z uprawnieniem `diagnostics:read`.
+- **Zakres jest węższy, niż zapowiadała ROADMAP, i jest to odnotowane.** Zapis mówił
+  o „ścieżkach bezwzględnych" jako o rzeczy obecnej; pomiar pokazał, że diagnoza nie emituje
+  ich wcale przy dostarczonej konfiguracji — pojawiają się wyłącznie w kontroli katalogów
+  zapisywalnych i tylko gdy operator ustawi je bezwzględnie.
+- **Host i port ZOSTAJĄ.** Bez nich ustalenie „silnik nie odpowiedział" nie mówi, który
+  silnik. Zawężenie obniża stawkę dyskusji o rolach (panel z Etapu 17l), ale jej nie zamyka.
+- Ścieżki w rodzaju `config/models.yaml` są nietknięte: to konwencja projektu, identyczna
+  w każdej instalacji, więc nie mówią o operatorze nic — a wskazują plik do poprawienia.
+
+### Naprawione (wykryte przy okazji Etapu 18g)
+
+- **Test porównywał TREŚĆ ustaleń API i CLI**, choć niezmiennikiem, o który chodziło, była
+  identyczność OCENY (te same kontrole, stany i wagi). Utrzymanie porównania napisów
+  wymuszałoby porzucenie zawężania albo — gorzej — zawężanie także w CLI, gdzie nie jest
+  potrzebne i szkodzi. Test rozdzielony na dwa: jeden pilnuje zgodności ocen, drugi tego,
+  że odpowiedź HTTP jest faktycznie węższa.
+
 ### Dodane (Etap 18f — limit tempa diagnozy per wywołujący)
 
 - **`security.diagnostics.max_requests_per_minute_per_principal`** — osobny kubełek dla

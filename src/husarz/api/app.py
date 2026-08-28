@@ -39,6 +39,7 @@ from husarz.accounts.errors import (
 from husarz.agents.base import SupportsComplete
 from husarz.agents.tool_loop import ToolLoop, build_tool_loop
 from husarz.api.audit_view import public_detail
+from husarz.api.redakcja import zawez_dla_http
 from husarz.api.schemas import (
     AgentInfo,
     AuditEntryView,
@@ -755,12 +756,15 @@ def create_app(
         )
         return DoctorReport(
             findings=[
+                # Zawężenie dotyczy WYŁĄCZNIE odpowiedzi HTTP — `husarz doctor` w terminalu
+                # dostaje treść pełną. Ocena (stan, waga, identyfikator) jest ta sama, bo
+                # interpretacja ma mieszkać w jednym miejscu; różni się prezentacja.
                 DoctorFinding(
                     id=u.id,
                     state=u.stan.value,
                     severity=u.waga.value,
-                    description=u.opis,
-                    remedy=u.naprawa,
+                    description=zawez_dla_http(u.opis),
+                    remedy=zawez_dla_http(u.naprawa),
                 )
                 for u in ustalenia
             ],
