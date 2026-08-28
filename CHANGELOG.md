@@ -54,6 +54,28 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18o — powiadomienie o aktualizacji)
+
+- **`husarz update check`** oraz powiadomienie przy starcie `husarz up`. Nowa sekcja
+  konfiguracji `config/update.yaml`.
+- **Domyślnie WYŁĄCZONE — i to nie jest ostrożność na wyrost.** Samo zapytanie o wersję jest
+  połączeniem wychodzącym, które ujawnia serwerowi wydań, że ta instalacja istnieje, ma dany
+  adres IP i konkretną wersję. Projekt deklaruje zero telemetrii, więc mechanizm o takim
+  skutku nie może włączyć się sam.
+- **Trzy stany, nie dwa**: „nie udało się sprawdzić" NIGDY nie zaokrągla się do „masz
+  aktualną wersję" i ma własny kod wyjścia (3). Instalacja, która przez tydzień nie dobiła
+  do serwera wydań, ma o tym powiedzieć.
+- **Własna allowlista `update.sources`**, osobna od `security.egress.allowlist`: zgoda na
+  pytanie o wersję nie może po cichu otwierać tej domeny narzędziu `web`, wtyczkom MCP ani
+  agentom. Droga objęta pinowaniem IP (ADR-0020) jak każda inna wychodząca.
+- **Profil airgap odrzuca mechanizm przy starcie.** Instalacja odcięta od sieci nie ma jak
+  sprawdzić wersji, a pole „istnieje, ale nie działa" jest gorsze niż jego brak.
+- Włączony mechanizm bez repozytorium albo bez allowlisty jest odrzucany — atrapa wyglądająca
+  na działającą byłaby gorsza niż odmowa startu.
+- Porównanie wersji jest LICZBOWE (0.9.0 < 0.10.0), a wersja o nieznanym kształcie daje stan
+  NIEZNANY zamiast domysłu.
+- Nieudane sprawdzenie **nie zatrzymuje startu** platformy.
+
 ### Naprawione (Etap 18n — dostarczona konfiguracja czyniła czat NIEUŻYWALNYM)
 
 - **`cost_controls.max_tokens_per_request: 8192` równało się `context_length` modeli

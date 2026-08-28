@@ -1574,6 +1574,85 @@ class GitConfig(_StrictModel):
     connections_path: Path | None = None  # np. ./data/git-connections.json; None = w pamięci
 
 
+class UpdateConfig(_StrictModel):
+    """Sprawdzanie i instalacja aktualizacji Husarza (config/update.yaml).
+
+    **Domyślnie WYŁĄCZONE — i to nie jest ostrożność na wyrost.** Samo sprawdzenie wersji
+    jest połączeniem WYCHODZĄCYM, które ujawnia serwerowi wydań, że ta instalacja istnieje,
+    ma dany adres IP i konkretną wersję. Projekt deklaruje zero telemetrii, więc mechanizm
+    o takim skutku nie może być włączony bez decyzji operatora. Komentarz w pliku mówi to
+    wprost, żeby wybór był świadomy, a nie przeoczony.
+
+    **Dlaczego ``sources`` jest OSOBNE od ``security.egress.allowlist``** — dokładnie z tego
+    powodu, co w :class:`BootstrapConfig`: zgoda na pytanie o wersję nie może po cichu
+    otwierać tej domeny narzędziu ``web``, wtyczkom MCP ani agentom.
+
+    **Profil airgap odrzuca ten mechanizm w całości** (walidacja krzyżowa). Instalacja
+    odcięta od sieci nie ma jak sprawdzić wersji, a mechanizm, który w takim profilu
+    „istnieje, ale nie działa", byłby polem bez skutku.
+
+    Attributes:
+        enabled: Czy sprawdzanie aktualizacji w ogóle działa.
+        repository: Repozytorium wydań w postaci ``wlasciciel/nazwa``. ``None`` przy
+            wyłączonym mechanizmie; wymagane, gdy włączony — bez niego nie ma czego pytać.
+        sources: Allowlista hostów dla zapytania o wydania. Pusta = nic nie wolno.
+    """
+
+    enabled: bool = False
+    repository: str | None = None
+    sources: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate(self) -> UpdateConfig:
+        """Normalizuje hosty i pilnuje kompletności włączonej konfiguracji.
+
+        Raises:
+            ValueError: Gdy wpis allowlisty nie jest samą nazwą hosta, gdy repozytorium ma
+                zły kształt albo gdy mechanizm jest włączony bez repozytorium/allowlisty.
+        """
+        # Ta sama kontrola co dla `security.egress.allowlist`: wpis musi być czystą nazwą
+        # hosta. Pusty wpis stałby się częściowym wildcardem (`host.endswith('.')`).
+        znormalizowane: list[str] = []
+        for wpis in self.sources:
+            host = wpis.strip().lower()
+            if not host:
+                raise ValueError("update.sources zawiera pusty wpis (usuń go).")
+            if "/" in host or "@" in host or ":" in host or host != wpis.strip():
+                raise ValueError(
+                    f"update.sources['{wpis}'] musi być samą nazwą hosta "
+                    f"(bez schematu/portu/ścieżki/poświadczeń)."
+                )
+            znormalizowane.append(host)
+        object.__setattr__(self, "sources", znormalizowane)
+
+        if self.repository is not None:
+            repo = self.repository.strip()
+            czesci = repo.split("/")
+            if len(czesci) != 2 or not all(czesci) or any(z in repo for z in " \t:@"):
+                raise ValueError(
+                    f"update.repository='{self.repository}' musi mieć postać "
+                    f"'wlasciciel/nazwa' (bez schematu, hosta i ukośników wewnątrz nazw)."
+                )
+            object.__setattr__(self, "repository", repo)
+
+        if not self.enabled:
+            return self
+        # Fail-closed: włączony mechanizm bez repozytorium albo bez allowlisty jest atrapą,
+        # która wygląda na działającą. Lepiej odmówić startu niż milczeć przy każdym
+        # sprawdzeniu — to ta sama zasada, co przy `bootstrap`.
+        if self.repository is None:
+            raise ValueError(
+                "update.enabled=true wymaga `update.repository` — bez niego nie ma czego "
+                "pytać o wersję."
+            )
+        if not self.sources:
+            raise ValueError(
+                "update.enabled=true wymaga niepustej `update.sources` — bez allowlisty "
+                "zapytanie o wersję i tak zostanie zablokowane przez bramkę egress."
+            )
+        return self
+
+
 class BootstrapConfig(_StrictModel):
     """Pobieranie wag modeli przy pierwszym uruchomieniu (config/bootstrap.yaml).
 
@@ -1643,6 +1722,7 @@ class HusarzConfig(_StrictModel):
     chat: ChatConfig = Field(default_factory=ChatConfig)
     git: GitConfig = Field(default_factory=GitConfig)
     bootstrap: BootstrapConfig = Field(default_factory=BootstrapConfig)
+    update: UpdateConfig = Field(default_factory=UpdateConfig)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     tools: dict[str, ToolConfig] = Field(default_factory=dict)
     plugins: dict[str, PluginConfig] = Field(default_factory=dict)
@@ -1810,6 +1890,15 @@ class HusarzConfig(_StrictModel):
         if self.platform.profile is Profile.AIRGAP:
             if self.security.egress.default_policy is not EgressPolicy.DENY:
                 errors.append("Profil airgap wymaga security.egress.default_policy=deny.")
+            # Aktualizacje wymagają połączenia wychodzącego, którego w airgapie nie ma.
+            # Mechanizm „włączony, ale niedziałający" byłby polem bez skutku — a operator
+            # miałby prawo sądzić, że instalacja sama się pilnuje.
+            if self.update.enabled:
+                errors.append(
+                    "Profil airgap nie dopuszcza update.enabled=true: sprawdzenie wersji "
+                    "jest połączeniem wychodzącym, a airgap nie ma sieci. Aktualizuj "
+                    "ręcznie, przenosząc wydanie na nośniku."
+                )
             if self.security.egress.allowlist:
                 errors.append(
                     "Profil airgap wymaga pustej security.egress.allowlist "

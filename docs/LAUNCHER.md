@@ -440,3 +440,52 @@ dziś milczy.
   dokładnie taką, jaka stoi w konfiguracji, i dopisuje ostrzeżenie.
 
 Kody wyjścia: **0** — wypisano wyjaśnienie, **2** — błąd konfiguracji albo ścieżki.
+
+## Aktualizacje: `husarz update check`
+
+**Domyślnie wyłączone — i nie jest to ostrożność na wyrost.** Samo zapytanie o wersję jest
+połączeniem **wychodzącym**: ujawnia serwerowi wydań, że ta instalacja istnieje, ma dany
+adres IP i konkretną wersję. Husarz deklaruje zero telemetrii, więc mechanizm o takim skutku
+nie może włączyć się sam.
+
+```bash
+python -m husarz.launcher.cli update check --config ./config
+```
+
+Włączenie: `config/update.yaml` → `enabled: true`. Wymagane są wtedy **oba** pozostałe pola
+(repozytorium i allowlista hostów) — włączony mechanizm bez nich byłby atrapą wyglądającą na
+działającą, więc start kończy się czytelnym błędem.
+
+### Trzy stany, nie dwa
+
+Ta sama zasada, co w diagnozie: **„nie udało się sprawdzić" NIGDY nie zaokrągla się do
+„masz aktualną wersję"**. Instalacja, która przez tydzień nie dobiła do serwera wydań, ma
+o tym powiedzieć — inaczej cisza znaczyłaby dwie zupełnie różne rzeczy naraz.
+
+| Kod wyjścia | Znaczenie |
+|---|---|
+| 0 | masz najnowszą wersję **albo** mechanizm jest wyłączony |
+| 1 | dostępna nowsza wersja |
+| 2 | błąd konfiguracji |
+| 3 | **nie dało się sprawdzić** — osobny kod, bo skrypt pilnujący wersji musi odróżnić to od „aktualna" |
+
+Powiadomienie pojawia się także przy starcie `husarz up`, **po** diagnozie: diagnoza mówi
+o tym, co nie działa teraz, a aktualizacja o tym, co można poprawić. Nieudane sprawdzenie
+nie zatrzymuje startu — platforma ma wstać także wtedy, gdy serwer wydań milczy.
+
+### Dwie allowlisty, nie jedna
+
+Zapytanie przechodzi przez `update.sources`, a **nie** przez `security.egress.allowlist`.
+Zgoda na pytanie o wersję nie może po cichu otwierać tej domeny narzędziu `web`, wtyczkom
+MCP ani agentom. Droga jest przy tym objęta pinowaniem IP (ADR-0020) tak samo jak każda inna
+wychodząca.
+
+W profilu **airgap** mechanizm jest odrzucany przy starcie: instalacja odcięta od sieci nie
+ma jak sprawdzić wersji, a pole, które „istnieje, ale nie działa", jest gorsze niż jego brak.
+
+### Czego jeszcze NIE ma
+
+Na tym etapie Husarz **wyłącznie powiadamia**. Pobierania nowej wersji, weryfikacji podpisu
+i podmiany przy restarcie jeszcze nie ma — to osobny krok, opisany w ROADMAP. Powód
+kolejności jest zasadniczy: aktualizator, który pobiera i **wykonuje kod**, jest powierzchnią
+ataku na łańcuch dostaw, więc nie powstanie przed weryfikacją podpisu ed25519.

@@ -336,6 +336,22 @@ Pozycja przechodzi stamtąd tutaj w chwili podjęcia decyzji o realizacji.
   z dostarczonego configu dzielą port domyślny 8000. Ostrzega, nie blokuje.
 - ✅ `flush=True` na komunikacie startowym — poza terminalem `stdout` jest buforowany
   blokowo i cały komunikat (z ostrzeżeniami) znikał z logów.
+- ✅ **Powiadomienie o aktualizacji** (Etap 18o) — `husarz update check` + komunikat przy
+  starcie. Domyślnie wyłączone (zapytanie o wersję to połączenie wychodzące), własna
+  allowlista, odrzucane w airgapie, trójstan z osobnym kodem wyjścia dla „nie wiadomo".
+- ⬜ **Pobranie i podmiana nowej wersji przy restarcie** — druga połowa mechanizmu, o którą
+  prosił operator. Kolejność jest tu warunkiem bezpieczeństwa, nie wygodą: aktualizator,
+  który pobiera i WYKONUJE kod, jest powierzchnią ataku na łańcuch dostaw, więc nie powstanie
+  przed weryfikacją podpisu. Zakres: wydzielenie weryfikacji ed25519 z `roe_signature` do
+  wspólnego modułu, pole `update.verify_key_ref` (klucz publiczny jako REFERENCJA), pobranie
+  binarki z wydania wraz z podpisem odłączonym, weryfikacja PRZED zapisaniem na docelową
+  ścieżkę, staging (`<binarka>.new`) i podmiana przy najbliższym starcie.
+  **Warunek wstępny po stronie operatora**: wygenerowanie klucza podpisującego i podpisywanie
+  wydań. Bez tego mechanizm ma ODMÓWIĆ instalacji, a nie ostrzec.
+- ⬜ **GitHub Release jeszcze nie istnieje.** Sprawdzenie na żywo zwraca „repozytorium nie ma
+  wydań": tag `v0.14.0` jest, ale `release.yml` buduje binarki dopiero na uruchomionym
+  runnerze, a Actions stoi w kolejce (rozliczenie). Do tego czasu mechanizm będzie meldował
+  stan NIEZNANY — poprawnie, ale bezużytecznie.
 - ⬜ Podpis kodu/notaryzacja (operator); desktop Tauri (auto-update, tray).
 - 🚧 **Bootstrap modelu przy pierwszym uruchomieniu** — pierwszy krok ZROBIONY:
   - ✅ `husarz doctor` — diagnoza jako jedno źródło prawdy; trzy stany (OK/problem/NIEZNANY),

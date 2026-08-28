@@ -712,6 +712,14 @@ def _cmd_up(args: argparse.Namespace) -> int:
         for linia in sformatuj(warte_uwagi):
             print(linia, flush=True)
         print("", flush=True)
+    # Powiadomienie o aktualizacji — PO diagnozie, bo diagnoza mówi o tym, co nie działa
+    # TERAZ, a aktualizacja o tym, co można poprawić. Odwrotna kolejność zepchnęłaby
+    # problem blokujący pod komunikat informacyjny.
+    #
+    # Sprawdzenie NIE zatrzymuje startu przy braku sieci: `sprawdz` nigdy nie rzuca, a limit
+    # czasu jest krótki. Platforma ma wstać także wtedy, gdy serwer wydań milczy.
+    for linia in _opis_aktualizacji(_sprawdz_aktualizacje(config)):
+        print(linia, flush=True)
     # Launcher: otwórz konsolę w przeglądarce (tylko loopback — sensowne lokalnie).
     if getattr(args, "open", False) and _is_loopback(args.host):
         _open_browser_async(url)
@@ -804,6 +812,102 @@ def _cmd_roe_sign(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     return 0
+
+
+def _sprawdz_aktualizacje(config: HusarzConfig) -> object:
+    """Sprawdza aktualizacje, nie pozwalając awarii przewrócić startu platformy.
+
+    ``sprawdz`` z założenia nie rzuca, ale ten start jest ścieżką krytyczną: gdyby kiedyś
+    zaczęło, platforma przestałaby wstawać z powodu mechanizmu, który jest wygodą, a nie
+    warunkiem działania. Osłona jest tania, a jej brak kosztowałby dostępność.
+
+    Args:
+        config: Wczytana konfiguracja.
+
+    Returns:
+        Wynik sprawdzenia (``WynikSprawdzenia``).
+    """
+    from husarz import __version__  # noqa: PLC0415
+    from husarz.launcher.aktualizacja import Stan, WynikSprawdzenia, sprawdz  # noqa: PLC0415
+
+    try:
+        return sprawdz(config, __version__)
+    except Exception as exc:  # noqa: BLE001 - start platformy jest ważniejszy
+        return WynikSprawdzenia(
+            stan=Stan.NIEZNANY, biezaca=__version__, powod=f"błąd sprawdzenia: {exc}"
+        )
+
+
+def _opis_aktualizacji(wynik: object) -> list[str]:
+    """Formatuje wynik sprawdzenia aktualizacji na linie do wypisania.
+
+    Wydzielone, bo tę samą treść pokazuje polecenie ``husarz update check`` i start
+    ``husarz up`` — dwa różne miejsca, jedno brzmienie. Rozjazd między nimi znaczyłby, że
+    operator czyta co innego w zależności od tego, którędy zapytał.
+
+    Args:
+        wynik: Wynik ``aktualizacja.sprawdz``.
+
+    Returns:
+        Linie gotowe do wypisania; pusta lista, gdy nie ma o czym mówić.
+    """
+    from husarz.launcher.aktualizacja import Stan  # noqa: PLC0415
+
+    stan = wynik.stan  # type: ignore[attr-defined]
+    if stan is Stan.WYLACZONE:
+        return []
+    if stan is Stan.DOSTEPNA:
+        linie = [
+            f"[!] Dostępna nowsza wersja Husarza: {wynik.najnowsza}"  # type: ignore[attr-defined]
+            f" (masz {wynik.biezaca})."  # type: ignore[attr-defined]
+        ]
+        if wynik.strona:  # type: ignore[attr-defined]
+            linie.append(f"    Wydanie: {wynik.strona}")  # type: ignore[attr-defined]
+        return linie
+    if stan is Stan.NIEZNANY:
+        # „Nie wiem" jest osobnym stanem i musi być WIDOCZNE. Cisza znaczyłaby to samo,
+        # co „masz aktualną wersję", a to dwie zupełnie różne rzeczy.
+        return [f"[?] Nie udało się sprawdzić aktualizacji: {wynik.powod}"]  # type: ignore[attr-defined]
+    return []
+
+
+def _cmd_update_check(args: argparse.Namespace) -> int:
+    """Sprawdza dostępność nowszego wydania i raportuje wynik.
+
+    Args:
+        args: Argumenty wiersza poleceń (``--config``).
+
+    Returns:
+        0 — aktualna albo mechanizm wyłączony; 1 — dostępna nowsza wersja;
+        2 — błąd konfiguracji; 3 — NIE DAŁO SIĘ sprawdzić (osobny kod, bo to nie to samo,
+        co „aktualna": skrypt pilnujący wersji musi móc te przypadki rozróżnić).
+    """
+    from husarz import __version__  # noqa: PLC0415
+    from husarz.launcher.aktualizacja import Stan, sprawdz  # noqa: PLC0415
+
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    wynik = sprawdz(config, __version__)
+    if wynik.stan is Stan.WYLACZONE:
+        print(
+            "Sprawdzanie aktualizacji jest WYŁĄCZONE (`update.enabled: false`).\n"
+            "Włączenie oznacza połączenie wychodzące do serwera wydań przy każdym "
+            "sprawdzeniu — patrz config/update.yaml.",
+            flush=True,
+        )
+        return 0
+
+    for linia in _opis_aktualizacji(wynik):
+        print(linia, file=sys.stderr if wynik.stan is Stan.NIEZNANY else sys.stdout, flush=True)
+
+    if wynik.stan is Stan.AKTUALNA:
+        print(f"Masz najnowszą wersję ({wynik.biezaca}).", flush=True)
+        return 0
+    return 1 if wynik.stan is Stan.DOSTEPNA else 3
 
 
 def _cmd_config_explain(args: argparse.Namespace) -> int:
@@ -1081,6 +1185,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Otwórz konsolę w przeglądarce po starcie (UX launchera; tylko loopback).",
     )
     p_up.set_defaults(func=_cmd_up)
+
+    p_update = sub.add_parser("update", help="Aktualizacje Husarza.")
+    update_sub = p_update.add_subparsers(dest="update_command", required=True)
+
+    p_update_check = update_sub.add_parser(
+        "check", help="Sprawdź, czy jest nowsze wydanie (kod 0 = aktualna albo wyłączone)."
+    )
+    p_update_check.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_update_check.set_defaults(func=_cmd_update_check)
 
     p_config = sub.add_parser("config", help="Operacje na konfiguracji.")
     config_sub = p_config.add_subparsers(dest="config_command", required=True)

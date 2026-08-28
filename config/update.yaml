@@ -1,0 +1,22 @@
+# Sprawdzanie i instalacja aktualizacji Husarza (`husarz update`).
+#
+# DOMYŚLNIE WYŁĄCZONE — i nie jest to ostrożność na wyrost. Samo sprawdzenie wersji jest
+# połączeniem WYCHODZĄCYM, które ujawnia serwerowi wydań, że ta instalacja istnieje, ma
+# dany adres IP i konkretną wersję. Husarz deklaruje zero telemetrii, więc mechanizm
+# o takim skutku nie może włączyć się sam. To Twoja decyzja, nie nasza.
+#
+# W profilu `airgap` ten mechanizm jest ODRZUCANY przy starcie: instalacja odcięta od sieci
+# nie ma jak sprawdzić wersji, a pole, które „istnieje, ale nie działa", jest gorsze niż
+# jego brak.
+enabled: false
+
+# Repozytorium wydań w postaci `wlasciciel/nazwa`. Stąd czytamy listę wydań i numer
+# najnowszej wersji. Bez tego pola włączony mechanizm nie ma czego pytać, więc start
+# kończy się czytelnym błędem zamiast cichym milczeniem przy każdym sprawdzeniu.
+repository: Gh0s777tt/Husarz
+
+# Allowlista hostów dla zapytania o wydania — OSOBNA od security.egress.allowlist.
+# Zgoda na pytanie o wersję nie może po cichu otwierać tej domeny narzędziu `web`,
+# wtyczkom MCP ani agentom. Dwie listy = dwie różne decyzje operatora.
+sources:
+  - api.github.com
