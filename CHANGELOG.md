@@ -54,6 +54,38 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18m — `POST /api/chat/stream`)
+
+- **Endpoint strumieniujący odpowiedź czatu zdarzeniami SSE.** Uprawnienie, limit konta,
+  sanitacja załączników i obrazów oraz wpis audytu są IDENTYCZNE jak w `POST /api/chat` —
+  wspólny kod przygotowania żądania, nie kopia. Nowy endpoint z pominiętą kontrolą byłby
+  słabszymi drzwiami do tej samej zdolności, czyli gorszy niż brak endpointu.
+- **SSE zamiast WebSocket — wbrew własnemu planowi.** Strumień jest jednokierunkowy (do tego
+  SSE służy); WebSocket kosztowałby SZÓSTĄ zależność runtime w rdzeniu mającym ich świadomie
+  pięć; i — najważniejsze — nie podlega CORS, więc wymagałby osobnego projektu kontroli
+  `Origin` i uwierzytelniania, bo przeglądarka nie wyśle `Authorization` przy otwarciu
+  gniazda. SSE idzie zwykłym POST-em i dziedziczy jedno i drugie.
+- Bramki działają PRZED rozpoczęciem strumienia, więc błędy żądania nadal dają właściwy kod
+  HTTP. Po pierwszym bajcie status jest ustalony — awaria modelu może być zgłoszona wyłącznie
+  zdarzeniem `error`.
+
+### Naprawione (wada wykryta dopiero przez strumieniowanie)
+
+- **`BodySizeLimitMiddleware` ucinał KAŻDĄ odpowiedź strumieniową.** Po odtworzeniu ciała
+  żądania zwracał sfabrykowane `http.disconnect`, a `StreamingResponse` nasłuchuje
+  rozłączenia równolegle z wysyłaniem treści i przerywa strumień, gdy je zobaczy. Objaw:
+  status 200, poprawne nagłówki, PUSTE ciało, w logu tylko „ASGI callable returned without
+  completing response". Wada była nieszkodliwa, dopóki każdy endpoint czytał ciało w całości.
+  Po odtworzeniu bufora `receive` idzie teraz do oryginalnego kanału.
+
+### Sprostowane (Etap 18m)
+
+- **Uzasadnienie `ensure_ascii=True` w formatowaniu zdarzeń SSE było NIEPRAWDZIWE.**
+  Twierdziłem, że to ta flaga chroni przed rozbiciem ramki przez znak nowej linii. Gwarancję
+  daje samo kodowanie JSON (znaki sterujące są zawsze escapowane), a flaga dotyczy wyłącznie
+  znaków spoza ASCII — jej jedynym realnym skutkiem było podwojenie rozmiaru ładunku dla
+  polszczyzny (109 vs 59 bajtów). Wykryła to kontrola nośności, potwierdził pomiar.
+
 ### Dodane (Etap 18l — strumieniowanie odpowiedzi: transport, klient, router)
 
 - **`ModelRouter.complete_stream`** zwraca kolejne fragmenty treści zamiast czekać na całość.

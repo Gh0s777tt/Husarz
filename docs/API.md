@@ -110,3 +110,57 @@ app = create_app(config, config_dir="./config", router=ModelRouter(config), prom
 ```
 
 Decyzje projektowe: [ADR-0007](adr/0007-api-launcher-web.md).
+
+## `POST /api/chat/stream` — odpowiedź strumieniowana (SSE)
+
+Ta sama treść co `POST /api/chat`, ale oddawana fragmentami, w miarę jak model je tworzy.
+Uprawnienie, limit konta, sanitacja załączników i obrazów oraz wpis audytu są **identyczne** —
+endpoint dzieli z nim kod przygotowania żądania, a nie ma własnej kopii.
+
+```bash
+curl -sN -X POST http://127.0.0.1:8000/api/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Cześć"}]}'
+```
+
+Odpowiedź to `text/event-stream`:
+
+```
+data: {"delta": "Cze"}
+
+data: {"delta": "ść!"}
+
+data: {"done": true, "model": "husarz-local"}
+```
+
+Rodzaje zdarzeń: `delta` (fragment treści), `done` (koniec, z użytym modelem), `error`
+(strumień przerwany).
+
+### Dlaczego SSE, a nie WebSocket
+
+Plan rozwoju zapowiadał WebSocket. Przy realizacji okazał się złym narzędziem z trzech
+niezależnych powodów, więc plan został poprawiony:
+
+1. **Strumień jest jednokierunkowy** (serwer → klient) — dokładnie to, do czego SSE służy.
+   WebSocket dokłada kanał zwrotny, którego nikt tu nie potrzebuje.
+2. **Kosztowałby szóstą zależność runtime** (`websockets`/`wsproto`) w rdzeniu, który ma ich
+   świadomie pięć.
+3. **WebSocket nie podlega CORS.** Trzeba by osobno zaprojektować kontrolę `Origin`
+   i uwierzytelnianie, bo przeglądarka nie wyśle nagłówka `Authorization` przy otwarciu
+   gniazda. SSE idzie zwykłym POST-em i dziedziczy jedno i drugie bez wymyślania od nowa.
+
+### Granica: co jest kodem HTTP, a co zdarzeniem
+
+Wszystko, co da się sprawdzić **przed** rozpoczęciem strumienia, kończy się normalnym kodem
+HTTP: brak uprawnienia (401/403), przekroczony limit konta (429), model bez obsługi obrazów
+albo odrzucony załącznik (400), brak routera (503).
+
+Po wysłaniu pierwszego bajtu status jest już ustalony i nie da się go zmienić — awaria modelu
+może więc zostać zgłoszona **wyłącznie** jako zdarzenie `error`. To ograniczenie protokołu,
+nie przeoczenie; dlatego bramki celowo działają wcześniej.
+
+### Fallback kończy się na pierwszym fragmencie
+
+Router ma łańcuch modeli zapasowych, ale przy strumieniu przechodzi na kolejny **tylko
+dopóki nic nie wysłał**. Awaria w połowie kończy strumień zdarzeniem `error` — przełączenie
+modelu skleiłoby dwie różne odpowiedzi w jedną. Szczegóły: [ROUTER](ROUTER.md).

@@ -14,8 +14,9 @@ wyłącznie dla nasłuchu loopback (launcher wymusza token dla adresów nie-loop
 from __future__ import annotations
 
 import hmac
+import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -129,8 +130,13 @@ class BodySizeLimitMiddleware:
        doklejany do bufora (sufit pamięci ≈ ``max_bytes`` + jeden bufor odczytu serwera).
 
     Ciało jest buforowane i ODTWARZANE dla aplikacji (wszystkie endpointy czytają ciało
-    w całości — JSON — więc utrata strumieniowania nie ma znaczenia). Dzięki temu 413 jest
-    czyste (aplikacja nie zdąży zamienić wyjątku na 400 „error parsing the body").
+    w całości — JSON — więc utrata strumieniowania ŻĄDANIA nie ma znaczenia). Dzięki temu 413
+    jest czyste (aplikacja nie zdąży zamienić wyjątku na 400 „error parsing the body").
+
+    **Odtwarzanie dotyczy wyłącznie ciała, nie sygnału rozłączenia.** Po oddaniu bufora
+    kolejne wywołania `receive` idą do ORYGINALNEGO kanału. Zwracanie w tym miejscu
+    sfabrykowanego `http.disconnect` było wygodne i przez długi czas nieszkodliwe — do
+    pierwszej odpowiedzi STRUMIENIOWEJ, którą przerywało, zanim cokolwiek wyszło.
     """
 
     def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
@@ -171,7 +177,18 @@ class BodySizeLimitMiddleware:
             if not replayed:
                 replayed = True
                 return {"type": "http.request", "body": bytes(body), "more_body": False}
-            return {"type": "http.disconnect"}
+            # Po odtworzeniu ciała oddajemy głos ORYGINALNEMU `receive`. Wcześniej stało tu
+            # sfabrykowane `http.disconnect` — wygodne i przez długi czas nieszkodliwe, bo
+            # każdy endpoint czytał ciało w całości i nigdy nie pytał o więcej.
+            #
+            # Przestało być nieszkodliwe wraz z pierwszą odpowiedzią STRUMIENIOWĄ.
+            # `StreamingResponse` w Starlette nasłuchuje rozłączenia RÓWNOLEGLE z wysyłaniem
+            # treści i przerywa strumień, gdy je zobaczy. Sfabrykowane rozłączenie docierało
+            # natychmiast, więc odpowiedź kończyła się PUSTA, ze statusem 200 i właściwymi
+            # nagłówkami — bez żadnego błędu w logu poza „ASGI callable returned without
+            # completing response". Objaw wyglądał jak wada strumieniowania; przyczyna leżała
+            # tutaj.
+            return await receive()
 
         await self._app(scope, replay_receive, send)
 
@@ -253,6 +270,95 @@ def _martwe_zmiany(startowa: HusarzConfig, nowa: HusarzConfig) -> list[str]:
         if _pobierz(startowa, sciezka) != _pobierz(nowa, sciezka):
             znalezione.append(".".join(sciezka))
     return sorted(znalezione)
+
+
+def _zdarzenie_sse(dane: dict[str, Any]) -> str:
+    """Formatuje jedno zdarzenie Server-Sent Events.
+
+    **Skąd bezpieczeństwo nowych linii.** Ładunek jedzie w polu ``data:``, więc surowy znak
+    nowej linii rozbiłby zdarzenie na dwa — a odpowiedzi modelu zawierają je stale. Gwarancję
+    daje samo kodowanie JSON: znaki sterujące są w napisach ZAWSZE escapowane (``\\n`` jako
+    dwa znaki), niezależnie od jakichkolwiek opcji.
+
+    Pierwsza wersja tej funkcji ustawiała ``ensure_ascii=True`` z uzasadnieniem, że to ONA
+    chroni przed rozbiciem ramki. Było to NIEPRAWDZIWE — wykryła to kontrola nośności
+    (mutacja na ``False`` niczego nie zaczerwieniła) i potwierdził pomiar. Flaga dotyczy
+    wyłącznie znaków spoza ASCII, więc jej jedynym realnym skutkiem było podwojenie rozmiaru
+    ładunku dla polszczyzny (109 vs 59 bajtów na typowym zdaniu). Zostaje ``False``.
+
+    Args:
+        dane: Ładunek zdarzenia.
+
+    Returns:
+        Gotowa linia SSE zakończona pustą linią (separatorem zdarzeń).
+    """
+    return f"data: {json.dumps(dane, ensure_ascii=False)}\n\n"
+
+
+class _BledneZadanieCzatu(Exception):
+    """Żądanie czatu jest nieprawidłowe — treść komunikatu idzie wprost do wywołującego.
+
+    Osobny typ zamiast ``HTTPException``, bo tę samą walidację wykonuje ścieżka REST
+    (mapuje na 400) i ścieżka WebSocket (wysyła ramkę błędu i zamyka połączenie).
+    Gdyby wspólny kod rzucał wyjątkiem HTTP, ścieżka WebSocket musiałaby go tłumaczyć
+    z powrotem — albo, co gorsza, mieć własną kopię tych samych kontroli.
+    """
+
+
+def _przygotuj_wiadomosci_czatu(
+    request: ChatRequest, config: HusarzConfig, model_id: str
+) -> list[ChatMessage]:
+    """Buduje wiadomości modelu z żądania czatu: załączniki i obrazy są NIEZAUFANE.
+
+    Wydzielone z handlera REST, żeby ścieżka WebSocket przechodziła DOKŁADNIE te same
+    kontrole. Osobna kopia byłaby słabszymi drzwiami do tej samej zdolności: nowy endpoint
+    z pominiętą kontrolą wizyjną albo sanitacją załączników jest gorszy niż brak endpointu.
+
+    Args:
+        request: Żądanie czatu z API.
+        config: Aktualna konfiguracja (limity załączników i obrazów, rejestr modeli).
+        model_id: Identyfikator modelu, którym żądanie zostanie wykonane.
+
+    Returns:
+        Wiadomości gotowe dla routera.
+
+    Raises:
+        _BledneZadanieCzatu: Gdy załącznik/obraz nie przechodzi sanitacji, model nie
+            obsługuje obrazów albo brakuje wiadomości użytkownika do ich powiązania.
+    """
+    messages = [ChatMessage(role=m.role, content=m.content) for m in request.messages]
+    # Załączniki (NIEZAUFANE) → ogrodzony blok doklejany do bieżącej wiadomości.
+    if request.attachments:
+        try:
+            atts = sanitize_attachments(
+                [(a.name, a.content) for a in request.attachments], config.chat.attachments
+            )
+        except AttachmentError as exc:
+            raise _BledneZadanieCzatu(str(exc)) from exc
+        context = build_context_block(atts)
+        if context and messages:
+            messages[-1].content = f"{context}\n\n{messages[-1].content}"
+    # Obrazy (NIEZAUFANE, binarne) → wymagają modelu wizyjnego; sniff typu + limity.
+    if request.images:
+        spec = config.models.registry.get(model_id)
+        if spec is None or not spec.vision:
+            raise _BledneZadanieCzatu(
+                f"Model '{model_id}' nie obsługuje obrazów — użyj modelu wizyjnego "
+                f"(models: vision: true)."
+            )
+        try:
+            imgs = sanitize_images(
+                [(im.name, im.data) for im in request.images], config.chat.images
+            )
+        except AttachmentError as exc:
+            raise _BledneZadanieCzatu(str(exc)) from exc
+        # Obrazy wiąże się z OSTATNIĄ wiadomością użytkownika (nie ślepo z messages[-1] —
+        # ostatnia mogłaby być 'assistant'/'system', gdzie backend wizyjny obraz zignoruje).
+        target = next((m for m in reversed(messages) if m.role == "user"), None)
+        if target is None:
+            raise _BledneZadanieCzatu("Obrazy wymagają wiadomości użytkownika (rola 'user').")
+        target.images = [ImagePart(mime=i.mime, data_b64=i.data_b64) for i in imgs]
+    return messages
 
 
 def _principal_ref(principal: Principal | None) -> str:
@@ -816,6 +922,104 @@ def create_app(
             ],
         )
 
+    @app.post("/api/chat/stream")
+    def chat_stream(
+        request: ChatRequest,
+        principal: Principal | None = dep_agent_run,
+    ) -> StreamingResponse:
+        """Strumieniuje odpowiedź czatu zdarzeniami SSE, zamiast czekać na całość.
+
+        **Dlaczego SSE, a nie WebSocket — wbrew własnemu planowi.** Plan rozwoju zapowiadał
+        WebSocket, ale przy realizacji okazał się złym narzędziem, i to z trzech niezależnych
+        powodów. Po pierwsze, strumień odpowiedzi jest JEDNOKIERUNKOWY (serwer → klient),
+        czyli dokładnie tym, do czego SSE służy. Po drugie, WebSocket wymagałby SZÓSTEJ
+        zależności runtime (`websockets`/`wsproto`) w rdzeniu, który ma ich świadomie pięć.
+        Po trzecie i najważniejsze: WebSocket **nie podlega CORS**, więc trzeba by osobno
+        zaprojektować kontrolę `Origin` i uwierzytelnianie (przeglądarka nie wyśle nagłówka
+        `Authorization` przy otwarciu gniazda). SSE idzie zwykłym POST-em — obowiązuje ten
+        sam nagłówek `Authorization`, ta sama polityka CORS i ta sama zależność uprawnienia.
+
+        **Wszystkie bramki działają PRZED rozpoczęciem strumienia.** Limit konta, dobór
+        modelu, sanitacja załączników i obrazów oraz wpis audytu wykonują się, zanim wróci
+        odpowiedź — dzięki temu błąd nadal daje właściwy kod HTTP. Po rozpoczęciu strumienia
+        status jest już wysłany i nie da się go zmienić, więc awaria modelu może zostać
+        zgłoszona wyłącznie jako zdarzenie `error` w strumieniu. To jest ograniczenie
+        protokołu, nie przeoczenie — i dlatego przygotowanie żądania dzieli kod z `POST
+        /api/chat` zamiast go powielać.
+
+        Args:
+            request: Żądanie czatu (identyczne jak dla `/api/chat`).
+            principal: Wywołujący z RBAC.
+
+        Returns:
+            Odpowiedź `text/event-stream` ze zdarzeniami `delta`, `done` albo `error`.
+
+        Raises:
+            HTTPException: Gdy brak routera, przekroczono limit konta albo żądanie jest
+                nieprawidłowe — czyli zawsze, zanim strumień się zacznie.
+        """
+        with counter_lock:
+            active_router: SupportsComplete | None = state["router"]
+            current_config: HusarzConfig = state["config"]
+        if active_router is None:
+            raise HTTPException(status_code=503, detail="Model czatu niedostępny (brak routera).")
+        strumieniuj = getattr(active_router, "complete_stream", None)
+        if strumieniuj is None:
+            raise HTTPException(
+                status_code=503, detail="Router nie obsługuje strumieniowania odpowiedzi."
+            )
+        _enforce_quota(accounts, principal)
+        model_id = request.model or _resolve_chat_model(current_config)
+        try:
+            messages = _przygotuj_wiadomosci_czatu(request, current_config, model_id)
+        except _BledneZadanieCzatu as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        audit_log.record(
+            "api",
+            "chat.stream",
+            {
+                "model": model_id,
+                "turns": len(request.messages),
+                "attachments": len(request.attachments),
+                "images": len(request.images),
+            },
+            principal=_principal_ref(principal),
+        )
+        with counter_lock:
+            state["chats"] += 1
+        chat_request = RouterChatRequest(messages=messages, temperature=request.temperature)
+
+        def zdarzenia() -> Iterator[str]:
+            """Zamienia fragmenty odpowiedzi na zdarzenia SSE."""
+            try:
+                for fragment in strumieniuj(chat_request, model=model_id):
+                    yield _zdarzenie_sse({"delta": fragment})
+            except RateLimitExceededError:
+                _record_failure(state, counter_lock, audit_log, "rate_limit", action="chat.error")
+                yield _zdarzenie_sse({"error": "Przekroczono limit żądań (kontrola kosztów)."})
+                return
+            except NoModelAvailableError:
+                _record_failure(state, counter_lock, audit_log, "no_model", action="chat.error")
+                yield _zdarzenie_sse({"error": f"Model czatu '{model_id}' niedostępny."})
+                return
+            except RouterError as exc:
+                _record_failure(state, counter_lock, audit_log, "backend", action="chat.error")
+                # Komunikat routera jest bezpieczny do pokazania (nie niesie URL-i ani
+                # kluczy — patrz `HttpxTransport`), a bez niego operator nie wie, czy
+                # strumień urwał się na modelu, czy na sieci.
+                yield _zdarzenie_sse({"error": str(exc)})
+                return
+            yield _zdarzenie_sse({"done": True, "model": model_id})
+
+        return StreamingResponse(
+            zdarzenia(),
+            media_type="text/event-stream",
+            # `no-transform` jest tu istotne: pośrednik buforujący odpowiedź zniweczyłby
+            # cały sens strumienia, oddając ją dopiero na końcu.
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/api/chat", response_model=ChatReply)
     def chat(
         request: ChatRequest,
@@ -832,43 +1036,10 @@ def create_app(
             raise HTTPException(status_code=503, detail="Model czatu niedostępny (brak routera).")
         _enforce_quota(accounts, principal)
         model_id = request.model or _resolve_chat_model(current_config)
-        messages = [ChatMessage(role=m.role, content=m.content) for m in request.messages]
-        # Załączniki (NIEZAUFANE) → ogrodzony blok doklejany do bieżącej wiadomości.
-        if request.attachments:
-            try:
-                atts = sanitize_attachments(
-                    [(a.name, a.content) for a in request.attachments],
-                    current_config.chat.attachments,
-                )
-            except AttachmentError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            context = build_context_block(atts)
-            if context and messages:
-                messages[-1].content = f"{context}\n\n{messages[-1].content}"
-        # Obrazy (NIEZAUFANE, binarne) → wymagają modelu wizyjnego; sniff typu + limity.
-        if request.images:
-            spec = current_config.models.registry.get(model_id)
-            if spec is None or not spec.vision:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Model '{model_id}' nie obsługuje obrazów — użyj modelu wizyjnego "
-                    "(models: vision: true).",
-                )
-            try:
-                imgs = sanitize_images(
-                    [(im.name, im.data) for im in request.images], current_config.chat.images
-                )
-            except AttachmentError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            # Obrazy wiąże się z OSTATNIĄ wiadomością użytkownika (nie ślepo z messages[-1] —
-            # ostatnia mogłaby być 'assistant'/'system', gdzie backend wizyjny obraz zignoruje).
-            target = next((m for m in reversed(messages) if m.role == "user"), None)
-            if target is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Obrazy wymagają wiadomości użytkownika (rola 'user').",
-                )
-            target.images = [ImagePart(mime=i.mime, data_b64=i.data_b64) for i in imgs]
+        try:
+            messages = _przygotuj_wiadomosci_czatu(request, current_config, model_id)
+        except _BledneZadanieCzatu as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         chat_request = RouterChatRequest(messages=messages, temperature=request.temperature)
         audit_log.record(
             "api",
