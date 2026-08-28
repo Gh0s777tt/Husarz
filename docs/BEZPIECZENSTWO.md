@@ -2360,3 +2360,102 @@ Zawężenie ŁADUNKU odpowiedzi API (nie CLI): pełne endpointy i ścieżki bezw
 potrzebne operatorowi w terminalu, ale w odpowiedzi HTTP mogłyby być skracane. Obniżyłoby to
 stawkę całej tej dyskusji i uczyniłoby przyszłą rolę monitoringu bezpieczniejszą z definicji.
 Wymaga własnego testu skutku — w ROADMAP.
+
+## Etap 17m — przeszukanie systematyczne: pola konfiguracji, które KŁAMAŁY
+
+Notatka weryfikacyjna. Zmiana usuwa albo odrzuca sześć pól konfiguracji dotyczących izolacji,
+kosztów i uwierzytelniania — trzeci poziom audytu wg tabeli w `CLAUDE.md`.
+
+### Skąd przeszukanie
+
+Trzy kolejne commity naprawiały pole, które **wygląda na działające i nie robi nic**:
+`weights_path` (usunięte), koszt obrazu w budżecie kontekstu (liczony na zero),
+`routing.strategy` (router nie czyta pola). CLAUDE.md nakazuje przy poprawce WZORCA
+przeszukać repozytorium. Przeszukałem: **na 155 pól schematu siedemnaście nie miało
+odwołania poza `schema.py`.**
+
+Dochodzenie prowadzone było per pole, z wymogiem rozstrzygnięcia URUCHOMIENIEM, w trzech
+kategoriach: **A** bezpieczne z konstrukcji (martwy przełącznik), **B** niezaimplementowany
+podsystem, **C** dziura. Każdy werdykt „C" szedł do agenta, którego zadaniem było go obalić.
+
+**Potwierdzonych dziur: ZERO.** Ochrony, które wyglądały na warunkowe, okazały się
+bezwarunkowe. To dobra wiadomość i warto ją powiedzieć wprost.
+
+### Fałszywe alarmy mojego własnego narzędzia — sprostowanie
+
+Przeszukanie wskazało trzy pola, które **nie są martwe**, a mój grep tego nie widział:
+
+| Pole | Dlaczego grep się mylił |
+|---|---|
+| `platform.telemetry_enabled` | czytane przez walidator W `schema.py`, który zabrania wartości `true` — a ja wykluczyłem ten plik z przeszukania |
+| `roe.*.window` | konsumowane przez METODĘ modelu (`is_active_at`), nie przez odwołanie do pola. **Okno ROE jest w pełni egzekwowane** i ma test |
+| `roe.*.authorized_by` | wchodzi do payloadu podpisu przez `model_dump()` — usunięcie unieważniłoby wszystkie istniejące podpisy ROE |
+
+Wniosek metodyczny: „nazwa pola nie występuje poza schematem" **nie jest** równoważne
+„pole jest martwe". Pola konsumowane przez metody modelu i hurtem przez `model_dump()`
+wymagają sprawdzenia ręcznego. Zapisuję to, bo następne przeszukanie zacznie się od tej listy.
+
+### Co naprawiono
+
+**1. `tools.*.requires_sandbox` — USUNIĘTE. Najgorsze z całej listy.**
+
+Nie dlatego, że była to dziura (nie była — izolacja jest bezwarunkowa), tylko dlatego, że
+konfiguracja stawiała twierdzenie NIEPRAWDZIWE o granicy izolacji. `config/tools/web.yaml`
+i `file_edit.yaml` deklarowały `requires_sandbox: true`, a **oba narzędzia działają
+w procesie Husarza** — sprawdzone: żaden z tych modułów nie woła executora ani razu.
+Operator czytający `web.yaml` miał pełne prawo sądzić, że ruch wychodzący idzie
+z odizolowanego kontenera z `--network none`, `--cap-drop ALL` i non-root.
+
+To ta sama klasa, którą `docs/NARZEDZIA.md` sam nazywa: „Fałszywe poczucie kontroli jest
+gorsze niż jej brak, bo nie skłania do sprawdzenia".
+
+Usunięcie fałszywej informacji bez podania prawdziwej byłoby połową roboty, więc
+`docs/NARZEDZIA.md` dostał tabelę mówiącą, **co naprawdę biegnie w kontenerze** (`shell`,
+`git`, `run_tests`) i co chroni resztę.
+
+**2. `security.sandbox.workspace_only` i `path_allowlist` — USUNIĘTE.** Obiecywały
+konfigurowalność ograniczeń plikowych, której nie było: kontener dostaje DOKŁADNIE jeden
+montaż. Dopisanie ścieżki do `path_allowlist` nie dawało do niej dostępu.
+
+**3. `routing.cost_controls.max_cost_per_task` — ODRZUCANE.** Pomyłka szczególnie
+prawdopodobna, bo OBA sąsiednie limity w tym samym bloku są egzekwowane. Ten nie był.
+Przyczyna ta sama, co przy `routing.strategy: cost`: `models.registry` nie przechowuje ceny
+modelu. Odrzucamy tak samo twardo — dwa różne zachowania dla jednej przyczyny byłyby
+niespójnością, którą ktoś odziedziczy.
+
+**4. `security.mtls.enabled: true` i `security.auth.oidc_enabled: true` — ODRZUCANE.**
+To nie było zwykłe „pole nic nie robi". Konfiguracja z `mtls.enabled: true` **startowała**,
+a API nasłuchiwało po zwykłym HTTP — token Bearer szedł jawnym tekstem, podczas gdy plik
+konfiguracji mówił „mTLS włączony". Komunikat podaje wyjście (TLS na reverse-proxy),
+nie samą odmowę.
+
+### Test, który utrwalał złudzenie
+
+`test_sandbox_has_no_network_by_default` asercjonował `sandbox.workspace_only is True` —
+czyli **wartość pola, którego nic nie czytało**. Zielony test przy martwym polu jest gorszy
+niż brak testu: utrwala przekonanie, że ograniczenie zostało sprawdzone.
+
+Zastąpiony testem SKUTKU: `build_docker_argv` daje DOKŁADNIE jeden montaż i jest nim
+katalog roboczy. Asercja na LICZBIE, nie na obecności — inaczej przeszłaby także po dodaniu
+kolejnego bind-mounta hosta, czyli po realnym osłabieniu izolacji. Mutacja dokładająca
+`-v /etc:/etc:ro` czerwieni ten test.
+
+### Nośność
+
+**6 mutacji, 6 czerwonych**: cztery zdejmujące kolejne odmowy, jedna przywracająca
+przyjmowanie martwych pól sandboxa, jedna dokładająca montaż hosta.
+
+### Ograniczenia — wprost
+
+1. **gVisor (`runsc`) niezweryfikowany** — nie jest zainstalowany na tej maszynie.
+   Pomiary z realnymi kontenerami wykonano na zwykłym Dockerze. Potwierdzono natomiast,
+   że przy niedostępnym `runsc` narzędzie zwraca `ok=False`, czyli **nie degraduje po cichu**
+   do słabszej izolacji.
+2. **Pozostałe pola z listy siedemnastu** (`ca_cert_ref`, `cert_ref`, `client_id`, `issuer`,
+   `language_default`, `hash_chain`, `immutable`) zostają — są albo częścią odrzucanej już
+   sekcji, albo martwymi przełącznikami nad zachowaniem bezwarunkowo bezpiecznym. Zapisane
+   w ROADMAP z uzasadnieniem, nie przemilczane.
+3. **Trzy ustalenia poboczne przekazane do ROADMAP**, nie naprawione tutaj: odcięcie ogona
+   dziennika audytu przechodzi `verify()`; `hmac_key` jest nieosiągalny z konfiguracji;
+   `SandboxError` wychodzi wyjątkiem z `ToolDispatcher.dispatch` wbrew kontraktowi z jego
+   własnego docstringa.

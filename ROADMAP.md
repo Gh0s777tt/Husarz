@@ -473,6 +473,34 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   pomiarem, czy grupa przebiegów mieści się w oknie modelu, który startuje na tym sprzęcie.
   Twardy sygnał deterministyczny NIGDY nie jest nadpisywany oceną sędziego.
 
+## Ustalenia z przeszukania pól konfiguracji (Etap 17m)
+
+- ⬜ **Odcięcie ogona dziennika audytu przechodzi `verify()`** — nie ma kotwicy stanu
+  (`head_hash` ani licznika wpisów utrwalanego poza plikiem), więc usunięcie ostatnich linii
+  jest niewykrywalne, a `GET /api/audit` melduje `verified: true`. Wykryte przy badaniu pola
+  `audit.immutable`. Waga: bezpieczeństwo (zawartość audytu → trzeci wiersz tabeli audytu).
+- ⬜ **`hmac_key` dziennika audytu jest nieosiągalny z konfiguracji** — docstring `AuditLog`
+  zaleca go w produkcji, a `AuditConfig` nie ma pola na klucz. Bez niego przekucie całego
+  łańcucha jest trywialne dla kogoś z prawem zapisu do pliku. Dodać `audit.hmac_key_ref`
+  (wyłącznie REFERENCJA), z obsługą zgodności wstecz: włączenie unieważni `verify()` na
+  dzienniku sprzed zmiany.
+- ⬜ **`SandboxError` łamie kontrakt `ToolDispatcher.dispatch`** — docstring modułu deklaruje
+  „NIGDY wyjątek", a źle skonfigurowany sandbox (`image: null`) wywraca pętlę narzędziową
+  zamiast zwrócić `ToolResult(ok=False)`. Zachowanie jest fail-closed, ale niezgodne
+  z deklaracją.
+- ⬜ **`security.sandbox.engine: none` nie wyłącza sandboxa** poza profilami prod/airgap —
+  jedyny czytelnik tego pola to strażnik profilu; executor i tak woła `docker run`.
+  Rozstrzygnąć: albo pole ma działać, albo ma być odrzucane jak `requires_sandbox`.
+- ⬜ **Pozostałe pola bez czytelnika, świadomie zostawione**: `ca_cert_ref`, `cert_ref`,
+  `client_id`, `issuer` (części odrzucanych już sekcji mTLS/OIDC), `language_default`,
+  `audit.hash_chain` i `audit.immutable` (martwe przełączniki nad zachowaniem bezwarunkowo
+  bezpiecznym — łańcuch skrótów działa ZAWSZE, sprawdzone). Do rozważenia przy okazji
+  Etapu 6.
+- ⬜ **Testy asercjonujące WARTOŚĆ pola configu zamiast skutku** — wzorzec ten sam, co
+  w naprawionym `test_sandbox_has_no_network_by_default`. Podejrzane:
+  `test_encryption_at_rest_enabled`, `test_puszkarz_requires_roe`, `test_no_telemetry`.
+  Sprawdzić, czy za każdym stoi test skutku, czy tylko ✅ w macierzy.
+
 ## Pozostałe ustalenia
 - Modele (GLM-5.2, Bielik v3, Hermes) pobierane lokalnie do `models/` (gitignored)
   na dysku z zapasem miejsca — dopiero od Etapu 1 (router) i realnego uruchomienia.

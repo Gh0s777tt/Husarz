@@ -5,6 +5,51 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Usunięte / zmienione (przeszukanie systematyczne: pola konfiguracji, które KŁAMAŁY)
+
+Trzy kolejne commity naprawiały pole „wygląda na działające, nie robi nic". CLAUDE.md nakazuje
+przy poprawce WZORCA przeszukać repozytorium — przeszukanie wykazało, że **na 155 pól schematu
+siedemnaście nie miało odwołania poza `schema.py`**. Dochodzenie per pole, z wymogiem
+rozstrzygnięcia uruchomieniem i adwersaryjną weryfikacją każdego werdyktu „dziura".
+
+**Potwierdzonych dziur w bezpieczeństwie: ZERO.** Ochrony, które wyglądały na warunkowe,
+okazały się bezwarunkowe. Naprawiono natomiast sześć pól, które o tym kłamały:
+
+- **`tools.*.requires_sandbox` USUNIĘTE — najgorsze z listy.** `config/tools/web.yaml`
+  i `file_edit.yaml` deklarowały `requires_sandbox: true`, a **oba narzędzia działają
+  w procesie Husarza**, nie w kontenerze (sprawdzone: żaden z modułów nie woła executora).
+  Operator czytający te pliki miał pełne prawo sądzić, że ruch wychodzący idzie z izolowanego
+  kontenera. Izolacja nie była naruszona — naruszona była prawda o tym, gdzie przebiega.
+- **`security.sandbox.workspace_only` i `path_allowlist` USUNIĘTE.** Obiecywały
+  konfigurowalność ograniczeń plikowych, której nie było: kontener dostaje DOKŁADNIE jeden
+  montaż, a dopisanie ścieżki do `path_allowlist` nie dawało do niej dostępu.
+- **`routing.cost_controls.max_cost_per_task` ODRZUCANE.** Pomyłka szczególnie prawdopodobna,
+  bo oba sąsiednie limity w tym samym bloku DZIAŁAJĄ. Ten nie działał.
+- **`security.mtls.enabled: true` i `security.auth.oidc_enabled: true` ODRZUCANE.**
+  To nie było zwykłe „pole nic nie robi": konfiguracja z włączonym mTLS **startowała**,
+  a API nasłuchiwało po zwykłym HTTP — token Bearer szedł jawnym tekstem.
+- **`docs/NARZEDZIA.md` dostał tabelę, czego dotąd nie było nigdzie:** które narzędzia
+  naprawdę biegną w kontenerze (`shell`, `git`, `run_tests`), a które w procesie Husarza —
+  i co chroni te drugie. Usunięcie fałszywej informacji bez podania prawdziwej byłoby połową
+  roboty.
+
+### Poprawione (test, który utrwalał złudzenie)
+
+- `test_sandbox_has_no_network_by_default` asercjonował `sandbox.workspace_only is True` —
+  **wartość pola, którego nic nie czytało**. Zielony test przy martwym polu jest gorszy niż
+  brak testu: utrwala przekonanie, że ograniczenie zostało sprawdzone. Zastąpiony testem
+  SKUTKU (kontener dostaje dokładnie jeden montaż, i jest nim katalog roboczy), z asercją na
+  LICZBIE montaży — inaczej przeszedłby także po dodaniu kolejnego bind-mounta hosta.
+
+### Sprostowane (fałszywe alarmy mojego własnego przeszukania)
+
+- **`platform.telemetry_enabled`, `roe.*.window`, `roe.*.authorized_by` NIE SĄ martwe** —
+  mój grep tego nie widział. Pierwsze jest czytane przez walidator w samym `schema.py`
+  (zabrania wartości `true`), drugie przez METODĘ modelu (`is_active_at` — **okno ROE jest
+  w pełni egzekwowane**), trzecie wchodzi do payloadu podpisu przez `model_dump()`.
+- Wniosek metodyczny zapisany w `docs/BEZPIECZENSTWO.md`: „nazwa pola nie występuje poza
+  schematem" NIE jest równoważne „pole jest martwe".
+
 ### Zmienione (konfiguracja odrzuca `routing.strategy`, którego router nie realizuje)
 
 - **`routing.strategy: cost` / `latency` nie robiło NIC.** `selection.py` nie czyta tego pola

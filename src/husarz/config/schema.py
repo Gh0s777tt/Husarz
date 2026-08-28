@@ -271,6 +271,33 @@ class CostControls(_StrictModel):
     max_cost_per_task: float | None = Field(default=None, gt=0)
     max_requests_per_minute: int | None = Field(default=None, ge=1)
 
+    @model_validator(mode="after")
+    def _odrzuc_nieegzekwowany_limit_kosztu(self) -> CostControls:
+        """Odrzuca `max_cost_per_task` — limit, którego NIC nie egzekwuje.
+
+        Pomyłka była tu szczególnie prawdopodobna: OBA sąsiednie pola w tym samym bloku
+        (`max_tokens_per_request`, `max_requests_per_minute`) są egzekwowane, więc operator
+        miał wszelkie podstawy sądzić, że trzecie też. Nie było.
+
+        Przyczyna jest ta sama, co przy `routing.strategy: cost`: `models.registry` nie
+        przechowuje ceny modelu, więc kosztu w walucie nie ma z czego policzyć. Odrzucamy
+        tak samo twardo jak tam — dwa różne zachowania dla jednej przyczyny byłyby
+        niespójnością, którą ktoś odziedziczy.
+
+        Raises:
+            ValueError: Gdy limit kosztu jest ustawiony.
+        """
+        if self.max_cost_per_task is not None:
+            raise ValueError(
+                "routing.cost_controls.max_cost_per_task NIE JEST egzekwowane — żaden kod nie "
+                "czyta tego pola, więc limit nie obowiązywał (choć oba sąsiednie limity w tym "
+                "bloku obowiązują). Policzenie kosztu w walucie wymaga ceny modelu, której "
+                "`models.registry` nie przechowuje. Usuń pole i użyj działających limitów: "
+                "`max_tokens_per_request`, `max_requests_per_minute` oraz "
+                "`security.auth.default_token_quota` (limit tokenów per konto)."
+            )
+        return self
+
 
 # Strategie doboru modelu, które router NAPRAWDĘ realizuje. Reszta wartości `RoutingStrategy`
 # to zapisany zamiar na kolejne etapy — i dopóki nim jest, konfiguracja ich NIE PRZYJMUJE.
@@ -348,17 +375,44 @@ class EgressConfig(_StrictModel):
         return self
 
 
+# Pola USUNIĘTE ze `SandboxConfig`. Oba obiecywały konfigurowalność ograniczeń plikowych,
+# której nie było: kontener dostaje DOKŁADNIE jeden montaż (workspace), a narzędzia plikowe
+# przechodzą przez `resolve_within_workspace`. Konfinacja jest bezwarunkowa — nie ma czego
+# wyłączać ani poszerzać, a pole sugerujące inaczej to fałszywe poczucie kontroli.
+_USUNIETE_POLA_SANDBOXA: dict[str, str] = {
+    "workspace_only": (
+        "konfinacja do katalogu roboczego jest BEZWARUNKOWA (kontener dostaje dokładnie jeden "
+        "montaż, a narzędzia plikowe i tak przechodzą przez `resolve_within_workspace`), więc "
+        "pole nic nie przełączało. Usuń klucz."
+    ),
+    "path_allowlist": (
+        "pole nie było przez nic czytane — dopisanie ścieżki NIE dawało do niej dostępu. "
+        "Ograniczenia W OBRĘBIE katalogu roboczego ustawia się przez `deny_globs` "
+        "w config/tools/file_edit.yaml. Usuń klucz."
+    ),
+}
+
+
 class SandboxConfig(_StrictModel):
     """Ograniczenia sandboxa narzędzi."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _odrzuc_usuniete_pola(cls, dane: Any) -> Any:
+        """Czytelny komunikat zamiast „extra fields not permitted" dla usuniętych pól."""
+        if not isinstance(dane, dict):
+            return dane
+        for pole, powod in _USUNIETE_POLA_SANDBOXA.items():
+            if pole in dane:
+                raise ValueError(f"security.sandbox.{pole} zostało USUNIĘTE: {powod}")
+        return dane
 
     engine: SandboxEngine = SandboxEngine.DOCKER_GVISOR
     network: bool = False  # brak sieci domyślnie
     cpu_limit: str = "1"
     memory_limit: str = "512m"
     timeout_seconds: int = 60
-    workspace_only: bool = True
     command_allowlist: list[str] = Field(default_factory=list)
-    path_allowlist: list[str] = Field(default_factory=list)
     # Obraz kontenera i klasa runtime (np. 'runsc' dla gVisor) — bez hardcode w executorze.
     image: str | None = None
     runtime_class: str | None = None
@@ -369,12 +423,35 @@ class SandboxConfig(_StrictModel):
 
 
 class MtlsConfig(_StrictModel):
-    """mTLS między usługami (referencje do sekretów, nie same materiały)."""
+    """mTLS między usługami (referencje do sekretów, nie same materiały).
+
+    **NIEZAIMPLEMENTOWANE (Etap 6).** Sekcja jest zapisanym zamiarem; ustawienie
+    ``enabled: true`` jest ODRZUCANE przy starcie. Powód jest poważniejszy niż zwykłe
+    „pole nic nie robi": konfiguracja przyjmująca `true` dawała operatorowi fałszywe
+    poczucie, że kanał jest szyfrowany i klient uwierzytelniony — podczas gdy API nasłuchuje
+    po zwykłym HTTP, a token Bearer jedzie jawnym tekstem.
+    """
 
     enabled: bool = False
     ca_cert_ref: str | None = None
     cert_ref: str | None = None
     key_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _odrzuc_wlaczenie_niezaimplementowanego(self) -> MtlsConfig:
+        """Fail-closed: lepiej nie wystartować, niż wystartować z fałszywym poczuciem TLS-u.
+
+        Raises:
+            ValueError: Gdy mTLS jest włączony.
+        """
+        if self.enabled:
+            raise ValueError(
+                "security.mtls.enabled=true, ale mTLS NIE JEST zaimplementowany (Etap 6) — "
+                "serwer nasłuchuje po zwykłym HTTP, bez szyfrowania i bez weryfikacji "
+                "certyfikatu klienta, więc token Bearer szedłby jawnym tekstem. Ustaw "
+                "`enabled: false` i zakończ TLS na reverse-proxy przed Husarzem."
+            )
+        return self
 
 
 class AuthConfig(_StrictModel):
@@ -425,6 +502,16 @@ class AuthConfig(_StrictModel):
             raise ValueError(
                 f"security.auth.default_user_role='{self.default_user_role}' nie należy "
                 f"do auth.roles ({sorted(known)})."
+            )
+        # OIDC jest zapisanym zamiarem (Etap 6), nie funkcją. Przyjmowanie `true` dawałoby
+        # operatorowi fałszywe poczucie, że tożsamość jest weryfikowana u dostawcy — podczas
+        # gdy API uwierzytelnia wyłącznie tokenem Bearer i kontami lokalnymi.
+        if self.oidc_enabled:
+            raise ValueError(
+                "security.auth.oidc_enabled=true, ale przepływ OIDC NIE JEST zaimplementowany "
+                "(Etap 6) — API uwierzytelnia wyłącznie tokenem Bearer (`api_token_ref`) i "
+                "kontami lokalnymi. Ustaw `oidc_enabled: false` i użyj jednego z tych "
+                "mechanizmów."
             )
         if bool(self.seed_admin_username) != bool(self.seed_admin_password_ref):
             raise ValueError(
@@ -679,6 +766,19 @@ class PluginToolSettings(_StrictModel):
     max_output_bytes: int = Field(default=100_000, ge=1)
 
 
+# Pola USUNIĘTE ze schematu wraz z powodem. Komunikat migracyjny mówi, co zniknęło i dlaczego —
+# samo `extra="forbid"` dałoby „extra fields not permitted": prawdę, która niczego nie tłumaczy.
+_USUNIETE_POLA_NARZEDZIA: dict[str, str] = {
+    "requires_sandbox": (
+        "pole nie było przez nic czytane (zero odwołań w `src/`) i — co gorsza — stawiało "
+        "twierdzenie NIEPRAWDZIWE: `web` i `file_edit` deklarowały `true`, a oba działają "
+        "W PROCESIE Husarza, nie w kontenerze. W sandboxie biegną WYŁĄCZNIE `shell`, `git` "
+        "i `run_tests`, i to bezwarunkowo — nie ma czego włączać ani wyłączać. Usuń klucz; "
+        "co chroni pozostałe narzędzia, opisuje docs/NARZEDZIA.md."
+    ),
+}
+
+
 class ToolConfig(_StrictModel):
     """Definicja narzędzia dostępnego dla agentów."""
 
@@ -686,7 +786,6 @@ class ToolConfig(_StrictModel):
     kind: str  # web | shell | file_edit | git | run_tests | rag | custom
     description: str = ""
     enabled: bool = True
-    requires_sandbox: bool = True
     requires_egress: bool = False
     # Allowlista: domeny (web), komendy (shell), ścieżki (file_edit) itd.
     allowlist: list[str] = Field(default_factory=list)
@@ -694,6 +793,27 @@ class ToolConfig(_StrictModel):
     # Sparsowane, TYPOWANE ustawienia (wynik walidacji `config` wobec modelu rodzaju).
     # Prywatne, bo nie jest polem wejściowym YAML-a — pochodzi wyłącznie z `config`.
     _settings: BaseModel | None = PrivateAttr(default=None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _odrzuc_usuniete_pola(cls, dane: Any) -> Any:
+        """Tłumaczy usunięte pola na czytelny komunikat zamiast „extra fields not permitted".
+
+        Args:
+            dane: Surowe dane wejściowe modelu.
+
+        Returns:
+            Dane bez zmian.
+
+        Raises:
+            ValueError: Gdy konfiguracja używa pola usuniętego.
+        """
+        if not isinstance(dane, dict):
+            return dane
+        for pole, powod in _USUNIETE_POLA_NARZEDZIA.items():
+            if pole in dane:
+                raise ValueError(f"tools[...].{pole} zostało USUNIĘTE: {powod}")
+        return dane
 
     def settings_as(self, model: type[_SettingsT]) -> _SettingsT:
         """Zwraca typowane ustawienia narzędzia; ``model`` musi pasować do ``kind``.

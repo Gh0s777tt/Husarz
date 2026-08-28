@@ -21,9 +21,7 @@ sandbox:
   cpu_limit: "1"
   memory_limit: 512m
   timeout_seconds: 60
-  workspace_only: true       # dostęp wyłącznie do katalogu workspace
   command_allowlist: []      # np. ["python", "pytest", "git"] — ustawiane per profil
-  path_allowlist: []         # dodatkowe ścieżki tylko-do-odczytu
   image: husarz-sandbox:latest   # obraz kontenera narzędzi (budowany lokalnie, Etap 6)
   runtime_class: runsc           # gVisor; null dla zwykłego Dockera
   run_as_user: "1000:1000"       # non-root w kontenerze

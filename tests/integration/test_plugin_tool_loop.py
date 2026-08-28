@@ -76,9 +76,7 @@ def _config() -> HusarzConfig:
             )
         },
         tools={
-            "plugin_srv": ToolConfig(
-                name="plugin_srv", kind="plugin", requires_sandbox=False, config={"plugin": "srv"}
-            )
+            "plugin_srv": ToolConfig(name="plugin_srv", kind="plugin", config={"plugin": "srv"})
         },
     )
 

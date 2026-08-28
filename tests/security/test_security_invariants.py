@@ -32,7 +32,36 @@ def test_sandbox_has_no_network_by_default(repo_config_dir: Path) -> None:
     """Sandbox narzędzi domyślnie bez sieci."""
     config = load_config(repo_config_dir)
     assert config.security.sandbox.network is False
-    assert config.security.sandbox.workspace_only is True
+
+
+def test_kontener_dostaje_DOKLADNIE_JEDEN_montaz_i_jest_nim_workspace(
+    repo_config_dir: Path, tmp_path: Path
+) -> None:
+    """Konfinacja do katalogu roboczego sprawdzana SKUTKIEM, nie wartością z YAML-a.
+
+    Poprzednia wersja tego testu asercjonowała `sandbox.workspace_only is True` — czyli
+    odczytywała pole konfiguracji, którego NIC nie czytało. Zielony test przy martwym polu
+    to najgorszy możliwy układ: utrwalał przekonanie, że ograniczenie jest sprawdzone.
+    Pole usunięto; kontrola musi patrzeć na to, co naprawdę dostaje kontener.
+
+    Asercja na LICZBIE montaży, nie na obecności jednego — inaczej przeszłaby także po
+    dodaniu kolejnego bind-mounta hosta, czyli po realnym osłabieniu izolacji.
+    """
+    from husarz.tools.sandbox import SandboxSpec, build_docker_argv
+
+    config = load_config(repo_config_dir)
+    spec = SandboxSpec(
+        image="obraz:testowy",
+        workspace_host_path=tmp_path,
+        command=["ls"],
+        network=config.security.sandbox.network,
+    )
+
+    argv = build_docker_argv(spec)
+
+    montaze = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+    assert len(montaze) == 1, f"kontener dostaje {len(montaze)} montaży zamiast jednego: {montaze}"
+    assert montaze[0].startswith(f"{tmp_path}:"), montaze[0]
 
 
 def test_audit_log_enabled_and_immutable(repo_config_dir: Path) -> None:

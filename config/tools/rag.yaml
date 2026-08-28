@@ -5,7 +5,6 @@ name: rag
 kind: rag
 description: Zapis/odczyt pamięci i wyszukiwanie (słowne lub semantyczne wektorowe).
 enabled: true
-requires_sandbox: false      # usługa wewnętrzna, nie polecenie w sandboxie
 requires_egress: false       # in-memory/lokalny embedder loopback — brak ruchu na zewnątrz
 allowlist: []
 config:

@@ -3,7 +3,6 @@ name: git
 kind: git
 description: Operacje git w obrębie workspace (status, add, commit, diff, log).
 enabled: true
-requires_sandbox: true
 requires_egress: false
 # Dozwolone podkomendy git.
 allowlist:

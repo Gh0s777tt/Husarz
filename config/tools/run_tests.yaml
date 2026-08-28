@@ -3,7 +3,6 @@ name: run_tests
 kind: run_tests
 description: Uruchamianie zestawu testów (pytest) w izolowanym sandboxie.
 enabled: true
-requires_sandbox: true
 requires_egress: false
 allowlist:
   - pytest

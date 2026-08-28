@@ -4,7 +4,6 @@ name: shell
 kind: shell
 description: Uruchamianie dozwolonych poleceń w izolowanym sandboxie bez sieci.
 enabled: true
-requires_sandbox: true
 requires_egress: false
 # Allowlista poleceń (nazwa binarki). Puste = wszystko zablokowane.
 allowlist:

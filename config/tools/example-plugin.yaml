@@ -16,7 +16,6 @@ name: plugin_example
 kind: plugin
 description: Przykładowy serwer MCP (lokalny).   # ZAUFANY opis → trafia do manuala modelu
 enabled: false
-requires_sandbox: false      # usługa sieciowa (konektor), nie polecenie w sandboxie
 requires_egress: false       # egress egzekwuje konektor (build_connector), nie to pole
 config:
   plugin: example-mcp        # nazwa konektora z config/plugins/ (MUSI istnieć)

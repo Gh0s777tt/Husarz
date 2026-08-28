@@ -5,7 +5,6 @@ name: web
 kind: web
 description: Pobieranie stron/dokumentacji z domen dozwolonych (allowlist).
 enabled: true
-requires_sandbox: true
 requires_egress: true
 # Przykładowe dozwolone domeny (edytuj wg potrzeb; puste = narzędzie nieużywalne).
 allowlist:

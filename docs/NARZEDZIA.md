@@ -21,6 +21,42 @@ Kod: `husarz.tools`.
 | `web`       | `WebTool`        | allowlista domen narzędzia **oraz** globalny egress **oraz** anty-SSRF z pinowaniem IP |
 | `rag`       | `RagTool`        | pamięć/wyszukiwanie; backend `memory` (słowny, domyślny) lub `embedding` (wektorowy, `husarz.memory`) — patrz niżej i ADR-0017 |
 
+### Które narzędzia NAPRAWDĘ biegną w sandboxie
+
+To jest informacja, której operator dotąd nie miał nigdzie — a konfiguracja podawała mu
+w tym miejscu nieprawdę.
+
+| W kontenerze (`docker run`) | W procesie Husarza |
+|---|---|
+| `shell`, `git`, `run_tests` | `file_edit`, `web`, `rag`, narzędzia wtyczek |
+
+Podział jest **bezwarunkowy i wynika z rodzaju narzędzia**, nie z ustawienia. Nie ma
+przełącznika, który by go zmienił — i nie powinno być: `web` musi wykonać żądanie HTTP
+z procesu, który zna politykę egress, a `file_edit` operuje na katalogu roboczym hosta.
+
+Co chroni narzędzia działające **poza** kontenerem:
+
+- `file_edit` — konfinacja do katalogu roboczego (`resolve_within_workspace`, rozwija
+  dowiązania symboliczne PRZED kontrolą) plus deny-globi na sekrety i `models/`;
+- `web` — trzy warstwy: allowlista domen narzędzia, globalna polityka egress (deny-all)
+  i anty-SSRF z pinowaniem IP (ADR-0020);
+- `rag` — pamięć lokalna, bez wyjścia do sieci;
+- wtyczki — polityka konektora MCP (ADR-0015, ADR-0019).
+
+!!! warning "SPROSTOWANIE — `tools.*.requires_sandbox` USUNIĘTE"
+    Pole istniało w schemacie, **nie miało ani jednego czytelnika** i stawiało twierdzenie
+    nieprawdziwe: `config/tools/web.yaml` oraz `file_edit.yaml` deklarowały
+    `requires_sandbox: true`, choć oba narzędzia działają w procesie Husarza. Operator
+    czytający te pliki miał pełne prawo sądzić, że ruch wychodzący idzie z odizolowanego
+    kontenera.
+
+    To dokładnie ta klasa wady, którą ten sam dokument nazywa dwie sekcje niżej:
+    „Fałszywe poczucie kontroli jest gorsze niż jej brak, bo nie skłania do sprawdzenia".
+    Konfiguracja z tym kluczem **nie wczyta się**, a komunikat prostuje, gdzie co biegnie.
+
+    Wykryte przeszukaniem systematycznym: na 155 pól schematu siedemnaście nie miało
+    czytelnika poza `schema.py`. Szczegóły: `docs/BEZPIECZENSTWO.md`, Etap 17m.
+
 ## Ustawienia narzędzi — typowane i walidowane przy starcie
 
 Sekcja `config:` w `config/tools/*.yaml` NIE jest dowolną mapą: każdy `kind` ma własny model
