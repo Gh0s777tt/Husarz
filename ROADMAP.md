@@ -496,10 +496,13 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
 - ⬜ **Usunięcie CAŁEGO pliku dziennika wraz z kotwicą nie zostawia śladu w samym Husarzu.**
   Wykrycie wymaga nadzoru zewnętrznego (kopia poza maszyną, wysyłka do systemu zbierającego)
   — a to wysyłanie danych, więc wyłącznie za zgodą operatora i poza domyślną konfiguracją.
-- ⬜ **`SandboxError` łamie kontrakt `ToolDispatcher.dispatch`** — docstring modułu deklaruje
-  „NIGDY wyjątek", a źle skonfigurowany sandbox (`image: null`) wywraca pętlę narzędziową
-  zamiast zwrócić `ToolResult(ok=False)`. Zachowanie jest fail-closed, ale niezgodne
-  z deklaracją.
+- ✅ **Awaria sandboxa degraduje się do wyniku, nie do wyjątku.** `dispatch` łapał trzy
+  zaplecza z czterech (`MemoryError_`, `EgressError`, `PluginError`), a `SandboxError`
+  przepuszczał — źle skonfigurowany sandbox wywracał pętlę narzędziową i orkiestrację.
+  Łapiemy teraz CAŁĄ hierarchię `ToolError`, żeby dodanie rodzaju narzędzia nie wymagało
+  pamiętania o dopisaniu jego wyjątku. SPROSTOWANIE: pierwotne zgłoszenie mówiło o „złamaniu
+  kontraktu"; docstring był węższy, niż go zacytowano — obiecywał brak wyjątku dla złych
+  argumentów, nie dla awarii zaplecza. Wada była realna, jej opis nieprecyzyjny.
 - ⬜ **`security.sandbox.engine: none` nie wyłącza sandboxa** poza profilami prod/airgap —
   jedyny czytelnik tego pola to strażnik profilu; executor i tak woła `docker run`.
   Rozstrzygnąć: albo pole ma działać, albo ma być odrzucane jak `requires_sandbox`.

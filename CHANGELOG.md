@@ -5,6 +5,27 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (awaria sandboxa wywracała pętlę zamiast dać modelowi błąd)
+
+- **`ToolDispatcher.dispatch` łapał trzy zaplecza z czterech.** `MemoryError_`,
+  `EgressError` i `PluginError` degradowały się do `ToolResult(ok=False)`; `SandboxError`
+  przechodził na wylot. Skutek: `security.sandbox.image: null` albo niedostępny silnik
+  wywracał CAŁĄ pętlę narzędziową i orkiestrację — za błąd konfiguracji płaciła przerwana
+  praca, a nie jedno nieudane wywołanie. Odtworzone na realnych narzędziach: ani `ShellTool`,
+  ani `RunTestsTool` nie łapią tego same.
+- Łapiemy teraz **całą hierarchię `ToolError`**, nie wyliczankę klas. Wyliczanka już raz
+  zawiodła; dodanie piątego rodzaju narzędzia nie może wymagać pamiętania o dopisaniu jego
+  wyjątku do `except`. Test przechodzi po WSZYSTKICH podklasach `ToolError` — nowa podklasa
+  bez pokrycia zaczerwieni go sama z siebie.
+- Sprawdzone, że komunikaty tych wyjątków są bezpieczne do pokazania modelowi: `FetchError`
+  jest z założenia generyczny, `PathNotAllowedError` echuje wyłącznie ścieżkę podaną przez
+  model, `SandboxError` mówi o konfiguracji operatora, nie o jego danych.
+- **SPROSTOWANIE do własnego opisu tej pozycji w ROADMAP.** Zapowiadałem ją jako „złamanie
+  kontraktu z docstringa". Docstring był węższy, niż go zacytowałem: obiecywał brak wyjątku
+  dla ZŁYCH ARGUMENTÓW, nie dla awarii zaplecza. Wada była realna (trzy zaplecza obsłużone,
+  czwarte nie, bez uzasadnienia), ale jej pierwotny opis — nieprecyzyjny. Docstring
+  rozszerzony tak, żeby mówił to, co kod teraz robi.
+
 ### Dodane (bazowa linia profili prod/airgap — obietnica bez ani jednego testu)
 
 - **`docs/ARCHITEKTURA.md` obiecuje, że w profilach `prod` i `airgap` sandboxa, audytu

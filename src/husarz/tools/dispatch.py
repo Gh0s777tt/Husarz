@@ -7,6 +7,18 @@ Złe argumenty / nieznana akcja / nieznane narzędzie → ``ToolResult(ok=False)
 wyjątek i NIGDY efekt uboczny. ``ToolDispatcher.manual`` buduje z tej samej tabeli
 deterministyczny „man" — jedno źródło prawdy: dispatch ↔ schemat (brak dryfu).
 
+**Awarie zaplecza też degradują się do wyniku, nie do wyjątku.** Dotyczy to WSZYSTKICH
+zapleczy narzędzi: sandboxa, embeddera pamięci, wtyczki MCP i egressu. Model dostaje wtedy
+``ok=False`` z czytelnym powodem i może się odbić — spróbować innego narzędzia albo zgłosić
+problem w odpowiedzi. Wyjątek wywracałby CAŁĄ pętlę narzędziową i orkiestrację, czyli za
+źle skonfigurowany sandbox płaciłaby przerwana praca, a nie jedno nieudane wywołanie.
+
+Do Etapu 17q zasada ta była zrealizowana dla TRZECH zapleczy z czterech: ``MemoryError_``,
+``EgressError`` i ``PluginError`` były łapane, a ``SandboxError`` — nie. Odtworzone:
+``shell.run`` i ``run_tests.run`` przy ``security.sandbox.image: null`` przepuszczały wyjątek
+na wylot. Łapiemy więc całą hierarchię ``ToolError``, żeby czwarty przypadek nie był
+wyjątkiem od reguły ani teraz, ani po dodaniu piątego rodzaju narzędzia.
+
 Nowy rodzaj narzędzia = builder (patrz ``tools.registry``) + wpisy ``ActionSpec`` w jednym
 miejscu (``default_action_registry``), bez zmian w rdzeniu dispatchu (open/closed).
 """
@@ -334,10 +346,21 @@ class ToolDispatcher:
             # Kontrakt „nigdy nie rzuca": niespójny kind_of (instancja innego rodzaju niż
             # deklarowany kind) → cast trafia w brakującą metodę. Zwracamy błąd, nie wyjątek.
             return _err(tool, f"Narzędzie '{tool}' nie pasuje do rodzaju '{kind}'.")
-        except (MemoryError_, EgressError, PluginError) as exc:
-            # Awaria backendu (embedder RAG, egress, wtyczka MCP) degraduje się do wyniku,
-            # a NIE wywala pętli/orkiestracji — model dostaje ok=False i może się odbić.
-            # (redundantnie wobec PluginTool, które już łapie PluginError/EgressError — DiD).
+        except (MemoryError_, EgressError, PluginError, ToolError) as exc:
+            # Awaria ZAPLECZA (sandbox, embedder RAG, egress, wtyczka MCP) degraduje się do
+            # wyniku, a NIE wywala pętli/orkiestracji — model dostaje ok=False i może się
+            # odbić. (redundantnie wobec narzędzi, które łapią własne błędy same — DiD).
+            #
+            # `ToolError` to CAŁA hierarchia warstwy narzędzi, nie wyliczanka konkretnych
+            # klas. Wyliczanka już raz zawiodła: łapała trzy zaplecza z czterech, a
+            # `SandboxError` przepuszczała, więc źle skonfigurowany sandbox wywracał pętlę
+            # zamiast zwrócić modelowi błąd. Dodanie piątego rodzaju narzędzia nie może
+            # wymagać pamiętania o dopisaniu go tutaj.
+            #
+            # Komunikaty tych wyjątków są bezpieczne do pokazania modelowi: `FetchError`
+            # jest z założenia generyczny (bez URL-a), `PathNotAllowedError` echuje wyłącznie
+            # ścieżkę, którą model sam podał, a `SandboxError` mówi o konfiguracji operatora,
+            # nie o jego danych. Sprawdzone.
             return _err(tool, str(exc))
 
     def manual(self, allowed_names: list[str]) -> str:

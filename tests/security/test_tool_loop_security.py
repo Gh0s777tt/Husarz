@@ -147,3 +147,72 @@ def test_no_network_in_loop(tmp_path: Path, repo_config_dir: Path) -> None:
     router = ScriptedRouter([_action("file_edit", "write", {"path": "a.md", "content": "x"}), "ok"])
     loop.run(_agent(["file_edit"]), "x", router=router, budget=loop.new_budget())
     assert (tmp_path / "a.md").exists()  # efekt tylko w tmp workspace
+
+
+# ---------------------------- awaria ZAPLECZA degraduje się do wyniku, nie do wyjątku
+
+
+def test_blad_sandboxa_daje_ok_False_zamiast_wywracac_petle() -> None:
+    """Źle skonfigurowany sandbox nie może kosztować CAŁEJ pracy.
+
+    `dispatch` łapał trzy zaplecza z czterech: `MemoryError_`, `EgressError` i `PluginError`.
+    `SandboxError` przepuszczał, więc `security.sandbox.image: null` wywracał pętlę
+    narzędziową i orkiestrację — zamiast dać modelowi `ok=False`, od którego może się odbić.
+    Odtworzone na realnych narzędziach: `shell.run` i `run_tests.run` przepuszczały wyjątek
+    na wylot (żadne z nich nie łapie go samo).
+    """
+    from husarz.config.schema import SandboxConfig
+    from husarz.tools.dispatch import ToolDispatcher
+    from husarz.tools.errors import SandboxError
+    from husarz.tools.shell import ShellTool
+
+    class _Wybuchowy:
+        def run(self, spec):  # noqa: ANN001, ANN202
+            raise SandboxError("Brak obrazu sandboxa (ustaw security.sandbox.image).")
+
+    narzedzie = ShellTool(_Wybuchowy(), command_allowlist=["ls"], sandbox=SandboxConfig(image=None))
+    dispatcher = ToolDispatcher({"shell": narzedzie}, {"shell": "shell"})
+
+    wynik = dispatcher.dispatch("shell", "run", {"command": ["ls"]})
+
+    assert wynik.ok is False
+    assert "sandbox" in wynik.error.lower(), "model musi dostać POWÓD, nie samo niepowodzenie"
+
+
+def test_lapiemy_CALA_hierarchie_bledow_narzedzi_a_nie_wyliczanke() -> None:
+    """Wyliczanka konkretnych klas już raz zawiodła — dodanie rodzaju narzędzia nie może
+    wymagać pamiętania o dopisaniu jego wyjątku do `except`.
+
+    Test przechodzi po WSZYSTKICH podklasach `ToolError`: każda ma degradować się do wyniku.
+    Dopisanie nowej podklasy bez pokrycia zaczerwieni ten test samo z siebie.
+    """
+    from husarz.tools import errors as bledy
+    from husarz.tools.base import ToolResult
+    from husarz.tools.dispatch import ToolDispatcher
+    from husarz.tools.errors import ToolError
+
+    podklasy = [
+        obiekt
+        for nazwa in dir(bledy)
+        if isinstance(obiekt := getattr(bledy, nazwa), type)
+        and issubclass(obiekt, ToolError)
+        and obiekt is not ToolError
+    ]
+    assert len(podklasy) >= 5, f"test byłby pusty — znaleziono {len(podklasy)} podklas"
+
+    for klasa in podklasy:
+
+        class _Narzedzie:
+            name = "file_edit"
+
+            def __init__(self, wyjatek: type[Exception]) -> None:
+                self._wyjatek = wyjatek
+
+            def read(self, path: str) -> ToolResult:
+                raise self._wyjatek("awaria zaplecza")
+
+        dispatcher = ToolDispatcher({"file_edit": _Narzedzie(klasa)}, {"file_edit": "file_edit"})
+
+        wynik = dispatcher.dispatch("file_edit", "read", {"path": "x"})
+
+        assert wynik.ok is False, f"{klasa.__name__} uciekł z dispatch jako wyjątek"
