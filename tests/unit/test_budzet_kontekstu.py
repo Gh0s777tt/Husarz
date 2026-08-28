@@ -135,3 +135,70 @@ def test_rezerwa_na_odpowiedz_jest_wliczana() -> None:
 
     assert mala is None, "prompt sam w sobie powinien się zmieścić"
     assert duza is not None, "z dużą rezerwą na odpowiedź nie powinien"
+
+
+# --------------------------------------------------- obrazy: koniec cichej niedoszacówki
+
+
+def test_obraz_KOSZTUJE_w_oszacowaniu() -> None:
+    """Regresja: obrazy były liczone na ZERO tokenów.
+
+    `ChatMessage.images` idzie do modelu wizyjnego tak samo jak treść, a bramka budżetu
+    udawała, że nic nie waży. Skutek: dla żądania z obrazem meldowała „mieści się", choć
+    model odrzuci je albo po cichu utnie kontekst — czyli bramka zawodziła dokładnie
+    w przypadku, dla którego istnieje.
+    """
+    from husarz.router.types import ImagePart
+
+    bez = ChatMessage("user", "Co jest na obrazku?")
+    z_obrazem = ChatMessage(
+        "user", "Co jest na obrazku?", images=[ImagePart(mime="image/png", data_b64="x")]
+    )
+
+    assert estimate_prompt_tokens([z_obrazem]) > estimate_prompt_tokens([bez])
+    # Bez tej asercji test przeszedłby także dla kosztu równego jednemu tokenowi, czyli dla
+    # zaokrąglenia, które w praktyce nadal jest zerem.
+    assert estimate_prompt_tokens([z_obrazem]) - estimate_prompt_tokens([bez]) > 1000
+
+
+def test_kazdy_obraz_liczony_OSOBNO() -> None:
+    """Dwa obrazy kosztują dwa razy tyle — inaczej galeria byłaby znów niedoszacowana."""
+    from husarz.router.types import ImagePart
+
+    obraz = ImagePart(mime="image/png", data_b64="x")
+    jeden = ChatMessage("user", "", images=[obraz])
+    trzy = ChatMessage("user", "", images=[obraz, obraz, obraz])
+
+    roznica = estimate_prompt_tokens([trzy]) - estimate_prompt_tokens([jeden])
+    na_obraz = estimate_prompt_tokens([jeden]) - estimate_prompt_tokens([ChatMessage("user", "")])
+    assert roznica == 2 * na_obraz
+
+
+def test_obraz_w_MALYM_oknie_powoduje_pominiecie_kandydata() -> None:
+    """Skutek, dla którego ta poprawka istnieje — sprawdzany na bramce, nie na estymatorze.
+
+    Model wizyjny o oknie 2048 nie obsłuży żądania z obrazem, a przed poprawką dostałby je
+    jako „mieszczące się".
+    """
+    from husarz.router.types import ImagePart
+
+    wiadomosci = [ChatMessage("user", "Opisz.", images=[ImagePart(mime="image/png", data_b64="x")])]
+
+    powod = check_fits(
+        wiadomosci, context_length=2048, request_max_tokens=256, model_max_tokens=None
+    )
+
+    assert powod is not None, "żądanie z obrazem uznane za mieszczące się w oknie 2048"
+    assert "2048" in powod
+
+
+def test_obraz_w_DUZYM_oknie_nadal_przechodzi() -> None:
+    """Nośność: stały koszt obrazu nie może blokować modeli, które go obsłużą."""
+    from husarz.router.types import ImagePart
+
+    wiadomosci = [ChatMessage("user", "Opisz.", images=[ImagePart(mime="image/png", data_b64="x")])]
+
+    assert (
+        check_fits(wiadomosci, context_length=32768, request_max_tokens=256, model_max_tokens=None)
+        is None
+    )

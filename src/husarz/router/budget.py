@@ -34,9 +34,23 @@ z czytelnym komunikatem jest tańsza niż cicha awaria backendu w środku pętli
 Model o większym oknie i tak zostanie wypróbowany, bo router traktuje niezmieszczenie się jak
 każdą inną przyczynę pominięcia kandydata.
 
-**Czego to oszacowanie NIE obejmuje.** Obrazów — modele wizyjne liczą je osobno i zależnie od
-rozdzielczości, a my nie mamy jak tego odtworzyć bez tokenizera modelu. Prompt z obrazami
-będzie więc niedoszacowany; ograniczenie zapisane w `docs/ROUTER.md`.
+**Obrazy: „nie wiem" zaokrąglone w BEZPIECZNĄ stronę.** Modele wizyjne liczą obraz osobno,
+zależnie od rozdzielczości i wielkości łaty — bez tokenizera konkretnego modelu nie da się
+tego odtworzyć. Poprzednia wersja liczyła obraz na ZERO tokenów, czyli zaokrąglała „nie wiem"
+do „nic nie kosztuje". To najgorszy możliwy wybór: bramka istnieje po to, żeby nie wysłać
+promptu przekraczającego okno, a przy obrazach właśnie tam zawodziła — meldowała „mieści się"
+dla żądania, które model odrzuci albo po cichu utnie.
+
+Liczymy więc obraz jako STAŁY, celowo wysoki koszt. **To nie jest pomiar i nie udaje pomiaru** —
+to zaokrąglenie niewiedzy w stronę, która nie kłamie. Konstrukcja stałej: obraz ma kosztować
+nie mniej niż strona gęstego tekstu (≈3000 znaków ÷ 1,6 znaku/token ≈ 1900 tokenów), bo model
+wizyjny, dla którego obraz byłby tańszy, i tak zmieści się w oknie z zapasem. Skutek jest
+zgodny z resztą modułu: przy obrazach odmówimy wcześniej, niż trzeba, a router i tak wypróbuje
+model o większym oknie.
+
+Kalibracja pomiarem — tak jak dla tekstu (``prompt_eval_count`` z Ollamy) — wymaga
+uruchomionego modelu WIZYJNEGO. Gdy taki będzie dostępny, stałą należy zastąpić funkcją
+rozdzielczości; zapisane w ROADMAP.
 """
 
 from __future__ import annotations
@@ -56,6 +70,10 @@ _NARZUT_STALY = 32
 # Narzut na każdą wiadomość (znaczniki roli). Zmierzone ~3 — bierzemy 6.
 _NARZUT_NA_WIADOMOSC = 6
 
+# Koszt JEDNEGO obrazu. NIE jest to wartość zmierzona — patrz docstring modułu. Zaokrąglenie
+# niewiedzy w stronę bezpieczną: obraz kosztuje nie mniej niż strona gęstego tekstu.
+_TOKENOW_NA_OBRAZ = 1900
+
 # Ile tokenów zarezerwować na ODPOWIEDŹ, gdy ani żądanie, ani model nie podają `max_tokens`.
 # Odpowiedź krótsza niż to jest w praktyce bezużyteczna, a rezerwa zerowa oznaczałaby zgodę
 # na prompt wypełniający okno co do tokena — czyli na model, który nie ma czym odpowiedzieć.
@@ -69,11 +87,16 @@ def estimate_prompt_tokens(messages: Sequence[ChatMessage]) -> int:
         messages: Wiadomości żądania.
 
     Returns:
-        Oszacowanie Z GÓRY — patrz kalibracja w dokumentacji modułu. Obrazy NIE są liczone.
+        Oszacowanie Z GÓRY — patrz kalibracja w dokumentacji modułu. Obrazy liczone stałym,
+        celowo wysokim kosztem (zaokrąglenie niewiedzy w bezpieczną stronę, nie pomiar).
     """
     znaki = sum(len(m.content) for m in messages)
+    obrazow = sum(len(m.images) for m in messages)
     return (
-        _NARZUT_STALY + _NARZUT_NA_WIADOMOSC * len(messages) + math.ceil(znaki / _ZNAKOW_NA_TOKEN)
+        _NARZUT_STALY
+        + _NARZUT_NA_WIADOMOSC * len(messages)
+        + math.ceil(znaki / _ZNAKOW_NA_TOKEN)
+        + obrazow * _TOKENOW_NA_OBRAZ
     )
 
 

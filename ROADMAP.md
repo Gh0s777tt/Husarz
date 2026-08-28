@@ -458,9 +458,13 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   skalibrowany REALNYM tokenizerem (Ollama, `prompt_eval_count`); dzielnik z najgęstszego
   zmierzonego przypadku (JSON 1,68 znaku/token), bo wyniki narzędzi są JSON-em. Testy: +14.
   Docs: `docs/ROUTER.md`. Ograniczenie zapisane: obrazy nie są liczone.
-- ⬜ Liczenie obrazów w budżecie kontekstu — modele wizyjne liczą je osobno i zależnie od
-  rozdzielczości; bez tokenizera modelu nie da się tego odtworzyć. Prompt z obrazami jest
-  dziś niedoszacowany.
+- ✅ Obrazy w budżecie kontekstu przestały kosztować ZERO. Stały, celowo wysoki koszt —
+  zaokrąglenie niewiedzy w bezpieczną stronę, nie pomiar (i tak nazwane w kodzie i docs).
+  Poprzednio bramka meldowała „mieści się" dla żądania z obrazem, które model odrzuci.
+- ⬜ **Kalibracja kosztu obrazu POMIAREM** — wymaga uruchomionego modelu WIZYJNEGO
+  (`prompt_eval_count`, tak jak zrobiono to dla tekstu). Wtedy stałą zastąpić funkcją
+  rozdzielczości: koszt zależy od liczby łat, nie od liczby obrazów. Tu nie ma takiego
+  modelu, więc kalibracja nie została wykonana — i nie udajemy, że została.
 - ⬜ (hipoteza, poza zakresem etapu) Sędzia LLM z relatywnym ocenianiem grupowym. Poprzedzony
   pomiarem, czy grupa przebiegów mieści się w oknie modelu, który startuje na tym sprzęcie.
   Twardy sygnał deterministyczny NIGDY nie jest nadpisywany oceną sędziego.

@@ -5,6 +5,22 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (budżet kontekstu: obraz przestał kosztować ZERO)
+
+- **Obrazy nie były liczone w budżecie okna kontekstu.** `ChatMessage.images` idzie do modelu
+  wizyjnego tak samo jak treść, a bramka budżetu udawała, że nic nie waży — czyli meldowała
+  „mieści się" dla żądania, które model odrzuci albo po cichu utnie kontekst. Bramka zawodziła
+  dokładnie w przypadku, dla którego istnieje.
+- Obraz kosztuje teraz **stałą, celowo wysoką liczbę tokenów**. To **nie jest pomiar i nie
+  udaje pomiaru** — to zaokrąglenie „nie wiem" w stronę, która nie kłamie. Konstrukcja stałej
+  jest zapisana wprost w kodzie i w `docs/ROUTER.md`: obraz ma kosztować nie mniej niż strona
+  gęstego tekstu, bo model, dla którego byłby tańszy, i tak zmieści się z zapasem.
+- **SPROSTOWANIE w `docs/ROUTER.md`:** akapit „Obrazy NIE są liczone" opisywał stan zgodnie
+  z prawdą, ale przedstawiał go jako znane ograniczenie, a nie jako wadę do naprawy. Zero
+  kosztu to nie jest neutralne „nie liczymy" — to aktywnie fałszywe „nic nie kosztuje".
+- Kalibracja POMIAREM wymaga modelu wizyjnego (`prompt_eval_count`, jak dla tekstu). Tu
+  takiego nie ma, więc jej nie wykonano — i nie udajemy, że wykonano. ROADMAP.
+
 ### Sprostowane (uzasadnienie granicy `diagnostics:read` było niepełne)
 
 - **`viewer` nadal bez `diagnostics:read` — ale z INNEGO powodu, niż zapisano.** Uzasadnienie

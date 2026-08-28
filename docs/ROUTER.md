@@ -101,11 +101,25 @@ czatu — 32 tokeny stałe i 6 na wiadomość.
 tokenizer, więc odmówimy nieco wcześniej, niż trzeba. To świadomy wybór — fałszywa odmowa
 z czytelnym komunikatem jest tańsza niż cicha awaria backendu w środku pętli narzędziowej.
 
-!!! warning "Obrazy NIE są liczone"
-    Modele wizyjne liczą obrazy osobno i zależnie od rozdzielczości, czego nie da się odtworzyć
-    bez tokenizera modelu. Prompt z obrazami będzie więc **niedoszacowany** — bramka go
-    przepuści, choć może się nie zmieścić. Ograniczenie znane i nieobejściowe bez zależności,
-    której rdzeń świadomie nie ma.
+!!! warning "Obrazy: „nie wiem" zaokrąglone w BEZPIECZNĄ stronę"
+    Modele wizyjne liczą obrazy osobno i zależnie od rozdzielczości, czego nie da się
+    odtworzyć bez tokenizera konkretnego modelu.
+
+    **SPROSTOWANIE.** Poprzednia wersja tego akapitu mówiła „obrazy NIE są liczone" — i tak
+    było: obraz kosztował **zero** tokenów. To najgorsze możliwe zaokrąglenie niewiedzy,
+    bo bramka istnieje właśnie po to, żeby nie wysłać promptu przekraczającego okno,
+    a przy obrazach meldowała „mieści się" dla żądania, które model odrzuci albo po cichu utnie.
+
+    Obraz kosztuje teraz **stałą, celowo wysoką liczbę tokenów**. To **nie jest pomiar
+    i nie udaje pomiaru** — to zaokrąglenie w stronę, która nie kłamie. Konstrukcja stałej:
+    obraz ma kosztować nie mniej niż strona gęstego tekstu (≈3000 znaków ÷ 1,6 znaku/token),
+    bo model wizyjny, dla którego obraz byłby tańszy, i tak zmieści się w oknie z zapasem.
+    Skutek jest zgodny z resztą modułu: przy obrazach odmówimy wcześniej, niż trzeba, a router
+    wypróbuje model o większym oknie.
+
+    Kalibracja pomiarem — tak jak dla tekstu (`prompt_eval_count` z Ollamy) — wymaga
+    uruchomionego modelu **wizyjnego**; wtedy stałą należy zastąpić funkcją rozdzielczości.
+    Zapisane w ROADMAP.
 
 ## Klienci i transport
 
