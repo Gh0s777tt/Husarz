@@ -152,3 +152,24 @@ def test_konsola_i_CLI_odrozniaja_TE_SAME_przypadki() -> None:
 def test_klucz_konsoli_laczy_stan_z_waga() -> None:
     """Sam stan nie wystarczy — to była przyczyna nierozróżnialności."""
     assert 'f.state === "problem" ? `problem/${f.severity}`' in _ZRODLO
+
+
+def test_konsola_odroznia_LIMIT_TEMPA_od_awarii() -> None:
+    """429 to nie awaria: poprzedni wynik jest nadal na ekranie i pozostaje PRAWDZIWY.
+
+    Skasowanie go i wypisanie czerwonego błędu sugerowałoby, że diagnoza przestała działać —
+    a ona tylko odmówiła kolejnego przebiegu w tej minucie. Operator ma zobaczyć, że wystarczy
+    chwilę zaczekać, i nie stracić przy tym listy, na którą właśnie patrzył.
+    """
+    cialo = _cialo_funkcji("loadDoctor")
+    # Zawężamy do bloku obsługi NIEUDANEJ odpowiedzi. Bez tego pierwsze wystąpienie
+    # `<p class='err'>` należy do zupełnie innej gałęzi (błąd sieci na samej górze funkcji),
+    # a porównanie pozycji sprawdzałoby wtedy nie to, co trzeba — wykryte uruchomieniem.
+    blok = cialo[cialo.index("if (!r.ok") :]
+
+    assert "r.status === 429" in blok, "brak osobnej gałęzi dla limitu tempa"
+    # Gałąź 429 kończy się `return` PRZED wpisaniem błędu do tabeli — czyli nie kasuje wyniku.
+    poz429 = blok.index("r.status === 429")
+    poz_bledu = blok.index("""$("doctor-out").innerHTML = `<p class='err'>""")
+    assert poz429 < poz_bledu, "gałąź 429 musi wypaść PRZED wypisaniem błędu"
+    assert "warn" in blok[poz429:poz_bledu], "limit tempa ma kolor ostrzeżenia, nie błędu"

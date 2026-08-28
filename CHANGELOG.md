@@ -5,6 +5,23 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (limit tempa dla `GET /api/doctor`)
+
+- **`security.diagnostics.max_requests_per_minute`** (domyślnie 6/min). Każde wywołanie
+  diagnozy otwiera połączenia wychodzące do endpointów z konfiguracji, więc bez limitu
+  uprawnienie `diagnostics:read` było dźwignią: żądanie tanie dla wywołującego, kosztowne
+  dla instalacji i dla silników, do których Husarz się odzywa. Limit dobrany pod CZŁOWIEKA
+  klikającego „Sprawdź ponownie" (jedno na dziesięć sekund), nie pod automat.
+- **Limit sprawdzany PRZED sondowaniem**, nie po. To jest cała treść zabezpieczenia: 429
+  zwrócone po odpytaniu silników nie zmniejszyłoby ani jednego pakietu. Ma osobny test.
+- **Ogranicznik budowany RAZ, z konfiguracji startowej.** Przebudowa przy nadpisaniu
+  konfiguracji zerowałaby kubełek, więc `POST /api/config/runtime` przeplatany diagnozą
+  byłby obejściem limitu. Też ma test.
+- `None` wyłącza limit — świadoma REZYGNACJA z zabezpieczenia (np. instalacja jednoosobowa
+  na loopbacku), nie jego brak.
+- **Konsola odróżnia 429 od awarii**: pokazuje ostrzeżenie i **nie kasuje** poprzedniego
+  wyniku, bo ten jest nadal prawdziwy — diagnoza tylko odmówiła kolejnego przebiegu.
+
 ### Poprawione (diagnoza odróżnia problem blokujący od ostrzeżenia — w OBU nośnikach)
 
 - **Terminal:** `[!!]` blokujący, **`[! ]` ostrzeżenie**, `[??]` nie wiadomo, `[ok]` w porządku.

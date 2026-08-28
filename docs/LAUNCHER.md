@@ -189,6 +189,14 @@ zawiódł` jest dokładnie tym zdaniem, dla którego diagnoza powstała.
     Każde wywołanie zostawia wpis w audycie (akcja `doctor`) z identyfikatorem wywołującego
     i samymi liczbami w szczególe — bez endpointów i ścieżek, bo dziennik jest niemodyfikowalny.
 
+    **Tempo jest ograniczone** (`security.diagnostics.max_requests_per_minute`, domyślnie
+    6/min — jedno wywołanie na dziesięć sekund, swobodnie wystarcza człowiekowi klikającemu
+    „Sprawdź ponownie"). Każde wywołanie otwiera połączenia wychodzące, więc bez limitu
+    uprawnienie byłoby dźwignią: żądanie tanie dla wywołującego, kosztowne dla instalacji.
+    Limit sprawdzamy **przed** sondowaniem — chodzi o to, żeby nadmiarowe żądanie nie
+    wygenerowało ruchu, a nie żeby dostało 429 po fakcie. Konsola pokazuje wtedy ostrzeżenie
+    i **nie kasuje** poprzedniego wyniku, bo ten jest nadal prawdziwy.
+
 !!! note "Czego `doctor` NIE robi"
     Niczego nie pobiera i nie instaluje. Podaje polecenie do świadomego uruchomienia przez
     operatora. **Bez flagi `--probe` nie wysyła też żądania do modelu** (nie ładuje wag) —

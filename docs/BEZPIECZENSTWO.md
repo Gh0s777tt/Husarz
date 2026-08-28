@@ -2019,10 +2019,9 @@ zaczerwieniła swoje testy. Skrypt sam przywracał oryginał i kończył asercj�
    konsolę, kliknięto zakładkę i przycisk „Sprawdź ponownie" — dwa `GET /api/doctor` w logu,
    zero błędów w konsoli przeglądarki, tabela zgodna co do znaku z wyjściem CLI. Zrzut:
    `docs/assets/screenshots/console-diagnoza.png`.
-2. **Brak limitu tempa dla `/api/doctor`.** Każde wywołanie sonduje endpointy (timeout 3 s,
-   zapytanie raz na endpoint). Uprawnienie mają tylko `admin` i `operator`, którzy dysponują
-   znacznie kosztowniejszym `/api/chat`, więc nie jest to nowa dźwignia — ale limitu nie ma
-   i nie udajemy, że jest.
+2. ~~**Brak limitu tempa dla `/api/doctor`.**~~ **Domknięte** — patrz „Etap 17k" niżej.
+   `security.diagnostics.max_requests_per_minute`, domyślnie 6/min, sprawdzany PRZED
+   sondowaniem.
 3. **Tabela w konsoli nie odróżnia problemu blokującego od ostrzeżenia** (oba jako ✕), tak samo
    jak CLI (oba jako `[!!]`). Rozróżnienie niesie nagłówek z licznikami. Pole `severity` jest
    w odpowiedzi API, więc zmiana wymaga poprawienia OBU nośników naraz — zapisane w ROADMAP.
@@ -2236,3 +2235,50 @@ pułapka co przy `--probe-timeout`. Test podstawia teraz wartość enuma i spraw
    limit odczytu: 300 s bez ani jednego bajtu = połączenie uznane za zawieszone.
 4. **Bootstrapu nie ma w konsoli WWW ani w API.** Ta sama decyzja co dla sondy głębokiej:
    operacja trwa i zużywa zasoby, więc jest operacją terminala.
+
+
+## Etap 17k — limit tempa diagnozy przez API
+
+Notatka weryfikacyjna. Domyka ograniczenie zapisane wprost w sekcji 17h jako nienaprawione.
+
+**Dźwignia, którą to zamyka.** `GET /api/doctor` jest tani dla wywołującego (jedno żądanie),
+a kosztowny dla instalacji: otwiera połączenie do KAŻDEGO endpointu z konfiguracji, z limitem
+czasu na każdy. Rola z `diagnostics:read` mogła więc generować ruch wychodzący w tempie
+ograniczonym wyłącznie własnym łączem — i to ruch kierowany do CUDZYCH silników, jeśli
+operator wskazał zdalne endpointy.
+
+**Limit sprawdzany PRZED sondowaniem.** To jest cała treść zabezpieczenia, nie szczegół
+implementacyjny: 429 zwrócone po odpytaniu silników nie zmniejszyłoby ani jednego pakietu,
+więc niczego by nie chroniło. Ma osobny test, który liczy zapytania sondy i sprawdza, że
+żądanie ponad limit nie dołożyło ani jednego.
+
+**Ogranicznik budowany RAZ, z konfiguracji startowej.** Gdyby powstawał przy każdej
+przebudowie, `POST /api/config/runtime` zerowałby kubełek — wystarczyłoby przeplatać diagnozę
+pustymi nadpisaniami, żeby limit przestał istnieć. Wywołujący `config:write` ma i tak szersze
+uprawnienia, ale zabezpieczenie z tak łatwym obejściem jest gorsze niż jego brak, bo usypia.
+Też ma test.
+
+**Zamek na ograniczniku.** `RateLimiter` nie jest bezpieczny wątkowo, a FastAPI wykonuje
+funkcje synchroniczne w puli wątków. Bez zamka dwa równoległe żądania mogłyby pobrać ten sam
+token.
+
+**Wartość domyślna dobrana pod człowieka**: 6/min to jedno wywołanie na dziesięć sekund —
+swobodnie wystarcza operatorowi, który coś poprawił i klika „Sprawdź ponownie", a nie pozwala
+robić z endpointu generatora ruchu. `None` wyłącza limit i jest świadomą REZYGNACJĄ
+z zabezpieczenia (instalacja jednoosobowa na loopbacku), nie jego brakiem.
+
+**Konsola odróżnia 429 od awarii.** Poprzedni wynik zostaje na ekranie, bo jest nadal
+prawdziwy — diagnoza tylko odmówiła kolejnego przebiegu w tej minucie. Skasowanie listy
+i czerwony błąd sugerowałyby, że narzędzie przestało działać.
+
+Kontrola nośności: **6 mutacji, 6 czerwonych** (brak limitu; limit po sondowaniu; limit
+z konfiguracji ignorowany; limitu nie da się wyłączyć; konsola traktuje 429 jak awarię;
+limit pokazany kolorem błędu). Jedna mutacja ujawniła BRAK POKRYCIA — celowałem w test
+obsługi 403, a gałąź 429 w konsoli nie miała żadnego. Dopisany. Sam ten test padł przy
+pierwszym uruchomieniu, bo porównywał pozycję z PIERWSZYM wystąpieniem `<p class='err'>`,
+które należy do zupełnie innej gałęzi (błąd sieci na górze funkcji) — zawężony do właściwego
+bloku.
+
+**Ograniczenie — wprost.** Limit jest GLOBALNY dla instalacji, nie per wywołujący. Przy
+kilku operatorach jeden może wyczerpać pulę drugiemu. Limit per konto wymagałby wiązania
+kubełka z `principal`, co ma sens dopiero przy instalacji wieloosobowej — zapisane w ROADMAP.

@@ -582,6 +582,15 @@
       if (!r.ok || !Array.isArray(d.findings)) {
         // 403 dla roli bez `diagnostics:read` (m.in. `user` i `viewer`) — mówimy to wprost,
         // zamiast pokazywać pustą tabelę, którą łatwo wziąć za „wszystko w porządku".
+        // 429 to co INNEGO niż awaria: poprzedni wynik jest nadal na ekranie i pozostaje
+        // prawdziwy, więc go NIE kasujemy — dopisujemy tylko, żeby chwilę zaczekać.
+        if (r.status === 429) {
+          $("doctor-status").innerHTML = `<span class="warn">${esc(opisBledu(d))}</span>`;
+          if ($("doctor-out").textContent.trim() === "sprawdzam…") {
+            $("doctor-out").innerHTML = `<p class='muted'>Poczekaj i kliknij „Sprawdź ponownie".</p>`;
+          }
+          return;
+        }
         $("doctor-out").innerHTML = `<p class='err'>${esc(opisBledu(d))}</p>`;
         return;
       }

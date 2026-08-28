@@ -207,3 +207,106 @@ def test_endpoint_API_NIE_zadaje_pytania_modelowi(repo_config_dir: Path) -> None
         s == "ok" for s in stany.values()
     ), f"test byłby pusty: żadna kontrola katalogu nie przeszła — {stany}"
     assert sonda.zapytane == [], "endpoint API zapytał model"
+
+
+# ------------------------------------------------- limit tempa (dźwignia zasobowa)
+
+
+class _SondaLiczaca(_SondaZObiemaRolami):
+    """Sonda potwierdzająca modele i licząca, ile RAZY pytano silnik o katalog."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.zapytania: list[str] = []
+
+    def modele_u_dostawcy(self, endpoint: str) -> list[str] | None:
+        """Zapisuje wywołanie i potwierdza obecność modeli."""
+        self.zapytania.append(endpoint)
+        return super().modele_u_dostawcy(endpoint)
+
+
+def _app_z_limitem(config_dir: Path, limit: int | None, sonda: object) -> object:
+    config = load_config(config_dir)
+    return create_app(
+        config.model_copy(
+            update={
+                "security": config.security.model_copy(
+                    update={
+                        "diagnostics": config.security.diagnostics.model_copy(
+                            update={"max_requests_per_minute": limit}
+                        )
+                    }
+                )
+            }
+        ),
+        config_dir=config_dir,
+        audit=AuditLog(),
+        doctor_probe=sonda,
+    )
+
+
+def test_ponad_limit_dostaje_429(repo_config_dir: Path) -> None:
+    """Sedno: `diagnostics:read` nie może być dźwignią do generowania ruchu.
+
+    Żądanie jest tanie dla wywołującego (jedno GET), a kosztowne dla instalacji — otwiera
+    połączenie do KAŻDEGO endpointu z konfiguracji.
+    """
+    sonda = _SondaLiczaca()
+    client = TestClient(_app_z_limitem(repo_config_dir, 2, sonda))
+
+    kody = [client.get("/api/doctor").status_code for _ in range(4)]
+
+    assert kody[:2] == [200, 200], kody
+    assert kody[2:] == [429, 429], kody
+
+
+def test_zadanie_ponad_limit_NIE_generuje_ruchu(repo_config_dir: Path) -> None:
+    """Odmowa musi nastąpić PRZED sondowaniem — inaczej limit chroni tylko odpowiedź.
+
+    To jest właściwa treść tej poprawki: 429 zwrócone po odpytaniu silników nie zmniejszyłoby
+    ani jednego pakietu, a więc niczego by nie zabezpieczało.
+    """
+    sonda = _SondaLiczaca()
+    client = TestClient(_app_z_limitem(repo_config_dir, 1, sonda))
+
+    client.get("/api/doctor")
+    po_pierwszym = len(sonda.zapytania)
+    assert po_pierwszym > 0, "test byłby pusty, gdyby pierwsze żądanie nic nie sondowało"
+
+    assert client.get("/api/doctor").status_code == 429
+    assert len(sonda.zapytania) == po_pierwszym, "żądanie ponad limit odpytało silniki"
+
+
+def test_komunikat_429_wskazuje_MIEJSCE_w_konfiguracji(repo_config_dir: Path) -> None:
+    """Operator ma wiedzieć, gdzie ten limit zmienić — inaczej zostaje z samym „za dużo"."""
+    client = TestClient(_app_z_limitem(repo_config_dir, 1, _SondaLiczaca()))
+    client.get("/api/doctor")
+
+    detail = client.get("/api/doctor").json()["detail"]
+
+    assert "security.diagnostics" in detail
+    assert "odpytuje silniki" in detail
+
+
+def test_limit_mozna_wylaczyc_swiadomie(repo_config_dir: Path) -> None:
+    """Nośność: `None` to REZYGNACJA z zabezpieczenia, ale musi działać jak obiecano."""
+    client = TestClient(_app_z_limitem(repo_config_dir, None, _SondaLiczaca()))
+
+    kody = [client.get("/api/doctor").status_code for _ in range(8)]
+
+    assert kody == [200] * 8, kody
+
+
+def test_nadpisanie_konfiguracji_w_runtime_NIE_zeruje_limitu(repo_config_dir: Path) -> None:
+    """Ogranicznik budowany raz, ze startu — inaczej `POST /api/config/runtime` byłby obejściem.
+
+    Przebudowa ogranicznika przy każdym nadpisaniu konfiguracji zerowałaby kubełek, więc
+    wystarczyłoby przeplatać diagnozę pustymi nadpisaniami, żeby limit przestał istnieć.
+    """
+    sonda = _SondaLiczaca()
+    client = TestClient(_app_z_limitem(repo_config_dir, 1, sonda))
+
+    assert client.get("/api/doctor").status_code == 200
+    assert client.post("/api/config/runtime", json={"overrides": {}}).status_code == 200
+
+    assert client.get("/api/doctor").status_code == 429, "nadpisanie configu zresetowało limit"

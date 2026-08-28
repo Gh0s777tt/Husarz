@@ -58,7 +58,7 @@ w konfiguracji jest tylko *referencja* do sekretu (zero hardcode).
 | `POST /api/config/runtime`  | `{overrides}` → walidacja + zastosowanie w pamięci; **przebudowuje orkiestrator** (audytowane) | `config:write` |
 | `POST /api/auth/register` · `login` · `logout` · `GET /api/auth/me` | konta i sesje — patrz [KONTA.md](KONTA.md) | mieszane |
 | `GET/POST/DELETE /api/git/connections` · `…/wizard` · `…/{name}/repos` · `…/{name}/pull-request` | integracje Git — patrz [GIT.md](GIT.md) | `git:*` |
-| `GET /api/doctor`         | diagnoza instalacji: modele czatu/orkiestracji/agentów, katalogi zapisu, kolizja portu. `findings[]` (`id`, `state`, `severity`, `description`, `remedy`) + liczniki `blocking`/`warnings`/`unknown`. **Ta sama funkcja, co `husarz doctor`** | `diagnostics:read` |
+| `GET /api/doctor`         | diagnoza instalacji: modele czatu/orkiestracji/agentów, katalogi zapisu, kolizja portu. `findings[]` (`id`, `state`, `severity`, `description`, `remedy`) + liczniki `blocking`/`warnings`/`unknown`. **Ta sama funkcja, co `husarz doctor`**. Tempo ograniczone (`security.diagnostics.max_requests_per_minute`, domyślnie 6/min) — nadmiarowe żądanie dostaje 429 **przed** odpytaniem silników | `diagnostics:read` |
 | `GET /api/secrets/store` | stan zapisywalnego magazynu sekretów: `enabled` + nazwy wpisów i daty (NIGDY wartości ani szyfrogramów) | `git:read` |
 | `GET /`                   | konsola WWW (HTML) | — (otwarte) |
 

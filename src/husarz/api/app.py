@@ -102,6 +102,7 @@ from husarz.router.errors import (
     RateLimitExceededError,
     RouterError,
 )
+from husarz.router.rate_limit import RateLimiter
 from husarz.router.selection import resolve_agent_model
 from husarz.runs import build_run_store_from_config
 from husarz.security.audit import AuditLog, build_audit_log
@@ -493,6 +494,15 @@ def create_app(
         "failures": 0,
     }
     counter_lock = threading.Lock()
+    # Limit tempa diagnozy. Budowany RAZ, z konfiguracji startowej: przebudowa po
+    # `POST /api/config/runtime` zerowałaby kubełek, więc nadpisanie konfiguracji stałoby się
+    # sposobem na obejście limitu. `None` = operator świadomie zrezygnował.
+    _limit_diagnozy = (
+        RateLimiter(config.security.diagnostics.max_requests_per_minute)
+        if config.security.diagnostics.max_requests_per_minute is not None
+        else None
+    )
+    _mutex_diagnozy = threading.Lock()
 
     def _authenticate(authorization: str | None) -> Principal | None:
         """Zwraca principala ważnego tokenu; ``None`` gdy uwierzytelnianie wyłączone.
@@ -678,6 +688,13 @@ def create_app(
         wychodzące. Rola `user` (zakładana samodzielną rejestracją) ma `config:read`,
         więc oparcie diagnozy na nim wystawiłoby jedno i drugie publicznie.
 
+        **Tempo jest ograniczone** (`security.diagnostics.max_requests_per_minute`,
+        domyślnie 6/min). Każde wywołanie otwiera połączenia wychodzące, więc bez limitu
+        uprawnienie `diagnostics:read` byłoby dźwignią: żądanie tanie dla wywołującego,
+        kosztowne dla instalacji i dla silników, do których się odzywamy. Limit sprawdzamy
+        PRZED sondowaniem — chodzi o to, żeby nadmiarowe żądanie nie wygenerowało ruchu,
+        a nie żeby dostało 429 po fakcie.
+
         **Dlaczego to nie jest skaner portów.** Sondowanie przechodzi przez tę samą
         bramkę egress, co ruch routera (:class:`SondaSystemowa`). Endpoint spoza
         allowlisty nie jest odpytywany — kontrola kończy się stanem `nieznany`
@@ -690,6 +707,23 @@ def create_app(
         Returns:
             Ustalenia posortowane wg wagi wraz z licznikami policzonymi z TEJ SAMEJ listy.
         """
+        # Limit tempa PRZED czymkolwiek innym: sedno sprawy jest w tym, żeby żądanie ponad
+        # limit nie wygenerowało ruchu wychodzącego, a nie w tym, żeby dostało 429 na końcu.
+        # `RateLimiter` nie jest bezpieczny wątkowo, a FastAPI wykonuje funkcje synchroniczne
+        # w puli wątków — stąd zamek.
+        if _limit_diagnozy is not None:
+            with _mutex_diagnozy:
+                try:
+                    _limit_diagnozy.acquire()
+                except RateLimitExceededError as exc:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=(
+                            f"{exc} Diagnoza odpytuje silniki przy KAŻDYM wywołaniu, więc jej "
+                            f"tempo jest ograniczone (security.diagnostics)."
+                        ),
+                    ) from exc
+
         current: HusarzConfig = state["config"]
         # Sonda budowana z AKTUALNEJ konfiguracji, nie z tej ze startu: po
         # `POST /api/config/runtime` obowiązuje nowa polityka egress i nowe endpointy.

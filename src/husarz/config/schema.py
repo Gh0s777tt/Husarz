@@ -520,6 +520,27 @@ class SecretStoreConfig(_StrictModel):
         return self
 
 
+class DiagnosticsConfig(_StrictModel):
+    """Diagnoza wystawiona przez API (``GET /api/doctor``).
+
+    **Po co limit tempa.** Każde wywołanie diagnozy OTWIERA połączenia wychodzące do
+    endpointów z konfiguracji — po jednym na endpoint, z limitem czasu. Bez ograniczenia
+    tempa uprawnienie `diagnostics:read` byłoby dźwignią: żądanie tanie dla wywołującego,
+    kosztowne dla instalacji i dla silników, do których Husarz się odzywa.
+
+    Limit dobrany pod CZŁOWIEKA klikającego „Sprawdź ponownie", nie pod automat. Sześć
+    wywołań na minutę to jedno na dziesięć sekund — swobodnie wystarcza operatorowi, który
+    coś poprawił i chce zobaczyć skutek, a nie pozwala robić z endpointu generatora ruchu.
+
+    Attributes:
+        max_requests_per_minute: Ile wywołań ``GET /api/doctor`` na minutę. ``None``
+            wyłącza limit — dopuszczalne świadomie (np. instalacja jednoosobowa na
+            loopbacku), ale to REZYGNACJA z zabezpieczenia, nie jego brak.
+    """
+
+    max_requests_per_minute: int | None = Field(default=6, ge=1)
+
+
 class SecurityConfig(_StrictModel):
     """Zbiorcza konfiguracja bezpieczeństwa."""
 
@@ -532,6 +553,7 @@ class SecurityConfig(_StrictModel):
     tool_loop: ToolLoopConfig = Field(default_factory=ToolLoopConfig)
     roe: RoeSignatureConfig = Field(default_factory=RoeSignatureConfig)
     secret_store: SecretStoreConfig = Field(default_factory=SecretStoreConfig)
+    diagnostics: DiagnosticsConfig = Field(default_factory=DiagnosticsConfig)
     prompt_injection_filters: bool = True
 
 

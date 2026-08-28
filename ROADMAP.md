@@ -350,13 +350,16 @@ Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 - ✅ **Waga ustalenia widoczna w obu nośnikach** — terminal: `[!!]` blokujący, `[! ]`
   ostrzeżenie; konsola: czerwone ✕ zarezerwowane dla blokującego, bursztynowe `!` dla
   ostrzeżenia. Poprawione NARAZ, z testem pilnującym, że oba odróżniają te same przypadki.
+- ⬜ **Limit tempa diagnozy jest GLOBALNY, nie per wywołujący** — przy kilku operatorach
+  jeden może wyczerpać pulę drugiemu. Kubełek per `principal` ma sens dopiero przy instalacji
+  wieloosobowej; dziś byłby złożonością bez odbiorcy.
 - ⬜ **Rola „NOC" (podgląd + diagnoza) do rozważenia** — `viewer` świadomie nie dostał
   `diagnostics:read`, bo podgląd nie powinien wysyłać pakietów. Gdyby powstał scenariusz
   monitoringu bez uprawnień operatora, właściwą odpowiedzią jest osobna rola, nie
   rozluźnienie `viewer`.
-- ⬜ **Brak limitu tempa dla `GET /api/doctor`** — każde wywołanie sonduje endpointy.
-  Uprawnienie mają tylko admin i operator, którzy dysponują kosztowniejszym `/api/chat`,
-  więc nie jest to nowa dźwignia; zapisane, żeby nie udawać, że limit istnieje.
+- ✅ **Limit tempa dla `GET /api/doctor`** — `security.diagnostics.max_requests_per_minute`
+  (domyślnie 6/min), sprawdzany PRZED sondowaniem, budowany raz ze startu (żeby nadpisanie
+  konfiguracji nie zerowało kubełka). Konsola odróżnia 429 od awarii i nie kasuje wyniku.
 - ✅ **Modele z łańcucha `fallback` są diagnozowane** — rekurencyjnie, z ochroną przed cyklem,
   tylko przy `routing.fallbacks_enabled`; obejmuje też `routing.rules[].prefer`. Model wyłącznie
   zapasowy dostaje OSTRZEŻENIE, nie blokadę (nie przerywa pracy dziś, więc nie może zatrzymywać
