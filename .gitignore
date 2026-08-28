@@ -26,9 +26,19 @@ secrets/
 /artifacts/
 /var/
 *.log
-audit/*.log
-# Kotwica dziennika (liczba wpisów + skrót ostatniego) — dane runtime, jak sam dziennik.
-audit/*.kotwica
+# CAŁY domyślny katalog dziennika audytu, nie wybrane wzorce nazw. Wcześniej stało tu
+# `audit/*.log` + `audit/*.kotwica`, co ignorowało dokładnie dwie nazwy — a dziennik
+# zarchiwizowany jako `audit.log.2026-08-28` nie pasował już do żadnego wzorca i trafiał
+# do `git status` jako plik do zacommitowania. Repozytoria są PUBLICZNE, a dziennik audytu
+# niesie referencje kont, nazwy akcji i ścieżki operatora; gitleaks go NIE zatrzyma, bo
+# dziennik nie zawiera wzorca sekretu.
+/audit/
+# Pliki towarzyszące dziennikowi — na wypadek `audit.path` wskazującego POZA `/audit/`.
+# To nie jest pełne zabezpieczenie i mówimy to wprost: ścieżka jest konfigurowalna, więc
+# dziennik wskazany w inne miejsce repozytorium trzeba dopisać tutaj ręcznie. Wzorce niżej
+# domykają to, co da się domknąć bez znajomości konfiguracji (`*.log` stoi już wyżej).
+*.kotwica
+*.lock
 
 # Python
 __pycache__/

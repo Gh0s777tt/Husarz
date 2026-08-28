@@ -117,3 +117,24 @@ def make_config():
         )
 
     return _make
+
+
+@pytest.fixture(autouse=True)
+def _dziennik_audytu_poza_repozytorium(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Kieruje dziennik audytu do katalogu tymczasowego — w KAŻDYM teście.
+
+    **Skąd ta fikstura.** Testy budujące aplikację z dostarczonej konfiguracji
+    (`repo_config_dir`) używały jej wartości `audit.path`, czyli `./audit/audit.log`
+    liczonej od katalogu roboczego — a więc PRAWDZIWEGO dziennika operatora w repozytorium.
+    Skutki były dwa i oba niedobre. Po pierwsze, przebieg testów dopisywał się do danych,
+    których nie jest właścicielem. Po drugie — poważniejsze — przebieg testów równoległy
+    z uruchomioną instancją (`husarz up`) dawał DWA procesy piszące do jednego pliku, co
+    rozgałęziało łańcuch skrótów. Dokładnie to zdarzyło się w tym repozytorium: dziennik
+    z 376 wpisami przestał się weryfikować, choć nikt niczego nie fałszował
+    (patrz `tests/security/test_audyt_wieloprocesowo.py`).
+
+    Nadpisanie idzie warstwą ENV, bo ona wygrywa z plikami konfiguracji, więc działa także
+    dla testów wczytujących dostarczony `config/`. Żaden test nie ustawia `audit.path`
+    w plikach, więc niczego nie przesłania — sprawdzone przeszukaniem katalogu `tests/`.
+    """
+    monkeypatch.setenv("HUSARZ_SECURITY__AUDIT__PATH", str(tmp_path / "audit" / "audit.log"))

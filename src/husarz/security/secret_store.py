@@ -41,7 +41,6 @@ import contextlib
 import json
 import os
 import re
-import sys
 import threading
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -50,6 +49,7 @@ from typing import Any
 
 from husarz.core.crypto import AesGcmCipher, Cipher, derive_key
 from husarz.core.errors import CryptoError
+from husarz.core.filelock import FileLockError, blokada_pliku
 from husarz.security.errors import SecurityError
 
 SCHEME = "husarz:"
@@ -73,17 +73,10 @@ def _default_clock() -> datetime:
 def _blokada_pliku(sciezka: Path) -> Iterator[None]:
     """Wyłączna blokada międzyprocesowa na czas modyfikacji magazynu.
 
-    **Po co.** Bez niej dwa procesy Husarza wskazujące ten sam plik gubiły sobie nawzajem
-    zapisy: każdy trzyma wpisy w pamięci, więc zapis drugiego nadpisywał plik wersją bez
-    sekretu zapisanego przez pierwszy. Objawiało się to jako „token przestał działać po
-    restarcie" — bez żadnego błędu.
-
-    Blokujemy OSOBNY plik ``.lock``, a nie sam magazyn: plik magazynu jest podmieniany przez
-    ``os.replace``, więc blokada trzymana na nim dotyczyłaby po chwili i-węzła, którego już
-    nikt nie widzi.
-
-    Blokada jest DORADCZA — chroni przed innym Husarzem, nie przed dowolnym procesem, który
-    zignoruje konwencję. To wystarcza dla scenariusza, który realnie zachodzi.
+    Cienka obwoluta na :func:`husarz.core.filelock.blokada_pliku`. Prymityw wyprowadzono do
+    warstwy 0, bo tej samej blokady potrzebuje dziennik audytu — a dziennik nie ma powodu
+    importować magazynu sekretów. Obwoluta zostaje, żeby zachować kontrakt tego modułu:
+    wołający łapie ``SecretStoreError`` i nie musi wiedzieć, skąd wzięto prymityw.
 
     Args:
         sciezka: Ścieżka pliku magazynu (plik blokady powstanie obok, z sufiksem ``.lock``).
@@ -94,50 +87,11 @@ def _blokada_pliku(sciezka: Path) -> Iterator[None]:
     Raises:
         SecretStoreError: Gdy pliku blokady nie da się utworzyć albo zablokować.
     """
-    plik_blokady = sciezka.with_name(sciezka.name + ".lock")
-    plik_blokady.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
-        fd = os.open(plik_blokady, os.O_RDWR | os.O_CREAT, 0o600)
-    except OSError as exc:
-        raise SecretStoreError(f"Nie można utworzyć blokady {plik_blokady}: {exc}") from exc
-    try:
-        _zajmij(fd, plik_blokady)
-        yield
-    finally:
-        _zwolnij(fd)
-        os.close(fd)
-
-
-def _zajmij(fd: int, plik_blokady: Path) -> None:
-    """Zakłada blokadę wyłączną, czekając na jej zwolnienie."""
-    if sys.platform == "win32":  # pragma: no cover - nieweryfikowane na macOS
-        import msvcrt  # noqa: PLC0415
-
-        try:
-            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
-        except OSError as exc:
-            raise SecretStoreError(f"Nie można zająć blokady {plik_blokady}: {exc}") from exc
-        return
-    import fcntl  # noqa: PLC0415
-
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-    except OSError as exc:
-        raise SecretStoreError(f"Nie można zająć blokady {plik_blokady}: {exc}") from exc
-
-
-def _zwolnij(fd: int) -> None:
-    """Zwalnia blokadę. Awaria zwolnienia nie może przesłonić właściwego błędu operacji."""
-    if sys.platform == "win32":  # pragma: no cover - nieweryfikowane na macOS
-        import msvcrt  # noqa: PLC0415
-
-        with contextlib.suppress(OSError):
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        return
-    import fcntl  # noqa: PLC0415
-
-    with contextlib.suppress(OSError):
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        with blokada_pliku(sciezka):
+            yield
+    except FileLockError as exc:
+        raise SecretStoreError(str(exc)) from exc
 
 
 class EncryptedFileSecretStore:

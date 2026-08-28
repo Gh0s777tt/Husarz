@@ -36,12 +36,12 @@ Kolejność jest rekomendacją, nie zobowiązaniem.
 | 1 | `husarz audit verify` — weryfikacja łańcucha z wiersza poleceń | Launcher | 🟢 | S |
 | 2 | Kubełek limitu tempa per `principal` | Bezpieczeństwo | 🟢 | M |
 | 3 | Routing świadomy zdrowia modelu (wyłącznik bezpiecznikowy) | Router | 🟢 | M |
-| 4 | Rotacja klucza HMAC audytu | Bezpieczeństwo | 🟢 | M |
+| 4 | ~~Rotacja klucza HMAC audytu~~ — **zrobione** (Etap 18a) | Bezpieczeństwo | ✅ | M |
 | 5 | Równoległa delegacja niezależnych kroków planu | Orkiestrator | 🟢 | L |
 | 6 | `husarz config explain` — z której warstwy pochodzi wartość | Launcher | 🟢 | S |
 | 7 | Strumieniowanie odpowiedzi (WebSocket) | API + konsola | 🟢 | L |
 | 8 | Chunkowanie dokumentów w RAG | Pamięć | 🟢 | L |
-| 9 | `mkdocs --strict` i `black scripts` w CI (dziś ich nie ma) | Operacje | 🟢 | S |
+| 9 | ~~`mkdocs --strict` i `black scripts` w CI~~ — **zrobione** (Etap 18) | Operacje | ✅ | S |
 | 10 | Pola kosztu i opóźnienia w `ModelSpec` | Router | 🟢 | S |
 
 ---
@@ -399,17 +399,32 @@ Wszystkie pozycje z tej sekcji podlegają **trzeciemu wierszowi** tabeli audytu
 w CLAUDE.md: samokontrola + mutacja + pełny przegląd adwersaryjny, z notatką w
 [BEZPIECZENSTWO.md](BEZPIECZENSTWO.md).
 
-### 🟢 Rotacja klucza HMAC audytu (M)
+### ✅ Rotacja klucza HMAC audytu (M) — ZREALIZOWANE (Etap 18a)
 
-Dziś zmiana klucza zachowuje się jak włączenie go po raz pierwszy: stare wpisy przestają
-weryfikować się nowym kluczem. Płynna rotacja wymaga wersjonowania klucza w samych
-wpisach, żeby weryfikator wiedział, którym kluczem sprawdzać który odcinek.
+Wpisy niosą etykietę pokolenia (`key_id`), konfiguracja wskazuje klucz bieżący i listę
+kluczy historycznych. Przy realizacji okazało się, że wersjonowanie klucza — czyli to,
+co ta pozycja opisywała — jest **dopiero połową rzeczy**: samo dobieranie klucza po
+etykiecie zostawiałoby posiadaczowi klucza wycofanego możliwość dopisania się do końcówki
+dziennika. Sednem jest reguła niemalejącego pokolenia.
+Projekt: [ADR-0026](adr/0026-rotacja-klucza-hmac-audytu.md).
 
-### 🟢 Fail-closed przy uszkodzonym łańcuchu bez klucza HMAC (M)
+### ✅ Fail-closed przy uszkodzonym łańcuchu bez klucza HMAC (M) — ZREALIZOWANE (Etap 18b)
 
-Z kluczem uszkodzenie łańcucha zatrzymuje start. Bez klucza jest tylko sygnalizowane.
-Ta asymetria jest trudna do obrony: brak klucza nie powinien osłabiać wykrywania
-naruszeń.
+`security.audit.integrity` z domyślnym `blocking`. Pozycja została zrealizowana szerzej,
+niż ją opisano: przy okazji wyszło, że **nieczytelny** plik dziennika był po cichu
+połykany, po czym Husarz dopisywał od nowego genesis w środku istniejącego pliku.
+
+### ✅ Rozgałęziony łańcuch przy dwóch procesach — ZREALIZOWANE (Etap 18c), **nie było na tej liście**
+
+Wada, której ten przegląd nie przewidział, bo nie wynikała z żadnej znanej luki. Wyszła
+przy realizacji pozycji wyżej: po włączeniu blokującej integralności realny dziennik
+projektu przestał się weryfikować. `AuditLog` miał blokadę wątkową, ale trzymał głowę
+łańcucha w pamięci — dwa procesy na jednej ścieżce rozgałęziały dziennik.
+
+Warto to odnotować jako ograniczenie samego przeglądu: **lista otwartych możliwości
+wymienia to, o czym wiadomo, że brakuje.** Wady tej klasy — działający kod, który przestaje
+działać dopiero w konfiguracji, o jakiej nikt nie pomyślał — nie trafiają na takie listy
+i znajduje je dopiero uruchomienie.
 
 ### 🟢 Kubełek limitu tempa per `principal` (M) — **warunek wstępny RBAC**
 

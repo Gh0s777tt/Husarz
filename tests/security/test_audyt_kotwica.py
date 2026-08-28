@@ -178,7 +178,7 @@ def test_przekucie_calego_lancucha_bez_klucza_jest_WYKRYWANE(tmp_path: Path) -> 
     assert (
         AuditLog.load(sciezka).verify() is True
     ), "podrobiony łańcuch JEST wewnętrznie spójny — na tym polega ta droga ataku"
-    with pytest.raises(AuditError, match="NIE weryfikuje się kluczem"):
+    with pytest.raises(AuditError, match="NIE weryfikuje się kluczami"):
         build_audit_log(cfg, secrets=_Sekrety())
 
 
@@ -204,15 +204,22 @@ def test_nierozwiazywalna_referencja_to_ODMOWA(tmp_path: Path) -> None:
         build_audit_log(_konfiguracja(tmp_path / "audit.log"), secrets=_Sekrety(klucz=None))
 
 
-def test_bez_klucza_uszkodzony_lancuch_NIE_blokuje_startu(tmp_path: Path) -> None:
-    """Świadome rozróżnienie, nie przeoczenie.
+def test_bez_klucza_uszkodzony_lancuch_BLOKUJE_start(tmp_path: Path) -> None:
+    """SPROSTOWANIE wcześniejszej decyzji tego pliku.
 
-    Skonfigurowanie klucza jest deklaracją „integralność tego dziennika jest blokująca".
-    Bez klucza dziennik pozostaje doradczy: uszkodzenie widać jako `verified: false`
-    w `GET /api/audit`, ale start się nie wywraca. Zmiana tego byłaby osobną decyzją
-    dotykającą domyślnej ścieżki wszystkich instalacji.
+    Do Etapu 18 stało tu twierdzenie odwrotne: że bez klucza HMAC dziennik pozostaje
+    doradczy, bo „skonfigurowanie klucza jest deklaracją, że integralność jest blokująca",
+    a zmiana byłaby osobną decyzją. Decyzja została podjęta i wypadła inaczej, bo tamto
+    rozumowanie miało dziurę: uszkodzenie było wprawdzie WIDOCZNE jako `verified: false`
+    w `GET /api/audit`, ale wyłącznie dla kogoś, kto sam o to zapytał. W praktyce znaczyło
+    to, że instalacja bez klucza pracowała dalej na dzienniku, który nic już nie dowodzi.
+
+    Nowa wartość domyślna to `integrity: blocking`. Czego ona NIE daje, mówimy wprost
+    w komunikacie błędu: bez klucza HMAC kontrola wykrywa uszkodzenie, ale nie odróżnia
+    go od świadomej podmiany.
     """
     from husarz.security.audit import build_audit_log
+    from husarz.security.errors import AuditError
 
     sciezka = tmp_path / "audit.log"
     log = build_audit_log(_konfiguracja(sciezka, ref=None))
@@ -220,9 +227,8 @@ def test_bez_klucza_uszkodzony_lancuch_NIE_blokuje_startu(tmp_path: Path) -> Non
     linie = sciezka.read_text(encoding="utf-8").splitlines()
     sciezka.write_text(linie[0].replace('"a"', '"PODMIENIONE"') + "\n", encoding="utf-8")
 
-    odtworzony = build_audit_log(_konfiguracja(sciezka, ref=None))
-
-    assert odtworzony.verify() is False, "uszkodzenie ma być WIDOCZNE"
+    with pytest.raises(AuditError, match="nie odróżnia"):
+        build_audit_log(_konfiguracja(sciezka, ref=None))
 
 
 def test_klucz_z_magazynu_husarza_jest_ZABRONIONY() -> None:

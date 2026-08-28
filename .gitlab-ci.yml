@@ -27,13 +27,18 @@ quality:
   image: "python:$PY-slim"
   script:
     - python -m pip install --upgrade pip
-    - pip install -e ".[dev]"
+    # `docs` dla kroku `mkdocs build --strict` — MkDocs mieszka w extra `docs`, nie `dev`.
+    - pip install -e ".[dev,docs]"
     - ruff check .
-    - black --check src tests
+    # `scripts` dopisane w Etapie 18: CLAUDE.md wymienia trzy katalogi, CI sprawdzało dwa.
+    - black --check src tests scripts
     - mypy
     - pytest -q
     # Bramka jakości Husarza (Etap 16) — weryfikatory deterministyczne, bez modelu i sieci.
     - python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
+    # Dokumentacja jako bramka: `--strict` wywraca się na martwym odnośniku, czyli na
+    # rozjeździe dokumentacji z kodem. Kroku brakowało w obu pipeline'ach (Etap 18).
+    - python -m mkdocs build --strict
 
 # --- Skan sekretów ----------------------------------------------------------
 gitleaks:

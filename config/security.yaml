@@ -98,10 +98,47 @@ audit:
   # Schemat `husarz:` jest tu ZABRONIONY: klucz integralności audytu nie może pochodzić
   # z magazynu należącego do systemu, którego dziennik ma pilnować.
   #
-  # UWAGA przy włączaniu: istniejący dziennik NIE zweryfikuje się nowym kluczem, a Husarz
-  # odmówi wtedy startu — celowo, bo nie da się odróżnić „plik sprzed HMAC" od „ktoś bez
-  # klucza przepisał historię". Zarchiwizuj stary dziennik razem z jego `.kotwica`.
+  # UWAGA przy WŁĄCZANIU po raz pierwszy: istniejący dziennik NIE zweryfikuje się nowym
+  # kluczem, a Husarz odmówi wtedy startu — celowo, bo nie da się odróżnić „plik sprzed
+  # HMAC" od „ktoś bez klucza przepisał historię". Zarchiwizuj stary dziennik z `.kotwica`.
   hmac_key_ref: null
+  #
+  # ROTACJA klucza (Etap 18) — bez utraty historii i bez archiwizowania dziennika:
+  #   1. nadaj etykietę pokoleniu BIEŻĄCEMU:      hmac_key_id: "2026-08"
+  #   2. dopisz klucz POPRZEDNI do listy poniżej (etykieta pusta, gdy wpisy powstały,
+  #      zanim pole `key_id` w ogóle istniało),
+  #   3. podmień `hmac_key_ref` na nowy klucz.
+  # Przy najbliższym starcie Husarz dopisze wpis `audit.key_rotated`, który zamyka okno,
+  # w którym rotacja jeszcze niczego nie chroni.
+  #
+  # Kolejność listy jest ZNACZĄCA: od najstarszego pokolenia do najnowszego. Na niej opiera
+  # się reguła, dzięki której klucz WYCOFANY nie DOPISZE wpisu za wpisami pokolenia
+  # nowszego — bez niej rotacja byłaby pozorna.
+  #
+  # Zakres tej ochrony jest węższy, niż mogłoby się wydawać, i mówimy to wprost: reguła nie
+  # broni przed USUNIĘCIEM wpisów nowszego pokolenia. Przy działającym procesie skurczenie
+  # pliku jest wykrywane i odrzucane, a kotwica ma zapadkę — ale przed zimnym startem na już
+  # spreparowanym pliku chroni dopiero nadzór ZEWNĘTRZNY (kopia dziennika poza maszyną).
+  #
+  # ROTACJĘ WYKONUJ PRZY ZATRZYMANYCH INSTANCJACH. Reguła pokoleń jest nieodwracalna:
+  # pierwszy wpis STAREGO pokolenia zapisany po znaczniku rotacji psuje weryfikację na
+  # stałe. Wystarczy, że po podmianie konfiguracji zadziała jeszcze stary proces (serwer
+  # albo polecenie CLI — obie drogi piszą do audytu), a dziennik przestanie się weryfikować,
+  # choć nikt niczego nie fałszował. Kod tego nie wykryje: dla weryfikatora wygląda to
+  # dokładnie jak atak.
+  hmac_key_id: ""
+  hmac_verify_keys: []
+  #
+  # Co zrobić, gdy istniejący dziennik NIE weryfikuje się przy starcie:
+  #   blocking — zatrzymuje start, także bez klucza HMAC (wartość DOMYŚLNA),
+  #   warn     — nigdy nie zatrzymuje; uszkodzenie widać jako `verified: false`
+  #              w GET /api/audit, czyli tam, gdzie nikt nie patrzy, dopóki nie szuka.
+  #
+  # Wpisujemy wartość domyślną wprost, bo to decyzja, nie szczegół. Bez klucza HMAC
+  # kontrola wykrywa USZKODZENIE (urwany zapis, nieudana rotacja pliku), ale NIE odróżnia
+  # go od świadomej podmiany: kto ma prawo zapisu, przeliczy goły SHA-256 od nowa.
+  # Profile prod/airgap odrzucają `warn`.
+  integrity: blocking
 
 encryption:
   at_rest: true

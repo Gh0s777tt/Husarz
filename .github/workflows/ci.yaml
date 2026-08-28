@@ -27,16 +27,22 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Instalacja zależności (dev)
+      # `docs` jest tu potrzebne dla kroku `mkdocs build --strict`: MkDocs mieszka w extra
+      # `docs`, nie `dev`. Bez tego nowy krok wywróciłby pipeline na braku polecenia —
+      # sprawdzone przed dopisaniem, a nie po.
+      - name: Instalacja zależności (dev + docs)
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,docs]"
 
       - name: Ruff (lint)
         run: ruff check .
 
+      # `scripts` NIE jest tu ozdobą: CLAUDE.md wymienia `black --check src tests scripts`
+      # jako bramkę, a CI sprawdzało tylko dwa pierwsze katalogi. Źle sformatowany skrypt
+      # operatora przechodził więc przez pipeline, choć lokalna bramka by go zatrzymała.
       - name: Black (format check)
-        run: black --check src tests
+        run: black --check src tests scripts
 
       - name: Mypy (typy)
         run: mypy
@@ -49,6 +55,12 @@ jobs:
       # test; kod wyjścia 1 przy niezdanym przypadku zatrzymuje pipeline.
       - name: Husarz eval (bramka jakości)
         run: python -m husarz.launcher.cli eval --config ./config --prompts ./prompts
+
+      # Dokumentacja jest w tym projekcie bramką, nie dodatkiem: `--strict` wywraca się na
+      # martwym odnośniku, czyli na rozjeździe dokumentacji z kodem. Krok był wymieniony
+      # w CLAUDE.md, ale w pipelinie go NIE BYŁO — martwy odnośnik przechodził przez CI.
+      - name: MkDocs (build --strict)
+        run: python -m mkdocs build --strict
 
   gitleaks:
     name: Skan sekretów (gitleaks)

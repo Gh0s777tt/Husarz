@@ -5,6 +5,134 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (Etap 18 — integralność dziennika audytu)
+
+- **Rotacja klucza HMAC audytu bez utraty historii.** Wpisy niosą etykietę pokolenia
+  (`key_id`); konfiguracja wskazuje klucz bieżący (`hmac_key_ref` + `hmac_key_id`) oraz
+  klucze wcześniejszych pokoleń wyłącznie do weryfikacji (`hmac_verify_keys`). Dotąd wymiana
+  klucza zachowywała się jak włączenie HMAC po raz pierwszy: odmowa startu i konieczność
+  zarchiwizowania dziennika, czyli utrata historii dokładnie wtedy, gdy jest najbardziej
+  potrzebna. Projekt: [ADR-0026](docs/adr/0026-rotacja-klucza-hmac-audytu.md).
+- **Reguła niemalejącego pokolenia** — idąc po łańcuchu, indeks pokolenia nie może zmaleć.
+  To jest sedno rotacji, nie szczegół: bez niej posiadacz klucza WYCOFANEGO (czyli ten, przed
+  kim rotacja chroni) mógłby dopisać albo przepisać końcówkę dziennika, oznaczając własne
+  wpisy starym pokoleniem. Sprawdzone odegraniem tego ataku, nie rozumowaniem.
+- **Wpis `audit.key_rotated`** zapisywany raz po rotacji — zamyka okno, w którym w dzienniku
+  nie ma jeszcze żadnego wpisu nowego pokolenia, więc reguła nie ma się o co oprzeć.
+- **`husarz.core.filelock`** — blokada międzyprocesowa w warstwie 0, wyprowadzona
+  z `husarz.security.secret_store` (magazyn miał ją od Etapu 17, dziennik audytu nie).
+
+### Zmienione
+
+- **`security.audit.integrity` z wartością domyślną `blocking`**: uszkodzony albo nieczytelny
+  dziennik zatrzymuje start także BEZ klucza HMAC. `warn` przywraca poprzednie zachowanie
+  i jest odrzucane w profilach prod/airgap. Komunikat mówi wprost, czego kontrola bez klucza
+  nie potrafi: wykrywa uszkodzenie, ale nie odróżnia go od świadomej podmiany.
+- `.gitignore` ignoruje **cały katalog `/audit/`** zamiast wzorców `audit/*.log`
+  i `audit/*.kotwica`. Tamte pokrywały dokładnie dwie nazwy domyślne, choć `audit.path` jest
+  konfigurowalne — dziennik pod inną nazwą trafiał do `git status` jako plik do
+  zacommitowania, a repozytoria są **publiczne**.
+
+### Naprawione
+
+- **Rozgałęziony łańcuch skrótów przy dwóch procesach.** `AuditLog` miał blokadę wątkową
+  (pula FastAPI), ale trzymał głowę łańcucha w pamięci i nie sprawdzał, czy plik urósł. Dwa
+  procesy Husarza na jednej ścieżce rozgałęziały dziennik: w realnym pliku tego projektu wpis
+  nr 261 wskazywał na skrót wpisu nr 256, pomijając cztery wpisy drugiego procesu.
+  Weryfikacja słusznie meldowała manipulację, choć nikt niczego nie fałszował — a fałszywy
+  alarm w dzienniku audytu jest kosztowny osobno: uczy operatora ignorować alarmy.
+  Naprawa wymaga OBU części: blokady międzyprocesowej i ponownego odczytu pliku pod nią.
+- **Nieczytelny plik dziennika był po cichu połykany**, po czym Husarz startował z pustym
+  stanem i dopisywał od nowego genesis w ŚRODKU istniejącego pliku — powstawał dokument
+  wyglądający na kompletny, a będący zlepkiem dwóch łańcuchów. Teraz to odmowa startu.
+- **Dwa pokolenia klucza o tym samym materiale są odrzucane.** Schemat tego nie wychwyci:
+  widzi wyłącznie referencje, a dwie różne referencje mogą wskazywać ten sam sekret.
+- **Testy pisały do prawdziwego dziennika operatora** (`audit/audit.log` z dostarczonej
+  konfiguracji). Przebieg testów równoległy z uruchomioną instancją był bezpośrednią
+  przyczyną rozgałęzienia opisanego wyżej. Fikstura autouse kieruje dziennik do `tmp_path`.
+- **`fsync` przy dopisywaniu wpisu.** `record()` obiecuje persist-first, ale bez wymuszenia
+  obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
+  kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
+
+### Naprawione (przegląd adwersaryjny Etapu 18 — 33 zgłoszenia, 33 potwierdzone)
+
+- **REGRESJA wprowadzona przez naprawę wyścigu: odcięcie ogona było „prane".**
+  `_odswiez_z_pliku` przyjmowało każdą zmianę rozmiaru pliku jako dopisek innego procesu,
+  a plik wyłącznie dopisujący nie może się skurczyć. Skutek odwracał sens kotwicy: po
+  obcięciu dziennika do 2 z 5 wpisów `verify()` słusznie zwracało `False`, ale **jeden
+  zwykły wpis ofiary** (np. logowanie) wczytywał obcięty plik jako prawdę i przepisywał
+  kotwicę w dół — od tej chwili `verify()` mówiło `true`, a trzy wpisy znikały bez śladu.
+  Napastnik nie był przy tym potrzebny: to samo robiła zwykła rotacja pliku. Naprawa jest
+  dwuczęściowa — skurczenie pliku to twarda odmowa, a kotwica ma **zapadkę** i nie maleje.
+- **`verify()` czytało wyłącznie pamięć**, więc `GET /api/audit` na działającej instancji
+  nigdy nie pokazałby obcięcia pliku. Okno wykrycia było zerowe, nie „do następnego wpisu".
+- **Zniknięcie pliku dziennika** (logrotate, przeniesienie) prowadziło do założenia nowego
+  dziennika zaczynającego się w środku łańcucha. Teraz odmowa.
+- **Plik, który urósł, ale nie zawiera już naszej głowy łańcucha**, był przyjmowany jako
+  uzupełniony. Większy plik nie znaczy plik uzupełniony.
+- **Linia będąca poprawnym JSON-em, ale nie wpisem** (`[1,2]`, nadmiarowe pole) dawała
+  surowy `TypeError`, który omijał całą obsługę: API oddawało 500 zamiast 503, a `warn`
+  nie chronił przed zatrzymaniem startu. Dotyczyło też dziennika zapisanego przez NOWSZĄ
+  wersję Husarza.
+- **Nieczytelny dziennik przy `integrity: warn`** startował, po czym KAŻDY kolejny wpis
+  kończył się błędem — instalacja wstawała i nie zapisywała już niczego. Odczyt niemożliwy
+  jest teraz odmową bezwarunkową: `integrity` rozstrzyga o łańcuchu, który się nie zgadza,
+  a nie o pliku, którego nie da się przeczytać.
+- **Wyjątek w połowie wczytywania** zostawiał dziennik załadowany częściowo. Stan podmieniany
+  jest dopiero po udanym wczytaniu całości.
+- **Blokada plikowa nie miała limitu czasu** — proces, który padł ją trzymając, zamroziłby
+  cały audyt, a z nim każde żądanie do API. Limit 10 s i czytelny błąd.
+- **Odczyt przy starcie szedł poza blokadą i w złej kolejności**, więc zapis innego procesu
+  w szczelinie dawał parę (plik starszy, kotwica nowsza) — czytaną jako odcięcie ogona.
+  Fałszywy alarm na ścieżce krytycznej, wprost przeciwny celowi naprawy.
+- **Znacznik rotacji pomijał dziennik PUSTY** — czyli stan, w którym okno rotacji stoi
+  najszerzej otworem, a komunikat odmowy startu sam do niego prowadzi („zarchiwizuj").
+- **Brak albo uszkodzenie kotwicy WYŁĄCZA wykrywanie odcięcia ogona**, i robiło to
+  niewidocznie. Nowe pole `kotwica` w `GET /api/audit` (`ok`/`brak`/`nieczytelna`/
+  `wylaczona`) — rozróżnienie „nie wykryto naruszenia" od „nie ma czym wykrywać" należy
+  do operatora.
+- **Kotwica zapisywana bez `fsync`**, choć wpis był fsyncowany.
+- **`husarz up` wywracał się surowym tracebackiem** na nowej, domyślnej ścieżce odmowy.
+
+### Sprostowane (twierdzenia o bezpieczeństwie, które były nieprawdziwe)
+
+- **„Wycofany klucz nie dopisze ani nie PRZEPISZE końcówki dziennika"** — druga połowa była
+  nieprawdą. Reguła niemalejącego pokolenia broni przed DOPISANIEM za wpisem nowszego
+  pokolenia, ale nie przed USUNIĘCIEM tych wpisów. Poprawione w `AuditConfig`,
+  `AuditLog.verify`, `config/security.yaml`, ADR-0026 i `docs/BEZPIECZENSTWO.md`.
+- **„Kotwica podnosi poprzeczkę do «usuń linie i zaktualizuj kotwicę»"** — faktyczna
+  poprzeczka to „usuń linie i **usuń** kotwicę": brak kotwicy liczy się jak zgodność,
+  a usunąć jest łatwiej niż podrobić.
+- **Docstring `wymusza_integralnosc` mówił o „trójstanie"** `integrity`, choć stany są dwa —
+  trzeci usunięto w tej samej zmianie.
+- **Komentarz w `.gitignore`** uzasadniał regułę tym, że `audit.path` jest konfigurowalne,
+  a sama reguła obejmowała wyłącznie katalog domyślny. Uzasadnienie doprowadzone do stanu
+  faktycznego; dodane wzorce `*.kotwica` i `*.lock`.
+
+### Udokumentowane (warunek operacyjny, którego kod nie wykryje)
+
+- **Rotację klucza wykonuje się przy ZATRZYMANYCH instancjach.** Reguła pokoleń jest
+  nieodwracalna: stary proces, który zapisze wpis po znaczniku rotacji, psuje weryfikację
+  na stałe, a dla weryfikatora wygląda to identycznie jak atak.
+
+### Naprawione (CI — bramki opisane w CLAUDE.md, których pipeline nie miał)
+
+- **`mkdocs build --strict` nie był uruchamiany w ogóle** — ani w GitHub Actions, ani
+  w GitLabie. Martwy odnośnik w dokumentacji przechodził więc przez CI, choć lokalna bramka
+  by go zatrzymała. Krok dodany do obu pipeline'ów; przy okazji `pip install -e ".[dev]"`
+  zmieniono na `".[dev,docs]"`, bo MkDocs mieszka w extra `docs` — bez tego nowy krok
+  wywróciłby się na braku polecenia (sprawdzone PRZED dopisaniem, nie po).
+- **`black --check src tests`** zamiast `src tests scripts`. Źle sformatowany skrypt
+  operatora przechodził przez CI.
+
+### Sprostowane
+
+- **Bez klucza HMAC uszkodzony dziennik NIE blokował startu** — i było to opisane jako
+  świadome rozróżnienie („skonfigurowanie klucza jest deklaracją, że integralność jest
+  blokująca"). Rozumowanie miało dziurę: uszkodzenie było wprawdzie widoczne jako
+  `verified: false` w `GET /api/audit`, ale wyłącznie dla kogoś, kto sam o nie zapytał.
+  Twierdzenie poprawione w `tests/security/test_audyt_kotwica.py` i `docs/BEZPIECZENSTWO.md`.
+
 ### Dodane (przegląd otwartych możliwości — `docs/PLAN-ROZWOJU.md`)
 
 - Nowy dokument zbiera **wszystko, co da się jeszcze zrobić** w rdzeniu AI (router,

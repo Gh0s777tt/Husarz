@@ -589,6 +589,63 @@ class AuthConfig(_StrictModel):
         return self
 
 
+class AuditIntegrity(StrEnum):
+    """Co robimy, gdy istniejący dziennik NIE weryfikuje się przy starcie.
+
+    Rozróżnienie istnieje, bo koszt zatrzymania instalacji jest różny na stanowisku
+    deweloperskim i w produkcji — a nie dlatego, że gdzieś wolno uszkodzenie zignorować.
+
+    Był tu trzeci stan, ``auto`` („blokuj tylko przy ustawionym kluczu HMAC"), odtwarzający
+    zachowanie sprzed Etapu 18. Wypadł, bo jako WARTOŚĆ DOMYŚLNA znaczył „instalacja bez
+    klucza startuje na uszkodzonym dzienniku", a jako wybór jawny nie miał zastosowania,
+    którego nie pokrywałyby dwa pozostałe. Pole z trzema stanami, z których jeden jest
+    tylko zaszłością, to dokładnie ta klasa konfiguracji, którą Etap 17 usuwał.
+    """
+
+    #: Nigdy nie blokuje startu — uszkodzenie widać jako ``verified: false`` w API.
+    WARN = "warn"
+    #: Zawsze blokuje start, także bez klucza HMAC. Wartość DOMYŚLNA.
+    BLOCKING = "blocking"
+
+
+class AuditVerifyKey(_StrictModel):
+    """Klucz HMAC WYŁĄCZNIE do weryfikacji historii — po rotacji klucza bieżącego.
+
+    Rotacja bez tej listy oznaczałaby utratę weryfikowalności wszystkiego, co zapisano
+    starym kluczem: Husarz odmawiałby startu, a jedynym wyjściem byłoby zarchiwizowanie
+    dziennika i założenie nowego. Dziennik audytu, który trzeba wyrzucić przy każdej
+    wymianie klucza, nie jest dziennikiem audytu.
+
+    Attributes:
+        id: Etykieta pokolenia klucza, zapisywana we wpisach (``key_id``). Pusta etykieta
+            oznacza wpisy sprzed PIERWSZEJ rotacji — powstały, zanim pole istniało, więc
+            nie da się im nadać nazwy wstecz bez zmiany ich skrótów.
+        ref: Referencja do sekretu ZEWNĘTRZNEGO. Te same zasady, co dla klucza bieżącego.
+    """
+
+    id: str = ""
+    ref: str
+
+    @model_validator(mode="after")
+    def _validate_ref(self) -> AuditVerifyKey:
+        """Wymusza referencję zewnętrzną — identycznie jak dla klucza bieżącego.
+
+        Raises:
+            ValueError: Gdy podano materiał klucza albo schemat wewnętrzny ``husarz:``.
+        """
+        wartosc = self.ref.strip()
+        if not wartosc.startswith(_EXTERNAL_REF_SCHEMES):
+            raise ValueError(
+                "security.audit.hmac_verify_keys[].ref musi być referencją do sekretu "
+                "ZEWNĘTRZNEGO (env:/file:/vault:/sops:), a nie samym materiałem klucza. "
+                "Schemat 'husarz:' jest zabroniony z tego samego powodu, co dla klucza "
+                "bieżącego: magazyn Husarza jest częścią systemu, którego dziennik pilnuje."
+            )
+        object.__setattr__(self, "ref", wartosc)
+        object.__setattr__(self, "id", self.id.strip())
+        return self
+
+
 class AuditConfig(_StrictModel):
     """Dopisujący dziennik audytu z łańcuchem skrótów.
 
@@ -609,6 +666,24 @@ class AuditConfig(_StrictModel):
             to goły SHA-256: każdy, kto ma prawo zapisu do pliku, może przeliczyć go od
             nowa i podmienić historię tak, że ``verify()`` niczego nie zauważy. Z kluczem
             trzymanym POZA systemem plików staje się to niewykonalne bez tego klucza.
+        hmac_key_id: Etykieta POKOLENIA klucza bieżącego, zapisywana w nowych wpisach.
+            Pusta = pokolenie sprzed pierwszej rotacji.
+        hmac_verify_keys: Klucze wcześniejszych pokoleń, wyłącznie do weryfikacji historii.
+            **Kolejność jest znacząca**: od najstarszego do najnowszego. Opiera się na niej
+            reguła niemalejącego pokolenia, która nie pozwala posiadaczowi WYCOFANEGO klucza
+            DOPISAĆ wpisu za wpisami pokolenia nowszego.
+
+            Zakres tej ochrony jest węższy, niż brzmiało pierwsze sformułowanie („nie dopisze
+            ani nie przepisze końcówki"). Reguła działa wobec wpisów, które w pliku SĄ —
+            napastnik z prawem zapisu może je jednak usunąć, cofając dziennik do własnej ery.
+            Jedyną kontrolą kompletności jest kotwica, a ta nie jest uwierzytelniona i leży
+            w tym samym katalogu. Skurczenie pliku jest wprawdzie wykrywane przy DZIAŁAJĄCYM
+            procesie (Etap 18, ``_odswiez_z_pliku``), ale przed zimnym startem na już
+            spreparowanym pliku chroni dopiero nadzór ZEWNĘTRZNY: kopia dziennika poza
+            maszyną albo wysyłka do systemu zbierającego.
+        integrity: Co zrobić, gdy istniejący dziennik nie weryfikuje się przy starcie.
+            ``blocking`` (DOMYŚLNE) zatrzymuje start, także bez klucza HMAC; ``warn`` nigdy
+            nie zatrzymuje. Profile prod/airgap odrzucają ``warn``.
     """
 
     enabled: bool = True
@@ -616,6 +691,13 @@ class AuditConfig(_StrictModel):
     immutable: bool = True
     hash_chain: bool = True  # łańcuch skrótów (tamper-evidence)
     hmac_key_ref: str | None = None
+    # Etykieta pokolenia klucza BIEŻĄCEGO, zapisywana w nowych wpisach jako `key_id`.
+    # Pusta = pokolenie sprzed pierwszej rotacji.
+    hmac_key_id: str = ""
+    # Klucze wcześniejszych pokoleń — WYŁĄCZNIE do weryfikacji, nigdy do podpisywania.
+    # Kolejność jest znacząca: od NAJSTARSZEGO do najnowszego (patrz `AuditLog.verify`).
+    hmac_verify_keys: list[AuditVerifyKey] = Field(default_factory=list)
+    integrity: AuditIntegrity = AuditIntegrity.BLOCKING
 
     @model_validator(mode="after")
     def _validate_hmac_ref(self) -> AuditConfig:
@@ -628,7 +710,17 @@ class AuditConfig(_StrictModel):
         Raises:
             ValueError: Gdy podano materiał zamiast referencji albo schemat wewnętrzny.
         """
+        object.__setattr__(self, "hmac_key_id", self.hmac_key_id.strip())
         if self.hmac_key_ref is None:
+            # Bez klucza bieżącego pola rotacji nie mają czego rotować. Milczące ich
+            # zignorowanie byłoby dokładnie tą klasą wady, którą wytropiliśmy w Etapie 17:
+            # pole wygląda na działające i nie robi nic.
+            if self.hmac_key_id or self.hmac_verify_keys:
+                raise ValueError(
+                    "security.audit.hmac_key_id / hmac_verify_keys wymagają ustawionego "
+                    "hmac_key_ref. Bez klucza bieżącego łańcuch jest gołym SHA-256, więc "
+                    "etykiety pokoleń i klucze historyczne nic nie znaczą."
+                )
             return self
         wartosc = self.hmac_key_ref.strip()
         if not wartosc.startswith(_EXTERNAL_REF_SCHEMES):
@@ -639,7 +731,36 @@ class AuditConfig(_StrictModel):
                 "należącego do systemu, którego dziennik ma pilnować."
             )
         object.__setattr__(self, "hmac_key_ref", wartosc)
+
+        # Etykiety pokoleń muszą być JEDNOZNACZNE. Powtórzona etykieta znaczyłaby, że wpis
+        # da się zweryfikować dwoma różnymi kluczami — czyli że rotacja niczego nie odcina.
+        etykiety = [k.id for k in self.hmac_verify_keys]
+        if len(set(etykiety)) != len(etykiety):
+            raise ValueError(
+                "security.audit.hmac_verify_keys zawiera powtórzone etykiety `id`. Każde "
+                "pokolenie klucza musi mieć własną, bo to po niej dobierany jest klucz "
+                "do weryfikacji wpisu."
+            )
+        if self.hmac_key_id in etykiety:
+            raise ValueError(
+                f"security.audit.hmac_key_id='{self.hmac_key_id}' powtarza etykietę z "
+                f"hmac_verify_keys. Klucz bieżący i klucz historyczny o tej samej etykiecie "
+                f"są nierozróżnialne przy weryfikacji — a to znaczy, że stary klucz nadal "
+                f"uwierzytelnia NOWE wpisy, czyli rotacja jest pozorna."
+            )
         return self
+
+    @property
+    def wymusza_integralnosc(self) -> bool:
+        """Czy nieudana weryfikacja dziennika ma ZATRZYMAĆ start.
+
+        Sprowadza ``integrity`` do odpowiedzi tak/nie, żeby reguła żyła w jednym miejscu:
+        korzysta z niej i ``build_audit_log``, i walidacja krzyżowa profili.
+
+        Returns:
+            ``True``, gdy start ma być fail-closed.
+        """
+        return self.integrity is AuditIntegrity.BLOCKING
 
 
 class EncryptionConfig(_StrictModel):
@@ -1441,6 +1562,16 @@ class HusarzConfig(_StrictModel):
                 errors.append(
                     f"Profil '{profile_name}' wymaga szyfrowania at-rest "
                     f"(security.encryption.at_rest=true)."
+                )
+            # Dziennik, którego uszkodzenia nie zatrzymują startu, jest dziennikiem
+            # doradczym. Wartość domyślna jest już blokująca — tu pilnujemy tylko tego,
+            # żeby nie dało się jej OSŁABIĆ w profilu nieodwołalnym.
+            if not self.security.audit.wymusza_integralnosc:
+                errors.append(
+                    f"Profil '{profile_name}' wymaga blokującej kontroli integralności "
+                    f"dziennika (security.audit.integrity=blocking). Ustawienie 'warn' "
+                    f"znaczy, że instalacja wystartuje na dzienniku, który nie przechodzi "
+                    f"weryfikacji — a o tym operator dowie się dopiero, gdy sam zapyta."
                 )
             # ROE autoryzuje AKTYWNE działania Puszkarza wobec konkretnych celów. Bez
             # weryfikacji podpisu „autoryzacją" jest dowolny tekst w polu signature, czyli

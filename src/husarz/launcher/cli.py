@@ -627,33 +627,46 @@ def _cmd_up(args: argparse.Namespace) -> int:
     # TrustedHost tylko dla loopbacku (obrona przed DNS-rebindingiem na localhost).
     trusted = ["localhost", "127.0.0.1"] if _is_loopback(args.host) else None
 
-    app = create_app(
-        config,
-        config_dir=config_dir,
-        api_token=api_token,
-        accounts=accounts,
-        git_service=git_service,
-        # Fabryka: po `POST /api/config/runtime` serwis Git jest przebudowywany z NOWĄ
-        # polityką egress, ale z tym samym magazynem połączeń (bez utraty danych).
-        # Magazyn przychodzi OD API (serwis aktualny), a nie z domknięcia na `git_service`
-        # z chwili startu — to domknięcie gubiło połączenia, gdy Git był przy starcie
-        # wyłączony i włączono go dopiero nadpisaniem runtime.
-        git_service_factory=lambda cfg, store: _build_git(cfg, store=store),
-        plugin_service=plugin_service,
-        # Fabryka: przy nadpisaniu runtime serwis wtyczek (polityka konektorów: allow_call/
-        # call_allowlist/enabled/egress) jest przebudowywany z NOWEGO configu — jak router.
-        plugin_service_factory=_build_plugins,
-        router_factory=_router_factory,
-        trusted_hosts=trusted,
-        prompts_dir=prompts,
-        secrets=_SchemeSecrets(),  # przewleczenie sekretów: trwała pamięć RAG (klucz at-rest)
-        secret_store=_SEKRETY,  # kreator połączeń: zapis tokenu pod referencją `husarz:`
-        # REALNY adres nasłuchu — `GET /api/doctor` wykrywa dzięki temu model celujący
-        # w port zajęty przez samego Husarza. Bez przekazania tu wartości z `args` panel
-        # sprawdzałby port domyślny i przy `--port 9000` przeoczyłby kolizję (albo zmyślił).
-        listen_host=args.host,
-        listen_port=args.port,
-    )
+    # `create_app` buduje dziennik audytu, a ten od Etapu 18 domyślnie ODMAWIA startu
+    # na dzienniku, którego nie da się zweryfikować albo odczytać. Bez tej obsługi
+    # operator dostawał starannie napisany komunikat po polsku jako ostatnią linię
+    # pythonowego traceback'u — a CLAUDE.md wymaga czytelnego komunikatu, nigdy
+    # niekontrolowanego crashu. Do Etapu 18 ścieżka była rzadka (wymagała
+    # `hmac_key_ref`); teraz jest zwykła dla KAŻDEJ instalacji, bo wystarczy urwany
+    # zapis po zaniku zasilania albo nieudana rotacja pliku.
+    from husarz.security.errors import AuditError  # noqa: PLC0415
+
+    try:
+        app = create_app(
+            config,
+            config_dir=config_dir,
+            api_token=api_token,
+            accounts=accounts,
+            git_service=git_service,
+            # Fabryka: po `POST /api/config/runtime` serwis Git jest przebudowywany z NOWĄ
+            # polityką egress, ale z tym samym magazynem połączeń (bez utraty danych).
+            # Magazyn przychodzi OD API (serwis aktualny), a nie z domknięcia na `git_service`
+            # z chwili startu — to domknięcie gubiło połączenia, gdy Git był przy starcie
+            # wyłączony i włączono go dopiero nadpisaniem runtime.
+            git_service_factory=lambda cfg, store: _build_git(cfg, store=store),
+            plugin_service=plugin_service,
+            # Fabryka: przy nadpisaniu runtime serwis wtyczek (polityka konektorów: allow_call/
+            # call_allowlist/enabled/egress) jest przebudowywany z NOWEGO configu — jak router.
+            plugin_service_factory=_build_plugins,
+            router_factory=_router_factory,
+            trusted_hosts=trusted,
+            prompts_dir=prompts,
+            secrets=_SchemeSecrets(),  # przewleczenie sekretów: trwała pamięć RAG (klucz at-rest)
+            secret_store=_SEKRETY,  # kreator połączeń: zapis tokenu pod referencją `husarz:`
+            # REALNY adres nasłuchu — `GET /api/doctor` wykrywa dzięki temu model celujący
+            # w port zajęty przez samego Husarza. Bez przekazania tu wartości z `args` panel
+            # sprawdzałby port domyślny i przy `--port 9000` przeoczyłby kolizję (albo zmyślił).
+            listen_host=args.host,
+            listen_port=args.port,
+        )
+    except AuditError as exc:
+        print(f"[!!] audyt: {exc}", file=sys.stderr, flush=True)
+        return 1
     if api_token and accounts is not None:
         auth_note = "auth: token + konta"
     elif accounts is not None:

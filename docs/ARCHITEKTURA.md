@@ -41,9 +41,14 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   (plus opcjonalna `cryptography`, importowana leniwie wewnątrz funkcji). Mieszkają tu
   wyjątki `RouterError`, `EgressError` i `CryptoError` (`husarz.core.errors`) oraz
   prymityw szyfrowania at-rest `husarz.core.crypto` (`Cipher`, `AesGcmCipher`,
-  `derive_key`). Prymityw wylądował tu, bo potrzebują go DWA niezależne podsystemy
-  warstwy 3 — pamięć długoterminowa i magazyn sekretów — a żaden nie może być
-  zależnością drugiego. `husarz.memory.crypto` re-eksportuje te klasy, więc
+  `derive_key`) oraz blokada międzyprocesowa `husarz.core.filelock` (`blokada_pliku`,
+  `FileLockError`). Oba prymitywy wylądowały tu z tego samego powodu: potrzebują ich DWA
+  niezależne podsystemy warstwy 3, a żaden nie może być zależnością drugiego —
+  szyfrowania pamięć długoterminowa i magazyn sekretów, blokady magazyn sekretów
+  i dziennik audytu. Blokada mieszkała pierwotnie w `husarz.security.secret_store`, przez
+  co dziennik audytu musiałby importować magazyn sekretów po pięć linii kodu; skończyło
+  się na tym, że nie importował niczego i **nie miał blokady międzyprocesowej wcale**
+  (Etap 18c). `husarz.memory.crypto` re-eksportuje klasy szyfrowania, więc
   dotychczasowe importy działają bez zmian. Powód jest architektoniczny — patrz
   „Warstwy importów" niżej.
 - **Pakiet `husarz.config`** (Etap 0) — schematy, loader, dostawcy sekretów.
@@ -117,7 +122,7 @@ Kolejność warstw, od najniższej:
 
 | Warstwa | Zawartość | Może importować |
 |---|---|---|
-| `husarz.core` | wyjątki wspólne, prymityw szyfrowania (`crypto`) | wyłącznie stdlib |
+| `husarz.core` | wyjątki wspólne, prymityw szyfrowania (`crypto`), blokada plikowa (`filelock`) | wyłącznie stdlib |
 | `husarz.config` | schematy, loader, `net`, `evals` | `core` + stdlib |
 | `husarz.ssrf`, `husarz.fencing`, `husarz.textjson`, `husarz.attachments` | prymitywy współdzielone | `core`, `config` |
 | `husarz.router`, `husarz.tools`, `husarz.security` | usługi domenowe | powyższe |

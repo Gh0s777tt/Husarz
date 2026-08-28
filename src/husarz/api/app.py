@@ -646,6 +646,7 @@ def create_app(
         recent = entries[-limit:] if limit > 0 else []
         return AuditView(
             verified=audit_log.verify(),
+            kotwica=audit_log.stan_kotwicy(),
             count=len(entries),
             entries=[
                 AuditEntryView(

@@ -79,9 +79,22 @@ class AuditEntryView(BaseModel):
 
 
 class AuditView(BaseModel):
-    """Widok dziennika audytu."""
+    """Widok dziennika audytu.
+
+    Attributes:
+        verified: Czy łańcuch skrótów i kotwica zgadzają się z zawartością pliku.
+        kotwica: Czy kontrola KOMPLETNOŚCI w ogóle działa — ``ok``, ``brak``, ``nieczytelna``
+            albo ``wylaczona``. Pole istnieje, bo brak kotwicy po prostu WYŁĄCZA wykrywanie
+            odcięcia ogona, a robił to dotąd niewidocznie: ``verified`` pokazywało wtedy
+            ``true``, choć jedyny mechanizm wykrywający usunięcie wpisów przestał działać.
+            Rozróżnienie „nie wykryto naruszenia" od „nie ma czym wykrywać" należy do
+            operatora, nie do serwera.
+        count: Liczba wpisów w dzienniku.
+        entries: Ostatnie wpisy (bez pola ``detail`` — może nieść ścieżki i referencje kont).
+    """
 
     verified: bool
+    kotwica: str
     count: int
     entries: list[AuditEntryView]
 

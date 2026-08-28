@@ -491,13 +491,24 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   rozwiązana fail-closed: dziennik nieweryfikujący się kluczem blokuje start z komunikatem,
   bo nie da się odróżnić „plik sprzed HMAC" od „ktoś przepisał historię".
   Docs: `docs/BEZPIECZENSTWO.md`, Etap 17o.
-- ⬜ **Rotacja klucza HMAC audytu** — dziś zmiana klucza zachowuje się jak włączenie go po
-  raz pierwszy (odmowa startu, konieczna archiwizacja). Bezszwowa rotacja wymaga
-  wersjonowania klucza we wpisach.
-- ⬜ **Fail-closed przy uszkodzonym łańcuchu także BEZ klucza HMAC** — dziś uszkodzenie jest
-  widoczne (`verified: false`), ale nie blokuje startu, więc Husarz dopisuje do zepsutego
-  łańcucha. Zmiana dotknęłaby domyślnej ścieżki wszystkich instalacji, więc jest osobną
-  decyzją.
+- ✅ **Rotacja klucza HMAC audytu** (Etap 18a) — wpisy niosą etykietę pokolenia (`key_id`),
+  konfiguracja wskazuje klucz bieżący i listę kluczy historycznych (`hmac_verify_keys`).
+  Sednem nie jest dobór klucza po etykiecie, lecz **reguła niemalejącego pokolenia**: bez
+  niej posiadacz klucza WYCOFANEGO nadal dopisywałby się do końcówki. Projekt:
+  [ADR-0026](docs/adr/0026-rotacja-klucza-hmac-audytu.md).
+- ✅ **Fail-closed przy uszkodzonym łańcuchu także BEZ klucza HMAC** (Etap 18b) —
+  `security.audit.integrity` z domyślnym `blocking`; `warn` odrzucane w prod/airgap.
+  Wcześniejsze uzasadnienie („bez klucza dziennik jest doradczy") zostało w
+  `docs/BEZPIECZENSTWO.md` **sprostowane**: uszkodzenie było widoczne wyłącznie dla kogoś,
+  kto sam o nie zapytał.
+- ✅ **Rozgałęziony łańcuch przy dwóch procesach** (Etap 18c) — znaleziony nie przeglądem,
+  lecz awarią: realny dziennik projektu przestał się weryfikować, choć nikt niczego nie
+  fałszował. `AuditLog` miał blokadę wątkową, a trzymał głowę łańcucha w pamięci. Naprawa:
+  blokada międzyprocesowa (`husarz.core.filelock`, wyprowadzona z magazynu sekretów) **oraz**
+  ponowny odczyt pliku pod nią — sama blokada dawałaby fałszywe poczucie naprawy.
+- ⬜ **Trwałość zapisu dziennika nie jest zweryfikowana pomiarem** (luka z Etapu 18c).
+  `fsync` jest wołany, ale skutku nie da się przetestować bez odcięcia zasilania w środku
+  operacji; została kontrola strukturalna, opisana w docstringu jako słabsza.
 - ⬜ **Usunięcie CAŁEGO pliku dziennika wraz z kotwicą nie zostawia śladu w samym Husarzu.**
   Wykrycie wymaga nadzoru zewnętrznego (kopia poza maszyną, wysyłka do systemu zbierającego)
   — a to wysyłanie danych, więc wyłącznie za zgodą operatora i poza domyślną konfiguracją.
