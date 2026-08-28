@@ -50,7 +50,6 @@ def _katalog(write_config, profil: str, security: str = "") -> Path:
 @pytest.mark.parametrize(
     ("security", "fragment"),
     [
-        ("sandbox:\n  engine: none\n", "wymaga sandboxa"),
         ("audit:\n  enabled: false\n", "wymaga włączonego audytu"),
         ("audit:\n  immutable: false\n", "wymaga niemodyfikowalnego audytu"),
         ("encryption:\n  at_rest: false\n", "wymaga szyfrowania at-rest"),
@@ -77,7 +76,6 @@ def test_profil_nieodwolalny_ODRZUCA_oslabienie(
 @pytest.mark.parametrize(
     "security",
     [
-        "sandbox:\n  engine: none\n",
         "audit:\n  enabled: false\n",
         "audit:\n  immutable: false\n",
         "encryption:\n  at_rest: false\n",
@@ -118,3 +116,81 @@ def test_dostarczona_konfiguracja_przechodzi_baze_prod(repo_config_dir: Path) ->
 
     assert config.platform.profile.value == "prod"
     assert config.security.audit.enabled is True
+
+
+@pytest.mark.parametrize("profil", ["dev", "prod", "airgap"])
+def test_engine_none_jest_odrzucany_w_KAZDYM_profilu(write_config, profil: str) -> None:
+    """Silniejsze niż bramka profilowa — i dlatego zastąpiło ją jako droga główna.
+
+    Bazowa linia odrzucała `engine: none` wyłącznie w prod/airgap. W `dev` wartość
+    przechodziła i NIC nie robiła: `build_tools` zawsze buduje executor Dockera, więc
+    narzędzie i tak szło do kontenera. Operator miał prawo sądzić, że wyłączył izolację —
+    nie wyłączył, ale też się o tym nie dowiedział.
+
+    Wyłączenia izolacji świadomie NIE dodajemy: byłoby poszerzeniem powierzchni ataku.
+    Usuwamy więc wartość, która je obiecuje.
+    """
+    katalog = _katalog(
+        write_config, profil, "egress:\n  default_policy: deny\nsandbox:\n  engine: none\n"
+    )
+
+    with pytest.raises(ConfigError) as exc:
+        load_config(katalog)
+
+    assert "NIE MA drogi wykonania narzędzia poza kontenerem" in str(exc.value)
+
+
+# --------------- deklarowany silnik musi odpowiadać temu, co naprawdę robi kontener
+
+
+def test_gvisor_bez_runtime_class_jest_ODRZUCANY() -> None:
+    """Fałszywe zapewnienie o SILE izolacji — najgroźniejszy z rozjazdów w tej parze.
+
+    O gVisorze decyduje wyłącznie `runtime_class` (trafia do `docker run --runtime`).
+    `engine` nie steruje niczym, a jest POKAZYWANY operatorowi: w linii startowej CLI
+    i w `GET /api/config/summary`. Konfiguracja `engine: docker+gvisor` z pustym
+    `runtime_class` dawała więc zwykły runc, a operator czytał „docker+gvisor".
+    """
+    from husarz.config.schema import SandboxConfig
+
+    with pytest.raises(ValueError, match="wymaga `runtime_class`"):
+        SandboxConfig(engine="docker+gvisor", runtime_class=None)
+
+    # Nośność: poprawna para MUSI przechodzić, inaczej walidator blokuje dostarczoną
+    # konfigurację repo (która używa właśnie gVisora z `runsc`).
+    assert SandboxConfig(engine="docker+gvisor", runtime_class="runsc").runtime_class == "runsc"
+
+
+def test_docker_z_runtime_class_tez_jest_ODRZUCANY() -> None:
+    """Rozjazd w drugą stronę: kontener użyłby runtime'u, o którym nazwa silnika milczy."""
+    from husarz.config.schema import SandboxConfig
+
+    with pytest.raises(ValueError, match="engine='docker'"):
+        SandboxConfig(engine="docker", runtime_class="runsc")
+
+    assert SandboxConfig(engine="docker").runtime_class is None
+
+
+def test_domyslny_silnik_ZGADZA_sie_z_domyslnym_runtime() -> None:
+    """Regresja: walidator zgodności odrzucił WŁASNĄ wartość domyślną.
+
+    Domyślnie było `engine: docker+gvisor` przy `runtime_class: None`, czyli deklaracja
+    niespójna z zachowaniem (zwykły runc) od samego początku. Wyszło dopiero wtedy, gdy
+    kontrola zgodności powstała — i to jest najuczciwszy możliwy sygnał.
+    """
+    from husarz.config.schema import SandboxConfig
+
+    domyslny = SandboxConfig()  # nie może rzucić
+
+    assert domyslny.engine.value == "docker"
+    assert domyslny.runtime_class is None
+
+
+def test_dostarczona_konfiguracja_deklaruje_gvisora_I_go_ustawia(
+    repo_config_dir,
+) -> None:  # noqa: ANN001
+    """Konfiguracja repo ma mówić prawdę o sile izolacji, którą reklamuje."""
+    sandbox = load_config(repo_config_dir).security.sandbox
+
+    assert sandbox.engine.value == "docker+gvisor"
+    assert sandbox.runtime_class == "runsc", "deklaracja gVisora bez runtime'u byłaby pozorem"

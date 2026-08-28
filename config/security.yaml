@@ -16,7 +16,14 @@ egress:
   allowlist: []
 
 sandbox:
-  engine: docker+gvisor      # none | docker | docker+gvisor | firecracker
+  # Dozwolone: docker | docker+gvisor. Wartości `none` i `firecracker` są ODRZUCANE:
+  # pierwsza obiecywała wyłączenie izolacji, którego w tym kodzie NIE MA (narzędzia zawsze
+  # idą do kontenera), druga nie jest zaimplementowana.
+  #
+  # UWAGA: o gVisorze decyduje `runtime_class` niżej, nie ta nazwa — ona jest tylko
+  # POKAZYWANA (linia startowa, GET /api/config/summary). Dlatego para musi się zgadzać
+  # i pilnuje tego walidacja: `docker+gvisor` wymaga `runtime_class`, samo `docker` go zabrania.
+  engine: docker+gvisor
   network: false             # brak sieci w sandboxie domyślnie
   cpu_limit: "1"
   memory_limit: 512m

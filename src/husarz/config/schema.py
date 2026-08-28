@@ -375,6 +375,19 @@ class EgressConfig(_StrictModel):
         return self
 
 
+# Silniki sandboxa, które kod NAPRAWDĘ realizuje. Reszta wartości `SandboxEngine` to
+# zapisany zamiar albo — w przypadku `none` — obietnica, której świadomie NIE spełniamy.
+#
+# `none` jest odrzucane WSZĘDZIE, nie tylko w prod/airgap, i to nie z rygoryzmu: w tym
+# kodzie NIE MA drogi wykonania narzędzia poza kontenerem. `build_tools` zawsze buduje
+# `DockerSandboxExecutor`, więc `engine: none` po prostu nic nie robiło — a wartość
+# w konfiguracji sugerowała operatorowi, że wyłączenie izolacji jest możliwe. Dodawanie
+# takiej drogi byłoby poszerzeniem powierzchni ataku; usunięcie wartości jest tańsze
+# i uczciwsze.
+_ZAIMPLEMENTOWANE_SILNIKI: frozenset[SandboxEngine] = frozenset(
+    {SandboxEngine.DOCKER, SandboxEngine.DOCKER_GVISOR}
+)
+
 # Pola USUNIĘTE ze `SandboxConfig`. Oba obiecywały konfigurowalność ograniczeń plikowych,
 # której nie było: kontener dostaje DOKŁADNIE jeden montaż (workspace), a narzędzia plikowe
 # przechodzą przez `resolve_within_workspace`. Konfinacja jest bezwarunkowa — nie ma czego
@@ -407,7 +420,13 @@ class SandboxConfig(_StrictModel):
                 raise ValueError(f"security.sandbox.{pole} zostało USUNIĘTE: {powod}")
         return dane
 
-    engine: SandboxEngine = SandboxEngine.DOCKER_GVISOR
+    # Domyślnie `docker`, nie `docker+gvisor` — i to jest SPROSTOWANIE, nie osłabienie.
+    # Domyślny `runtime_class` to `None`, więc zachowanie i tak zawsze było zwykłym runc;
+    # deklaracja `docker+gvisor` po prostu tego nie opisywała. Wyszło, gdy nowy walidator
+    # zgodności odrzucił WŁASNĄ wartość domyślną — najuczciwszy możliwy sygnał, że para
+    # (silnik, runtime) była niespójna od początku. Dostarczona konfiguracja podnosi to
+    # jawnie do `docker+gvisor` + `runsc`.
+    engine: SandboxEngine = SandboxEngine.DOCKER
     network: bool = False  # brak sieci domyślnie
     cpu_limit: str = "1"
     memory_limit: str = "512m"
@@ -420,6 +439,55 @@ class SandboxConfig(_StrictModel):
     run_as_user: str | None = "1000:1000"
     pids_limit: int | None = Field(default=512, ge=1)
     read_only_rootfs: bool = True
+
+    @model_validator(mode="after")
+    def _silnik_musi_zgadzac_sie_z_rzeczywistoscia(self) -> SandboxConfig:
+        """Pilnuje, żeby deklarowany silnik odpowiadał temu, co naprawdę robi kontener.
+
+        Dwie różne nieprawdy, obie sprawdzone uruchomieniem:
+
+        1. **`engine: none` nic nie wyłączało.** `build_tools` zawsze buduje
+           `DockerSandboxExecutor`, więc narzędzie i tak szło do kontenera. Wartość
+           sugerowała możliwość, której w tym kodzie nie ma — i której świadomie nie
+           dodajemy, bo byłaby poszerzeniem powierzchni ataku.
+        2. **`engine` a `runtime_class` mogły się ROZJECHAĆ.** O gVisorze decyduje wyłącznie
+           `runtime_class` (trafia do `docker run --runtime`); `engine` nie steruje niczym,
+           a jest POKAZYWANY operatorowi — w linii startowej CLI i w `GET /api/config/summary`.
+           Konfiguracja `engine: docker+gvisor` z pustym `runtime_class` dawała więc zwykłego
+           runc, a operator czytał „docker+gvisor". Fałszywe zapewnienie o SILE izolacji.
+
+        Raises:
+            ValueError: Gdy silnik jest niezaimplementowany albo niezgodny z `runtime_class`.
+        """
+        if self.engine not in _ZAIMPLEMENTOWANE_SILNIKI:
+            dostepne = ", ".join(sorted(s.value for s in _ZAIMPLEMENTOWANE_SILNIKI))
+            powod = (
+                "w tym kodzie NIE MA drogi wykonania narzędzia poza kontenerem — "
+                "`build_tools` zawsze buduje executor Dockera, więc ta wartość niczego nie "
+                "wyłączała. Izolacja `shell`/`git`/`run_tests` jest bezwarunkowa z założenia"
+                if self.engine is SandboxEngine.NONE
+                else "ten silnik nie jest zaimplementowany"
+            )
+            raise ValueError(
+                f"security.sandbox.engine='{self.engine.value}': {powod}. "
+                f"Ustaw jedną z działających wartości ({dostepne})."
+            )
+        # O gVisorze decyduje `runtime_class`, nie nazwa silnika — a nazwa jest pokazywana
+        # operatorowi. Rozjazd między nimi to fałszywe zapewnienie o sile izolacji.
+        if self.engine is SandboxEngine.DOCKER_GVISOR and not self.runtime_class:
+            raise ValueError(
+                "security.sandbox.engine='docker+gvisor' wymaga `runtime_class` (np. 'runsc') "
+                "— to ONO trafia do `docker run --runtime`, a nie nazwa silnika. Bez niego "
+                "kontener biegnie na zwykłym runc, a linia startowa i `GET /api/config/summary` "
+                "meldowałyby gVisora. Ustaw `runtime_class: runsc` albo `engine: docker`."
+            )
+        if self.engine is SandboxEngine.DOCKER and self.runtime_class:
+            raise ValueError(
+                f"security.sandbox.engine='docker' z `runtime_class: {self.runtime_class}` — "
+                f"kontener użyłby tego runtime'u, a operator czytałby „docker\". Jeśli chodzi "
+                f"o gVisora, ustaw `engine: docker+gvisor`."
+            )
+        return self
 
 
 class MtlsConfig(_StrictModel):
@@ -1353,11 +1421,12 @@ class HusarzConfig(_StrictModel):
         #    twardych wymagań nie wolno cicho wyłączyć. W dev zostawiamy elastyczność.
         if self.platform.profile in (Profile.PROD, Profile.AIRGAP):
             profile_name = self.platform.profile.value
-            if self.security.sandbox.engine is SandboxEngine.NONE:
-                errors.append(
-                    f"Profil '{profile_name}' wymaga sandboxa "
-                    f"(security.sandbox.engine != none)."
-                )
+            # `engine: none` NIE jest tu sprawdzany, bo walidator pola `SandboxConfig`
+            # odrzuca tę wartość w KAŻDYM profilu — jest ściśle silniejszy. Sprawdzone:
+            # nawet podstawienie przez `model_copy` nie omija go, bo Pydantic rewaliduje
+            # zagnieżdżony model. Zostawienie martwej gałęzi „na wszelki wypadek" byłoby
+            # tym samym, co reszta pól usuniętych w Etapie 17m: kodem, który wygląda na
+            # działającą kontrolę.
             if not self.security.audit.enabled:
                 errors.append(
                     f"Profil '{profile_name}' wymaga włączonego audytu "

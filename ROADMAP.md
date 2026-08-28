@@ -503,9 +503,13 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   pamiętania o dopisaniu jego wyjątku. SPROSTOWANIE: pierwotne zgłoszenie mówiło o „złamaniu
   kontraktu"; docstring był węższy, niż go zacytowano — obiecywał brak wyjątku dla złych
   argumentów, nie dla awarii zaplecza. Wada była realna, jej opis nieprecyzyjny.
-- ⬜ **`security.sandbox.engine: none` nie wyłącza sandboxa** poza profilami prod/airgap —
-  jedyny czytelnik tego pola to strażnik profilu; executor i tak woła `docker run`.
-  Rozstrzygnąć: albo pole ma działać, albo ma być odrzucane jak `requires_sandbox`.
+- ✅ **`security.sandbox.engine` musi zgadzać się z rzeczywistością.** `none` odrzucane
+  w KAŻDYM profilu (wyłączenia izolacji w tym kodzie nie ma i świadomie go nie dodajemy —
+  byłoby poszerzeniem powierzchni ataku); `firecracker` odrzucany jako niezaimplementowany;
+  `docker+gvisor` wymaga `runtime_class`, bo to ONO trafia do `--runtime`, a nazwa silnika
+  jest tylko pokazywana operatorowi. Przy okazji: domyślna para była niespójna od początku
+  (`docker+gvisor` przy `runtime_class: None`) — wyszło, gdy walidator odrzucił własną
+  wartość domyślną.
 - ⬜ **Pozostałe pola bez czytelnika, świadomie zostawione**: `ca_cert_ref`, `cert_ref`,
   `client_id`, `issuer` (części odrzucanych już sekcji mTLS/OIDC), `language_default`,
   `audit.hash_chain` i `audit.immutable` (martwe przełączniki nad zachowaniem bezwarunkowo

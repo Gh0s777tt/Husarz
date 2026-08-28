@@ -5,6 +5,29 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Zmienione (deklarowany silnik sandboxa musi odpowiadać rzeczywistości)
+
+- **`security.sandbox.engine` nie sterował NICZYM.** `build_tools` zawsze buduje executor
+  Dockera, a o gVisorze decyduje wyłącznie `runtime_class` (trafia do `docker run --runtime`).
+  Sprawdzone na czterech kombinacjach: `none` też uruchamiał kontener, a `docker+gvisor`
+  z pustym `runtime_class` dawał zwykły runc.
+- To ostatnie jest najgroźniejsze, bo `engine` **jest pokazywany operatorowi** — w linii
+  startowej CLI i w `GET /api/config/summary`. Konfiguracja mogła więc meldować gVisora,
+  gdy kontener biegł na runc: fałszywe zapewnienie o SILE izolacji.
+- Walidacja pilnuje teraz pary: `docker+gvisor` **wymaga** `runtime_class`, samo `docker`
+  go **zabrania**. `none` odrzucane w KAŻDYM profilu (nie tylko prod/airgap): wyłączenia
+  izolacji w tym kodzie nie ma i świadomie go nie dodajemy — byłoby poszerzeniem powierzchni
+  ataku, a nie naprawą. `firecracker` odrzucany jako niezaimplementowany.
+- **Domyślna wartość była niespójna od początku** (`docker+gvisor` przy `runtime_class: None`,
+  czyli deklaracja gVisora przy zachowaniu runc). Wyszło dopiero wtedy, gdy nowy walidator
+  odrzucił WŁASNĄ wartość domyślną — najuczciwszy możliwy sygnał. Domyślnie jest teraz
+  `docker`; zachowanie nie zmieniło się o nic, zmieniła się prawdziwość deklaracji.
+- **Usunięta martwa gałąź** w bazowej linii profili: sprawdzenie `engine is NONE` stało się
+  nieosiągalne, bo walidator pola jest ściśle silniejszy (odrzuca we wszystkich profilach,
+  a rewalidacja zagnieżdżonego modelu nie pozwala obejść go przez `model_copy` — sprawdzone).
+  Zostawienie jej „na wszelki wypadek" byłoby tym samym, co pola usunięte wcześniej: kodem,
+  który wygląda na działającą kontrolę.
+
 ### Poprawione (awaria sandboxa wywracała pętlę zamiast dać modelowi błąd)
 
 - **`ToolDispatcher.dispatch` łapał trzy zaplecza z czterech.** `MemoryError_`,
