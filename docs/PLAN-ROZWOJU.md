@@ -33,7 +33,7 @@ Kolejność jest rekomendacją, nie zobowiązaniem.
 
 | # | Pozycja | Obszar | Blokada | Koszt |
 |---|---|---|---|---|
-| 1 | `husarz audit verify` — weryfikacja łańcucha z wiersza poleceń | Launcher | 🟢 | S |
+| 1 | ~~`husarz audit verify`~~ — **zrobione** (Etap 18e) | Launcher | ✅ | S |
 | 2 | Kubełek limitu tempa per `principal` | Bezpieczeństwo | 🟢 | M |
 | 3 | Routing świadomy zdrowia modelu (wyłącznik bezpiecznikowy) | Router | 🟢 | M |
 | 4 | ~~Rotacja klucza HMAC audytu~~ — **zrobione** (Etap 18a) | Bezpieczeństwo | ✅ | M |
@@ -54,17 +54,29 @@ operatora bez narzędzi do trzech rzeczy, które robi się najczęściej: sprawd
 integralności audytu, zarządzania sekretami i zrozumienia, skąd wzięła się wartość
 w konfiguracji.
 
-### 🟢 `husarz audit verify` (S) — **najpilniejsze**
+### ✅ `husarz audit verify` (S) — ZREALIZOWANE (Etap 18e)
 
-Łańcuch skrótów, kotwica i HMAC dziennika audytu istnieją w kodzie i są sprawdzane
-przy starcie oraz przez zakładkę „Audyt" w konsoli. **Nie ma jednak żadnej drogi, by
-sprawdzić je na żądanie z wiersza poleceń.** To jest luka w rzeczy, która stanowi
-rdzeń obietnicy niemodyfikowalności: operator podejrzewający naruszenie musi albo
-uruchomić całą platformę, albo napisać własny skrypt.
+Pozycja opisywała lukę tak: operator podejrzewający naruszenie musiał albo uruchomić całą
+platformę, albo napisać własny skrypt. Realizacja pokazała, że sformułowanie było **za
+słabe w dwóch miejscach**:
 
-Zakres: podkomenda wypisująca liczbę wpisów, stan łańcucha, zgodność z kotwicą i wynik
-HMAC; kod wyjścia 0/1 nadający się do crona. Dodatkowo `husarz audit anchor` do
-świadomego przestawienia kotwicy po zamierzonej rotacji.
+1. Uruchomienie platformy nie jest alternatywą, tylko ślepą uliczką — od Etapu 18b
+   `husarz up` na uszkodzonym dzienniku **odmawia startu**. Operator zostawał więc
+   z platformą, która nie wstaje, i bez sposobu, by dowiedzieć się dlaczego. Stąd osobna
+   ścieżka wglądu (`otworz_do_wgladu`), otwierająca dziennik wyłącznie do odczytu.
+2. Werdykt „coś jest nie tak" jest bezużyteczny. Przy prawdziwej awarii liczyła się
+   wyłącznie odpowiedź „GDZIE" — polecenie podaje numer wpisu, czas, akcję i rodzaj
+   niezgodności.
+
+Zakres zrealizowany: liczba wpisów, stan kotwicy, pokolenia kluczy, wynik, miejsce i rodzaj
+niezgodności; kody wyjścia 0/1/2 nadające się do crona. Opis: [LAUNCHER](LAUNCHER.md).
+
+**`husarz audit anchor` świadomie NIE powstało.** Miało przestawiać kotwicę „po zamierzonej
+rotacji", ale po Etapie 18c jest to pomysł wprost szkodliwy: kotwica dostała **zapadkę**
+właśnie po to, żeby nie dało się jej cofnąć, a polecenie do jej przestawiania byłoby gotowym
+narzędziem do zacierania śladu odcięcia ogona — i to podpisanym przez sam projekt. Jeżeli
+rotacja pliku dziennika ma być wspierana, musi to być operacja, która STARY dziennik
+zachowuje i wiąże z nowym, a nie taka, która przestawia licznik.
 
 ### 🟢 `husarz config explain <ścieżka>` (S)
 

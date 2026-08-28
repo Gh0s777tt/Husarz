@@ -95,6 +95,52 @@ def _payload(
     return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
+@dataclass(frozen=True, slots=True)
+class Niezgodnosc:
+    """Pierwsze miejsce, w którym dziennik przestaje się zgadzać.
+
+    Attributes:
+        indeks: Numer wpisu (liczony od zera) albo ``-1``, gdy problem nie dotyczy
+            konkretnego wpisu, lecz pliku albo kotwicy.
+        rodzaj: ``plik``, ``kotwica``, ``ogniwo``, ``pokolenie``, ``nieznany_klucz``
+            albo ``skrot``.
+        opis: Zdanie po polsku gotowe do wypisania operatorowi.
+        timestamp: Znacznik czasu wpisu (pusty, gdy ``indeks`` to ``-1``).
+        action: Nazwa akcji. **Świadomie NIE niesiemy pola ``detail``** — może zawierać
+            ścieżki i referencje kont, a raport bywa wklejany do zgłoszeń i logów.
+        actor: Kto wykonał akcję.
+    """
+
+    indeks: int
+    rodzaj: str
+    opis: str
+    timestamp: str = ""
+    action: str = ""
+    actor: str = ""
+
+    @classmethod
+    def z_wpisu(cls, indeks: int, wpis: AuditEntry, rodzaj: str, opis: str) -> Niezgodnosc:
+        """Buduje opis niezgodności dla konkretnego wpisu.
+
+        Args:
+            indeks: Pozycja wpisu w dzienniku.
+            wpis: Wpis, na którym rzecz się rozstrzygnęła.
+            rodzaj: Rodzaj niezgodności.
+            opis: Wyjaśnienie po polsku.
+
+        Returns:
+            Gotowy opis.
+        """
+        return cls(
+            indeks=indeks,
+            rodzaj=rodzaj,
+            opis=opis,
+            timestamp=wpis.timestamp,
+            action=wpis.action,
+            actor=wpis.actor,
+        )
+
+
 @dataclass(slots=True)
 class AuditLog:
     """Dopisujący dziennik audytu z weryfikowalnym łańcuchem skrótów.
@@ -470,21 +516,74 @@ class AuditLog:
         Returns:
             ``True``, gdy łańcuch jest spójny, pokolenia nie cofają się i nic nie zniknęło.
         """
+        return self.pierwsza_niezgodnosc() is None
+
+    def pierwsza_niezgodnosc(self) -> Niezgodnosc | None:
+        """To samo sprawdzenie, co ``verify``, ale mówi GDZIE i CO nie gra.
+
+        Jedna implementacja, dwa poziomy szczegółu — ``verify`` jest jej cienką obwolutą.
+        Rozdzielenie ich znaczyłoby dwa przejścia po łańcuchu, które musiałyby zgadzać się
+        ze sobą w nieskończoność.
+
+        **Po co szczegół.** Przy diagnozowaniu rozgałęzionego dziennika projektu (Etap 18c)
+        trzeba było napisać jednorazowy skrypt, żeby dowiedzieć się, że pęknięcie jest na
+        wpisie 261. Skoro odpowiedź „gdzie" była potrzebna raz, będzie potrzebna znowu —
+        korzysta z niej ``husarz audit verify``.
+
+        Returns:
+            ``None``, gdy dziennik jest spójny; inaczej opis PIERWSZEJ niezgodności.
+        """
         if not self._odswiezony_do_weryfikacji():
-            return False
+            return Niezgodnosc(
+                indeks=-1,
+                rodzaj="plik",
+                opis=(
+                    "Plik dziennika zmienił się w sposób, który wyklucza dalszą pracę "
+                    "(skurczył się, zniknął albo przestał być czytelny)."
+                ),
+            )
         if not self._kompletny_wobec_kotwicy():
-            return False
+            return Niezgodnosc(
+                indeks=-1,
+                rodzaj="kotwica",
+                opis=(
+                    "Dziennik nie zgadza się z kotwicą: wpisy zniknęły albo historia została "
+                    "przepisana. Kotwica jest jedyną kontrolą KOMPLETNOŚCI — sam łańcuch "
+                    "skrótów odcięcia ogona nie wykrywa."
+                ),
+            )
         prev = GENESIS_HASH
         najstarsze_dozwolone = 0
-        for entry in self._entries:
+        for indeks_wpisu, entry in enumerate(self._entries):
             if entry.prev_hash != prev:
-                return False
+                return Niezgodnosc.z_wpisu(
+                    indeks_wpisu,
+                    entry,
+                    "ogniwo",
+                    "Wpis wskazuje na inny skrót niż faktyczny skrót wpisu poprzedniego — "
+                    "łańcuch jest w tym miejscu ROZGAŁĘZIONY. Najczęstsza przyczyna to dwa "
+                    "procesy piszące do jednego pliku, a nie manipulacja.",
+                )
             pokolenie = self._pokolenie_wpisu(entry.key_id)
             if pokolenie is None:
-                return False
+                return Niezgodnosc.z_wpisu(
+                    indeks_wpisu,
+                    entry,
+                    "nieznany_klucz",
+                    f"Wpis nosi etykietę pokolenia '{entry.key_id}', dla której nie ma klucza "
+                    f"w konfiguracji. Nie ma go czym sprawdzić — a to nie znaczy 'w porządku'.",
+                )
             indeks, klucz = pokolenie
             if indeks < najstarsze_dozwolone:
-                return False
+                return Niezgodnosc.z_wpisu(
+                    indeks_wpisu,
+                    entry,
+                    "pokolenie",
+                    "Wpis należy do pokolenia STARSZEGO niż wpis poprzedni. Po rotacji klucza "
+                    "pokolenie nie może się cofnąć — albo dopisał go ktoś z kluczem "
+                    "wycofanym, albo (znacznie częściej) po rotacji zadziałał jeszcze stary "
+                    "proces, którego nie zatrzymano.",
+                )
             najstarsze_dozwolone = indeks
             payload = _payload(
                 entry.timestamp,
@@ -497,9 +596,15 @@ class AuditLog:
                 entry.key_id,
             )
             if self._skrot(payload, klucz) != entry.entry_hash:
-                return False
+                return Niezgodnosc.z_wpisu(
+                    indeks_wpisu,
+                    entry,
+                    "skrot",
+                    "Skrót wpisu nie zgadza się z jego treścią — wpis został ZMIENIONY po "
+                    "zapisaniu (albo policzono go innym kluczem).",
+                )
             prev = entry.entry_hash
-        return True
+        return None
 
     def _odswiezony_do_weryfikacji(self) -> bool:
         """Dociąga stan z dysku przed weryfikacją. ``False`` = plik mówi coś niepokojącego.
@@ -686,29 +791,7 @@ def build_audit_log(
     audit = security.audit
     if not audit.enabled:
         return AuditLog(path=None)
-    hmac_key = _rozwiaz_klucz_hmac(audit.hmac_key_ref, secrets)
-    verify_keys: list[tuple[str, bytes]] = []
-    for pokolenie in audit.hmac_verify_keys:
-        klucz = _rozwiaz_klucz_hmac(pokolenie.ref, secrets)
-        if klucz is None:  # pragma: no cover - `ref` jest wymagane i niepuste (walidacja)
-            raise AuditError(
-                f"Nie udało się rozwiązać historycznego klucza HMAC audytu "
-                f"(`{pokolenie.ref}`, pokolenie '{pokolenie.id}')."
-            )
-        verify_keys.append((pokolenie.id, klucz))
-    # Dwa pokolenia o TYM SAMYM materiale klucza znoszą regułę niemalejącego pokolenia:
-    # wpis dałoby się „awansować" do nowszego pokolenia bez zmiany jego skrótu. Schemat tego
-    # nie wychwyci, bo widzi wyłącznie referencje — dwie różne referencje mogą wskazywać ten
-    # sam sekret. Sprawdzamy dopiero tutaj, gdy materiał jest rozwiązany.
-    materialy = [*(k for _, k in verify_keys), *([hmac_key] if hmac_key is not None else [])]
-    if len(set(materialy)) != len(materialy):
-        raise AuditError(
-            "Co najmniej dwa pokolenia klucza HMAC audytu wskazują TEN SAM materiał. "
-            "Rotacja byłaby wtedy pozorna: ten sam klucz uwierzytelniałby wpisy stare "
-            "i nowe, więc reguła niemalejącego pokolenia przestałaby cokolwiek odcinać. "
-            "Sprawdź, czy referencje w `security.audit.hmac_key_ref` i `hmac_verify_keys` "
-            "nie prowadzą do tego samego sekretu."
-        )
+    hmac_key, verify_keys = _rozwiaz_pokolenia(audit, secrets)
     path = Path(audit.path)
     # Kotwica leży obok dziennika i ma tę samą nazwę z przyrostkiem. Osobny plik, bo musi
     # przetrwać odcięcie ogona dziennika — trzymanie jej W dzienniku niczego by nie dało.
@@ -763,6 +846,94 @@ def build_audit_log(
     # Właśnie stan pusty jest tym, w którym okno rotacji stoi najszerzej otworem, a komunikat
     # odmowy startu sam prowadzi operatora prosto do niego („zarchiwizuj dziennik").
     _zapisz_znacznik_rotacji(log, audit)
+    return log
+
+
+def _rozwiaz_pokolenia(
+    audit: AuditConfig, secrets: SecretsProvider | None
+) -> tuple[bytes | None, list[tuple[str, bytes]]]:
+    """Rozwiązuje klucz bieżący i klucze historyczne. Fail-closed na każdym kroku.
+
+    Args:
+        audit: Konfiguracja audytu.
+        secrets: Dostawca sekretów.
+
+    Returns:
+        Para ``(klucz bieżący albo None, lista (etykieta, klucz) od najstarszego)``.
+
+    Raises:
+        AuditError: Gdy któregoś klucza nie da się uzyskać albo dwa pokolenia wskazują ten
+            sam materiał.
+    """
+    hmac_key = _rozwiaz_klucz_hmac(audit.hmac_key_ref, secrets)
+    verify_keys: list[tuple[str, bytes]] = []
+    for pokolenie in audit.hmac_verify_keys:
+        klucz = _rozwiaz_klucz_hmac(pokolenie.ref, secrets)
+        if klucz is None:  # pragma: no cover - `ref` jest wymagane i niepuste (walidacja)
+            raise AuditError(
+                f"Nie udało się rozwiązać historycznego klucza HMAC audytu "
+                f"(`{pokolenie.ref}`, pokolenie '{pokolenie.id}')."
+            )
+        verify_keys.append((pokolenie.id, klucz))
+    # Dwa pokolenia o TYM SAMYM materiale klucza znoszą regułę niemalejącego pokolenia:
+    # wpis dałoby się „awansować" do nowszego pokolenia bez zmiany jego skrótu. Schemat tego
+    # nie wychwyci, bo widzi wyłącznie referencje — dwie różne referencje mogą wskazywać ten
+    # sam sekret. Sprawdzamy dopiero tutaj, gdy materiał jest rozwiązany.
+    materialy = [*(k for _, k in verify_keys), *([hmac_key] if hmac_key is not None else [])]
+    if len(set(materialy)) != len(materialy):
+        raise AuditError(
+            "Co najmniej dwa pokolenia klucza HMAC audytu wskazują TEN SAM materiał. "
+            "Rotacja byłaby wtedy pozorna: ten sam klucz uwierzytelniałby wpisy stare "
+            "i nowe, więc reguła niemalejącego pokolenia przestałaby cokolwiek odcinać. "
+            "Sprawdź, czy referencje w `security.audit.hmac_key_ref` i `hmac_verify_keys` "
+            "nie prowadzą do tego samego sekretu."
+        )
+    return hmac_key, verify_keys
+
+
+def otworz_do_wgladu(
+    security: SecurityConfig, *, secrets: SecretsProvider | None = None
+) -> AuditLog:
+    """Wczytuje dziennik do INSPEKCJI — nigdy do zapisu.
+
+    ``build_audit_log`` odmawia startu na dzienniku, który się nie weryfikuje, i słusznie:
+    buduje dziennik DO PISANIA, a dopisywanie do zepsutego łańcucha pogłębia szkodę.
+    Narzędzie diagnostyczne potrzebuje czegoś dokładnie odwrotnego — ma uszkodzenie
+    POKAZAĆ, a nie odmówić działania. Dziennik, którego nie da się obejrzeć dokładnie
+    wtedy, gdy coś jest z nim nie tak, byłby bezużyteczny w jedynym momencie, który się
+    liczy.
+
+    Zwrócony dziennik ma ``path=None``, więc nie da się nim przypadkiem dopisać.
+
+    Args:
+        security: Konfiguracja bezpieczeństwa (ścieżka dziennika, klucze).
+        secrets: Dostawca sekretów do rozwiązania referencji kluczy.
+
+    Returns:
+        Dziennik gotowy do ``verify`` / ``pierwsza_niezgodnosc``. Pusty, gdy pliku nie ma
+        albo audyt jest wyłączony.
+
+    Raises:
+        AuditError: Gdy kluczy nie da się rozwiązać albo pliku nie da się odczytać. Odczyt
+            niemożliwy jest błędem także tutaj: raport „dziennik w porządku" na pliku,
+            którego nie przeczytano, byłby fałszywym OK.
+    """
+    audit = security.audit
+    hmac_key, verify_keys = _rozwiaz_pokolenia(audit, secrets)
+    path = Path(audit.path)
+    log = AuditLog(
+        path=None,
+        hmac_key=hmac_key,
+        key_id=audit.hmac_key_id,
+        verify_keys=verify_keys,
+        anchor_path=path.with_name(path.name + ".kotwica"),
+    )
+    if not path.exists():
+        return log
+    try:
+        log._wczytaj(path)
+    except (OSError, ValueError, TypeError) as exc:
+        raise AuditError(f"Nie można odczytać dziennika audytu {path}: {exc}") from exc
     return log
 
 

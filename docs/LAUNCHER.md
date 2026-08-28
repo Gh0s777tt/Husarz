@@ -316,6 +316,66 @@ użycie **jest** zgodą — rozmiar i tak zostaje wypisany.
 
     Decyzje i uzasadnienia: [ADR-0025](adr/0025-pobieranie-wag-za-zgoda.md).
 
+## Integralność dziennika: `husarz audit verify`
+
+Odpowiada na pytanie, które przy awarii jest jedynym istotnym: nie „czy coś jest nie tak",
+lecz **gdzie**.
+
+```bash
+python -m husarz.launcher.cli audit verify --config ./config
+```
+
+Kody wyjścia nadają się do crona: **0** — łańcuch spójny, **1** — wykryta niezgodność,
+**2** — błąd konfiguracji albo klucza.
+
+Raport na dzienniku zdrowym:
+
+```
+Dziennik:  audit/audit.log (376 wpis(ów))
+Kotwica:   ok
+Klucz HMAC: pokolenie '2026-08', pokoleń łącznie: 2
+Wynik:     ŁAŃCUCH SPÓJNY
+```
+
+I na tym, od którego zaczął się Etap 18c — prawdziwym dzienniku tego projektu:
+
+```
+Dziennik:  audit/archiwum/audit.log.rozgalezony-2026-08-28 (376 wpis(ów))
+Kotwica:   brak
+Klucz HMAC: brak (goły SHA-256 — każdy z prawem zapisu może przeliczyć łańcuch)
+Wynik:     NIEZGODNOŚĆ (ogniwo)
+           wpis nr 261 — orchestrate (wykonał: api, 2026-08-23T11:28:21.270160+00:00)
+           Wpis wskazuje na inny skrót niż faktyczny skrót wpisu poprzedniego — łańcuch
+           jest w tym miejscu ROZGAŁĘZIONY. Najczęstsza przyczyna to dwa procesy piszące
+           do jednego pliku, a nie manipulacja.
+```
+
+Ostatnie zdanie jest tam celowo. Dziennik audytu, który melduje „manipulację" przy zwykłej
+pomyłce konfiguracyjnej, uczy operatora ignorować alarmy — a to kosztuje więcej niż sam
+błąd.
+
+### Rodzaje niezgodności
+
+| Rodzaj | Co znaczy |
+|---|---|
+| `plik` | plik skurczył się, zniknął albo przestał być czytelny |
+| `kotwica` | wpisy zniknęły albo historia została przepisana (kontrola KOMPLETNOŚCI) |
+| `ogniwo` | łańcuch rozgałęziony — zwykle dwa procesy na jednym pliku |
+| `skrot` | wpis zmieniono po zapisaniu (albo policzono innym kluczem) |
+| `pokolenie` | wpis starszego pokolenia po nowszym — patrz [ADR-0026](adr/0026-rotacja-klucza-hmac-audytu.md) |
+| `nieznany_klucz` | etykieta pokolenia bez klucza w konfiguracji — nie ma czym sprawdzić |
+
+### Dlaczego to osobna ścieżka, a nie `husarz up`
+
+`husarz up` **odmawia startu** na dzienniku, który się nie weryfikuje — i słusznie, bo
+buduje dziennik do PISANIA, a dopisywanie do zepsutego łańcucha pogłębia szkodę. Narzędzie
+diagnostyczne potrzebuje czegoś dokładnie odwrotnego. Dziennik, którego nie da się obejrzeć
+w jedynym momencie, który się liczy, byłby bezużyteczny.
+
+`audit verify` otwiera dziennik **wyłącznie do odczytu** (bez ścieżki zapisu, więc nie da
+się nim przypadkiem dopisać) i nie zawiera pola `detail` wpisów — może ono nieść ścieżki
+i referencje kont, a raport bywa wklejany do zgłoszeń.
+
 ## Zachowanie
 
 - Domyślny nasłuch **loopback** (`127.0.0.1`) — bezpieczny, lokalny.

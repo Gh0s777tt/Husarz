@@ -190,7 +190,11 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
 - **Sandbox** narzędzi bez sieci, limity CPU/RAM/czasu, allowlisty komend i ścieżek.
 - **Szyfrowanie at-rest**; **RBAC**; **audit log** dopisujący, z łańcuchem skrótów
   i kotwicą wykrywającą usunięcie wpisów (mTLS i OIDC — Etap 6, dziś odrzucane
-  przy starcie, żeby nie dawać fałszywego poczucia bezpieczeństwa).
+  przy starcie, żeby nie dawać fałszywego poczucia bezpieczeństwa). Klucz HMAC dziennika
+  można **rotować bez utraty historii** ([ADR-0026](docs/adr/0026-rotacja-klucza-hmac-audytu.md)),
+  a dziennik, który nie przechodzi weryfikacji, **zatrzymuje start** — domyślnie, także bez
+  klucza. Sprawdzenie na żądanie: `husarz audit verify` (podaje NUMER wpisu i rodzaj
+  niezgodności, nie sam werdykt).
 - **Zero telemetrii**; filtry anty-prompt-injection; izolacja treści niezaufanych.
 - **Puszkarz**: tylko autoryzowany pentest (ROE-gate, dry-run); nie tworzy exploitów.
 - **Podpis ROE**: zlecenie jest ważne dopiero z poprawnym podpisem kryptograficznym

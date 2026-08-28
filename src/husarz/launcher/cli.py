@@ -806,6 +806,74 @@ def _cmd_roe_sign(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_audit_verify(args: argparse.Namespace) -> int:
+    """Sprawdza integralność dziennika audytu i raportuje WYNIK ORAZ MIEJSCE.
+
+    Odpowiada na pytanie, które przy diagnozowaniu rozgałęzionego dziennika (Etap 18c)
+    trzeba było zadać jednorazowym skryptem: nie „czy coś jest nie tak", lecz „gdzie".
+
+    Raport świadomie NIE zawiera pola ``detail`` wpisów — może ono nieść ścieżki
+    i referencje kont, a wynik bywa wklejany do zgłoszeń i logów.
+
+    Args:
+        args: Argumenty wiersza poleceń (``--config``).
+
+    Returns:
+        0 — łańcuch spójny; 1 — wykryta niezgodność; 2 — błąd konfiguracji albo klucza.
+    """
+    from husarz.security.audit import otworz_do_wgladu  # noqa: PLC0415
+    from husarz.security.errors import AuditError  # noqa: PLC0415
+
+    try:
+        config = load_config(args.config)
+        dziennik = otworz_do_wgladu(
+            config.security,
+            secrets=_SchemeSecrets(magazyn_dostepny=config.security.secret_store.enabled),
+        )
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except AuditError as exc:
+        print(f"[!!] {exc}", file=sys.stderr)
+        return 2
+
+    audit = config.security.audit
+    if not audit.enabled:
+        print(
+            "Audyt jest WYŁĄCZONY (security.audit.enabled=false) — nie ma czego sprawdzać.",
+            flush=True,
+        )
+        return 0
+
+    pokolenia = len(audit.hmac_verify_keys) + (1 if audit.hmac_key_ref else 0)
+    print(f"Dziennik:  {audit.path} ({len(dziennik.entries)} wpis(ów))", flush=True)
+    print(f"Kotwica:   {dziennik.stan_kotwicy()}", flush=True)
+    print(
+        (
+            "Klucz HMAC: brak (goły SHA-256 — każdy z prawem zapisu może przeliczyć łańcuch)"
+            if not audit.hmac_key_ref
+            else f"Klucz HMAC: pokolenie '{audit.hmac_key_id or '(bez etykiety)'}', "
+            f"pokoleń łącznie: {pokolenia}"
+        ),
+        flush=True,
+    )
+
+    niezgodnosc = dziennik.pierwsza_niezgodnosc()
+    if niezgodnosc is None:
+        print("Wynik:     ŁAŃCUCH SPÓJNY", flush=True)
+        return 0
+
+    print(f"Wynik:     NIEZGODNOŚĆ ({niezgodnosc.rodzaj})", file=sys.stderr, flush=True)
+    if niezgodnosc.indeks >= 0:
+        print(
+            f"           wpis nr {niezgodnosc.indeks} — {niezgodnosc.action} "
+            f"(wykonał: {niezgodnosc.actor}, {niezgodnosc.timestamp})",
+            file=sys.stderr,
+        )
+    print(f"           {niezgodnosc.opis}", file=sys.stderr)
+    return 1
+
+
 def _cmd_roe_verify(args: argparse.Namespace) -> int:
     """Weryfikuje podpis wskazanego ROE i raportuje wynik (kod 0 = ważny)."""
     from husarz.security import RoeSignatureError  # noqa: PLC0415
@@ -970,6 +1038,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Otwórz konsolę w przeglądarce po starcie (UX launchera; tylko loopback).",
     )
     p_up.set_defaults(func=_cmd_up)
+
+    p_audit = sub.add_parser("audit", help="Operacje na dzienniku audytu.")
+    audit_sub = p_audit.add_subparsers(dest="audit_command", required=True)
+
+    p_audit_verify = audit_sub.add_parser(
+        "verify", help="Sprawdź integralność dziennika audytu (kod 0 = spójny)."
+    )
+    p_audit_verify.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_audit_verify.set_defaults(func=_cmd_audit_verify)
 
     p_roe = sub.add_parser("roe", help="Operacje na zleceniach ROE (podpis, weryfikacja).")
     roe_sub = p_roe.add_subparsers(dest="roe_command", required=True)

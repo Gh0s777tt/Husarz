@@ -54,6 +54,24 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18e — `husarz audit verify`)
+
+- **Weryfikacja dziennika audytu z wiersza poleceń.** Odpowiada nie na pytanie „czy coś jest
+  nie tak", lecz **gdzie**: podaje numer wpisu, znacznik czasu, akcję i RODZAJ niezgodności
+  (`plik`/`kotwica`/`ogniwo`/`skrot`/`pokolenie`/`nieznany_klucz`). Powstało, bo przy
+  diagnozowaniu rozgałęzionego dziennika projektu trzeba było napisać jednorazowy skrypt,
+  żeby ustalić, że pęknięcie jest na wpisie nr 261.
+- Kody wyjścia nadające się do crona: 0 spójny, 1 niezgodność, 2 błąd konfiguracji/klucza.
+- **Osobna ścieżka wglądu** (`otworz_do_wgladu`): `husarz up` odmawia startu na uszkodzonym
+  dzienniku i słusznie, bo buduje go DO PISANIA — narzędzie diagnostyczne ma uszkodzenie
+  POKAZAĆ. Dziennik, którego nie da się obejrzeć dokładnie wtedy, gdy coś jest z nim nie
+  tak, byłby bezużyteczny w jedynym momencie, który się liczy.
+- Raport świadomie **nie zawiera pola `detail`** wpisów: niesie ono ścieżki i referencje
+  kont, a wynik bywa wklejany do zgłoszeń i logów.
+- Komunikat przy rozgałęzieniu wprost nazywa najczęstszą przyczynę („dwa procesy piszące do
+  jednego pliku, a nie manipulacja"). Dziennik audytu, który melduje manipulację przy
+  zwykłej pomyłce, uczy operatora ignorować alarmy.
+
 ### Naprawione (przegląd adwersaryjny Etapu 18 — 33 zgłoszenia, 33 potwierdzone)
 
 - **REGRESJA wprowadzona przez naprawę wyścigu: odcięcie ogona było „prane".**
