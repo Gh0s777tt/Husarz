@@ -39,7 +39,7 @@ Kolejność jest rekomendacją, nie zobowiązaniem.
 | 4 | ~~Rotacja klucza HMAC audytu~~ — **zrobione** (Etap 18a) | Bezpieczeństwo | ✅ | M |
 | 5 | ~~Równoległa delegacja niezależnych kroków planu~~ — **zrobione** (Etap 18k) | Orkiestrator | ✅ | L |
 | 6 | ~~`husarz config explain`~~ — **zrobione** (Etap 18i) | Launcher | ✅ | S |
-| 7 | Strumieniowanie odpowiedzi (WebSocket) | API + konsola | 🟢 | L |
+| 7 | ~~Strumieniowanie odpowiedzi~~ — **zrobione** SSE, nie WebSocket (Etap 18l–m) | API | ✅ | L |
 | 8 | Chunkowanie dokumentów w RAG | Pamięć | 🟢 | L |
 | 9 | ~~`mkdocs --strict` i `black scripts` w CI~~ — **zrobione** (Etap 18) | Operacje | ✅ | S |
 | 10 | ~~Pola kosztu i opóźnienia w `ModelSpec`~~ + strategie — **zrobione** (Etap 18h) | Router | ✅ | S |

@@ -133,9 +133,21 @@ def test_config_validate(client: TestClient) -> None:
 
 
 def test_usage(client: TestClient) -> None:
+    """Monitor pokazuje limit z KONFIGURACJI, a nie zapamiętaną liczbę.
+
+    Test przypinał wcześniej literał 8192 — czyli dokładnie tę wartość, która czyniła
+    domyślny model czatu nieużywalnym (rezerwa równa oknu kontekstu, Etap 18n). Przypięcie
+    literału znaczy, że test broni KONKRETNEJ liczby zamiast właściwości, więc naprawa
+    konfiguracji wygląda jak regresja. Sprawdzamy teraz zgodność ze źródłem prawdy.
+    """
+    from husarz.config import load_config  # noqa: PLC0415
+
+    oczekiwany = load_config("./config").routing.cost_controls.max_tokens_per_request
+
     body = client.get("/api/usage").json()
+
     assert body["orchestrations"] == 0
-    assert body["max_tokens_per_request"] == 8192
+    assert body["max_tokens_per_request"] == oczekiwany
 
 
 def test_console_served(client: TestClient) -> None:

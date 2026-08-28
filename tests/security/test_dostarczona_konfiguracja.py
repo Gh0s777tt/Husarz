@@ -149,3 +149,55 @@ def test_zaden_plik_konfiguracji_nie_jest_OSIEROCONY(repo_config_dir: Path) -> N
         assert (
             repo_config_dir / podkatalog
         ).is_dir(), f"sekcja '{sekcja}' mapuje na katalog '{podkatalog}', którego nie ma"
+
+
+def test_limit_tokenow_NIE_zjada_calego_okna_kontekstu(repo_config_dir: Path) -> None:
+    """Dostarczona konfiguracja musi pozwalać na JAKIKOLWIEK czat.
+
+    **Skąd ten test.** `cost_controls.max_tokens_per_request` nie jest zwykłym sufitem, tylko
+    REZERWĄ: router odkłada tę liczbę na odpowiedź, zanim sprawdzi, czy prompt zmieści się
+    w oknie kontekstu. Dostarczony `routing.yaml` miał 8192 — dokładnie tyle, ile wynosi
+    `context_length` modeli `husarz-local` i `husarz-vision`. Rezerwa zabierała więc całe okno
+    i NIE MIEŚCIŁ SIĘ ŻADEN prompt, nawet jednowyrazowy.
+
+    Domyślny model czatu był przez to NIEUŻYWALNY, a wyglądało to niewinnie: silnik
+    odpowiadał, `husarz doctor` meldował OK, a każde żądanie kończyło się komunikatem
+    o oknie kontekstu. Nie wykrył tego żaden test, bo wszystkie sprawdzały warstwy OSOBNO —
+    ujawniło to dopiero uruchomienie czatu na żywo. To jest dokładnie ta lekcja, którą
+    CLAUDE.md nazywa „sprawdzaj SKUTEK, nie deklarację".
+    """
+    config = load_config(repo_config_dir)
+    limit = config.routing.cost_controls.max_tokens_per_request
+    assert limit is not None, "założenie testu: limit jest ustawiony"
+
+    ciasne = [
+        model_id
+        for model_id, spec in config.models.registry.items()
+        if spec.enabled and limit >= spec.context_length
+    ]
+
+    assert not ciasne, f"limit {limit} zabiera całe okno modelom: {ciasne}"
+
+
+def test_walidacja_ODRZUCA_limit_rowny_oknu(write_config) -> None:
+    """Kontrola pilnuje tego wprost, a nie tylko dostarczonej konfiguracji.
+
+    Bez niej test wyżej chroniłby wyłącznie plików w repozytorium, a operator mógłby
+    odtworzyć tę samą pułapkę u siebie — i tak samo jej nie zauważyć.
+    """
+    katalog = write_config(
+        {
+            "models.yaml": (
+                "default: m\nregistry:\n  m:\n    backend: mock\n    model: m\n"
+                "    context_length: 4096\n"
+            ),
+            "routing.yaml": "cost_controls:\n  max_tokens_per_request: 4096\n",
+        }
+    )
+
+    with pytest.raises(ConfigError) as blad:
+        load_config(katalog)
+
+    tresc = str(blad.value)
+    assert "REZERWOWANY na odpowiedź" in tresc, tresc
+    assert "m" in tresc, "komunikat musi nazwać model, którego dotyczy"

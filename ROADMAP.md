@@ -527,6 +527,12 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   fałszował. `AuditLog` miał blokadę wątkową, a trzymał głowę łańcucha w pamięci. Naprawa:
   blokada międzyprocesowa (`husarz.core.filelock`, wyprowadzona z magazynu sekretów) **oraz**
   ponowny odczyt pliku pod nią — sama blokada dawałaby fałszywe poczucie naprawy.
+- ⬜ **Rezerwa okna kontekstu jest MAKSYMALISTYCZNA** (ustalenie z Etapu 18n). Router odkłada
+  tyle tokenów, ile WOLNO wygenerować (`cost_controls.max_tokens_per_request`), a nie tyle,
+  ile model faktycznie wygeneruje. Przy oknie 8192 i limicie 2048 traci się czwartą część
+  okna na każdą rozmowę. Rozwiązaniem jest traktowanie limitu kosztowego jako SUFITU, a nie
+  prognozy — wymaga rozstrzygnięcia, skąd brać prognozę (osobne pole? heurystyka z długości
+  promptu?), więc nie jest to poprawka jednolinijkowa.
 - ⬜ **Trwałość zapisu dziennika nie jest zweryfikowana pomiarem** (luka z Etapu 18c).
   `fsync` jest wołany, ale skutku nie da się przetestować bez odcięcia zasilania w środku
   operacji; została kontrola strukturalna, opisana w docstringu jako słabsza.

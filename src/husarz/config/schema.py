@@ -1777,6 +1777,35 @@ class HusarzConfig(_StrictModel):
                     f"w konfiguracji, nie na rzeczywistości."
                 )
 
+        # 4c) Limit kosztu NIE MOŻE zjadać całego okna kontekstu.
+        #
+        # `cost_controls.max_tokens_per_request` jest górnym OGRANICZENIEM generacji, ale
+        # bramka budżetu okna traktuje je jako REZERWĘ na odpowiedź (`reserve_for_reply`).
+        # Gdy limit dorówna oknu modelu, rezerwa zjada je w całości i NIE MIEŚCI SIĘ ŻADEN
+        # prompt — nawet jednowyrazowy. Model wygląda przy tym na sprawny: silnik odpowiada,
+        # diagnoza melduje OK, a każde żądanie kończy się „prompt nie mieści się w oknie".
+        #
+        # Nie jest to hipoteza. Dostarczona konfiguracja miała dokładnie tę parę wartości
+        # (limit 8192, `husarz-local` z `context_length: 8192`), więc domyślny model czatu
+        # był NIEUŻYWALNY — i nie wykrył tego żaden test, bo wszystkie sprawdzały warstwy
+        # osobno. Ujawniło to dopiero uruchomienie czatu na żywo.
+        limit_tokenow = self.routing.cost_controls.max_tokens_per_request
+        if limit_tokenow is not None:
+            ciasne = sorted(
+                model_id
+                for model_id, spec in self.models.registry.items()
+                if spec.enabled and limit_tokenow >= spec.context_length
+            )
+            if ciasne:
+                errors.append(
+                    f"routing.cost_controls.max_tokens_per_request={limit_tokenow} jest "
+                    f"większe lub równe oknu kontekstu modeli: {', '.join(ciasne)}. Limit "
+                    f"jest REZERWOWANY na odpowiedź, więc na sam prompt nie zostaje nic — "
+                    f"każde żądanie do tych modeli odpadnie na bramce okna kontekstu, choć "
+                    f"silnik będzie odpowiadał, a diagnoza meldowała OK. Zmniejsz limit albo "
+                    f"podnieś `context_length` tam, gdzie model naprawdę ma większe okno."
+                )
+
         # 5) Profil airgap: brak egress i brak zdalnych endpointów modeli.
         if self.platform.profile is Profile.AIRGAP:
             if self.security.egress.default_policy is not EgressPolicy.DENY:

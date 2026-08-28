@@ -54,6 +54,24 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Naprawione (Etap 18n — dostarczona konfiguracja czyniła czat NIEUŻYWALNYM)
+
+- **`cost_controls.max_tokens_per_request: 8192` równało się `context_length` modeli
+  `husarz-local` i `husarz-vision`.** Limit nie jest zwykłym sufitem, tylko REZERWĄ: router
+  odkłada tę liczbę na odpowiedź, zanim sprawdzi, czy prompt zmieści się w oknie. Rezerwa
+  równa oknu zabierała je w całości, więc **nie mieścił się żaden prompt, nawet
+  jednowyrazowy** — domyślny model czatu był nieużywalny, i to od zawsze.
+- **Wyglądało to niewinnie**: silnik odpowiadał, `husarz doctor` meldował OK, a każde żądanie
+  kończyło się komunikatem o oknie kontekstu. Żaden test tego nie wykrył, bo wszystkie
+  sprawdzały warstwy OSOBNO. Ujawniło to dopiero uruchomienie czatu na żywo — dokładnie ta
+  lekcja, którą CLAUDE.md nazywa „sprawdzaj SKUTEK, nie deklarację".
+- Limit obniżony do **2048** (hojny sufit na odpowiedź czatu, zostawia 6144 tokeny na prompt).
+- **Walidacja krzyżowa odrzuca teraz taką parę wartości** i nazywa modele, których dotyczy —
+  żeby operator nie odtworzył tej pułapki u siebie i tak samo jej nie zauważył.
+- Test `test_usage` przypinał literał `8192`, czyli bronił KONKRETNEJ liczby zamiast
+  właściwości. Przez to naprawa konfiguracji wyglądała jak regresja. Sprawdza teraz zgodność
+  ze źródłem prawdy.
+
 ### Dodane (Etap 18m — `POST /api/chat/stream`)
 
 - **Endpoint strumieniujący odpowiedź czatu zdarzeniami SSE.** Uprawnienie, limit konta,

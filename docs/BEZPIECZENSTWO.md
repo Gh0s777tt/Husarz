@@ -3039,3 +3039,42 @@ czego nie dowodzi.
 silnikach — testy używają routera skryptowego, bez sieci. Zysk (albo strata) czasu przy
 wielu endpointach to pomiar, którego nie da się zrobić bez tego sprzętu; dlatego wartością
 domyślną jest wykonanie sekwencyjne.
+
+## Etap 18n — dostarczona konfiguracja czyniła czat NIEUŻYWALNYM
+
+**Jak to wyszło.** Nie przeglądem i nie testem, tylko uruchomieniem czatu na żywo przy
+weryfikacji strumieniowania. Każde żądanie do `husarz-local` — domyślnego modelu czatu —
+kończyło się komunikatem „prompt nie mieści się w oknie kontekstu", i to dla promptu
+jednowyrazowego.
+
+**Przyczyna: dwie wartości, każda z osobna rozsądna.**
+`cost_controls.max_tokens_per_request` nie jest zwykłym sufitem generacji — router odkłada tę
+liczbę jako REZERWĘ na odpowiedź, zanim sprawdzi, czy prompt zmieści się w oknie
+(`husarz.router.budget.reserve_for_reply`). Dostarczona konfiguracja miała limit `8192`,
+a `husarz-local` i `husarz-vision` mają `context_length: 8192`. Rezerwa zabierała więc całe
+okno i na prompt nie zostawało nic.
+
+**Dlaczego nikt tego nie zauważył — i to jest najważniejsza część tej notatki.** Objaw
+wyglądał niewinnie z każdej strony osobno:
+
+| Kontrola | Co pokazywała |
+|---|---|
+| `husarz doctor` | model dostępny u dostawcy — **OK** |
+| walidacja konfiguracji | obie wartości poprawne — **OK** |
+| testy jednostkowe routera | bramka okna działa poprawnie — **OK** |
+| testy konfiguracji | schemat przyjmuje wartości — **OK** |
+| `husarz eval` | routing kieruje agentów właściwie — **OK** |
+
+Każda warstwa była sprawdzona i każda była sprawna. Wada leżała w ICH ZŁOŻENIU, którego nie
+badał żaden test. To jest ten sam wzorzec, co w tabeli „sprawdzaj SKUTEK, nie deklarację"
+z CLAUDE.md — sześć wcześniejszych wad tej klasy przeszło przez komplet zielonych testów.
+
+**Naprawa dwutorowa.** Limit obniżony do 2048 (zostawia 6144 tokeny na prompt przy oknie
+8192). Osobno walidacja krzyżowa odrzuca teraz limit większy lub równy oknu KTÓREGOKOLWIEK
+włączonego modelu i nazywa te modele — bo sama poprawka pliku chroniłaby wyłącznie tego
+repozytorium, a operator odtworzyłby pułapkę u siebie i tak samo jej nie zauważył.
+
+**Czego to NIE naprawia.** Rezerwa jest nadal maksymalistyczna: odkładamy tyle, ile wolno
+wygenerować, a nie tyle, ile model faktycznie wygeneruje. Przy oknie 8192 i limicie 2048
+tracimy więc czwartą część okna na każdą rozmowę. Rozwiązaniem byłoby traktowanie limitu
+kosztowego jako sufitu, a nie prognozy — pozycja zapisana w ROADMAP.

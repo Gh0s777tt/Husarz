@@ -65,8 +65,22 @@ rules:
     prefer: [glm-main]
 
 # Kontrola kosztów i limitów (twarde limity egzekwowane przez router w Etapie 1).
+#
+# UWAGA na `max_tokens_per_request` — to nie jest zwykły sufit, tylko REZERWA. Router
+# odkłada tę liczbę tokenów na odpowiedź, sprawdzając, czy prompt zmieści się w oknie
+# kontekstu modelu (`husarz.router.budget`). Limit równy oknu zabiera je więc w całości
+# i NIE MIEŚCI SIĘ ŻADEN prompt, nawet jednowyrazowy.
+#
+# Stało tu wcześniej 8192, dokładnie tyle, ile wynosi `context_length` modeli
+# `husarz-local` i `husarz-vision` — przez co domyślny model czatu był NIEUŻYWALNY.
+# Wyglądało to niewinnie: silnik odpowiadał, `husarz doctor` meldował OK, a każde żądanie
+# kończyło się „prompt nie mieści się w oknie kontekstu". Wykryło to dopiero uruchomienie
+# czatu na żywo; od Etapu 18n taką parę wartości odrzuca walidacja krzyżowa.
+#
+# 2048 to hojny sufit na odpowiedź czatu (kilka ekranów tekstu), zostawiający 6144 tokeny
+# na prompt przy oknie 8192.
 cost_controls:
-  max_tokens_per_request: 8192
+  max_tokens_per_request: 2048
   max_requests_per_minute: 120
 
 # Włącz łańcuchy fallback zdefiniowane w models.yaml.
