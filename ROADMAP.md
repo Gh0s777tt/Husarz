@@ -3,6 +3,11 @@
 Realizacja etapami. Po KAŻDYM etapie: **testy → wpis do docs (+CHANGELOG) → commit**.
 Legenda: ✅ ukończone · 🚧 w toku · ⬜ zaplanowane.
 
+Ten plik jest **rejestrem zobowiązań** — co postanowiono i w jakim jest stanie.
+Szerszy przegląd tego, co w ogóle da się jeszcze zrobić, wraz z kosztem i konkretną
+blokadą każdej pozycji, mieszka w [docs/PLAN-ROZWOJU.md](docs/PLAN-ROZWOJU.md).
+Pozycja przechodzi stamtąd tutaj w chwili podjęcia decyzji o realizacji.
+
 ## ✅ Etap 0 — Szkielet + loader konfiguracji
 - ✅ Struktura katalogów, `pyproject`, lint (ruff), format (black), typy (mypy strict), pre-commit (gitleaks).
 - ✅ Loader konfiguracji z walidacją Pydantic i hierarchią nadpisań.

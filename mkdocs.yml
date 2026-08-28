@@ -79,6 +79,7 @@ markdown_extensions:
 
 nav:
   - Start: index.md
+  - Plan rozwoju: PLAN-ROZWOJU.md
   - Architektura i rdzeń:
       - Architektura: ARCHITEKTURA.md
       - Orkiestrator: ORKIESTRATOR.md

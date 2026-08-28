@@ -116,7 +116,8 @@ Szczegóły instalacji i uruchomienia: **[Launcher](LAUNCHER.md)** i **[Wdrożen
 | Model zagrożeń i niezmienniki | [Bezpieczeństwo](BEZPIECZENSTWO.md) |
 | Uruchamianie i wdrożenie | [Launcher](LAUNCHER.md) · [Wdrożenie](DEPLOY.md) · [API i konsola](API.md) |
 | Konta, sesje, integracje | [Konta i sesje](KONTA.md) · [Integracje Git](GIT.md) |
-| Decyzje projektowe | [ADR 0001–0021](adr/0001-uklad-repo.md) |
+| Co jeszcze przed nami | [Plan rozwoju](PLAN-ROZWOJU.md) |
+| Decyzje projektowe | [ADR 0001–0025](adr/0001-uklad-repo.md) |
 
 ## Wersja
 

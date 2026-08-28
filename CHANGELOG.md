@@ -5,6 +5,31 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (przegląd otwartych możliwości — `docs/PLAN-ROZWOJU.md`)
+
+- Nowy dokument zbiera **wszystko, co da się jeszcze zrobić** w rdzeniu AI (router,
+  orkiestrator, agenci, pętla narzędziowa, pamięć, ewaluacja) i w launcherze (CLI, diagnoza,
+  bootstrap, konsola, wdrożenie), z kosztem i konkretną blokadą każdej pozycji.
+- **Trzy rodzaje blokady rozdzielone jawnie**: brak blokady (czysta praca programistyczna),
+  decyzja operatora, brakujący zasób. Bez tego rozróżnienia lista otwartych pozycji sugeruje,
+  że wszystkie czekają na to samo — a czekają na rzeczy zupełnie różnej natury.
+- Podział ról z ROADMAP-em: ROADMAP jest **rejestrem zobowiązań**, nowy dokument **mapą
+  przestrzeni**. Pozycja przechodzi stamtąd tam w chwili decyzji o realizacji i znika ze
+  źródła, żeby nie powstała druga lista stanu.
+
+### Naprawione (sprostowania wykryte przy pisaniu przeglądu)
+
+- **CI sprawdza mniej niż bramki opisane w CLAUDE.md.** Pipeline nie uruchamia
+  `mkdocs build --strict` w ogóle, a `black` sprawdza `src tests` zamiast `src tests scripts`.
+  Martwy odnośnik w dokumentacji i źle sformatowany skrypt operatora przechodzą więc przez CI.
+  Ustalenie zapisane w przeglądzie; sama poprawka pipeline'u to osobny krok.
+- **Sprostowanie do pierwszej wersji tego przeglądu**: napisałem w niej, że interaktywnego PDF
+  nie ma. To była nieprawda i wykryło ją dopiero sprawdzenie `mkdocs.yml` przed commitem —
+  `mkdocs-print-site-plugin` generuje go z `docs/` (okładka, spis treści z odnośnikami), a
+  zależność stoi w `pyproject.toml`. Twierdzenie poprawione przed trafieniem do repozytorium.
+  Realną luką jest wyłącznie **wiki**: nie ma dla niej ani źródła w repo, ani opisanej procedury.
+- `docs/index.md` odsyłał do „ADR 0001–0021", podczas gdy w `docs/adr/` jest ich 25.
+
 ### Dodane (kontrola dostarczonej konfiguracji po sesji zmian w schemacie)
 
 - W tej sesji usunięto ze schematu **cztery pola** i dołożono **sześć odmów**. Po każdej
