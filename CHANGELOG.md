@@ -5,6 +5,27 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (kontrola dostarczonej konfiguracji po sesji zmian w schemacie)
+
+- W tej sesji usunięto ze schematu **cztery pola** i dołożono **sześć odmów**. Po każdej
+  takiej zmianie sprawdzałem ręcznie, czy dostarczona konfiguracja nadal się wczytuje.
+  Ten wpis zamienia rytuał w kontrolę — jeśli kolejna zmiana zepsuje `config/`, zestaw
+  zaczerwieni się od razu, a nie po pierwszym uruchomieniu u kogoś.
+- **Wszystkie trzy profile**, nie tylko domyślny: `prod` i `airgap` mają dodatkowe wymagania,
+  więc dostarczona konfiguracja mogła przestać się w nich mieścić bez żadnego sygnału
+  w `dev`, w którym pracuje się na co dzień.
+- **Odmowy obowiązują także w warstwie ENV.** To nie jest szczegół: w kontenerze nadpisywanie
+  konfiguracji ENV-em jest DROGĄ DOMYŚLNĄ (`deploy/k8s/configmap.yaml`), więc walidacja
+  działająca tylko dla YAML-a zostawiałaby obejście dokładnie tam, gdzie system pracuje
+  produkcyjnie. Zweryfikowane uruchomieniem dla czterech zmiennych.
+- **Żaden plik w `config/` nie może być OSIEROCONY.** Wykryte kontrolą nośności: usunięcie
+  jednego wpisu z mapy loadera nie psuło niczego widocznego — konfiguracja ładowała się
+  dalej z wartościami domyślnymi, a plik stawał się dekoracją. To ta sama klasa co pola bez
+  czytelnika, tylko o piętro wyżej: tam martwe było POLE, tu martwy bywa CAŁY PLIK.
+- Weryfikacja end-to-end po całej sesji: platforma startuje, `GET /api/health`,
+  `/api/config/summary` i `/api/doctor` odpowiadają, limit tempa działa (6× 200, potem 429),
+  a deklarowany silnik sandboxa zgadza się z tym, co trafia do `docker run`.
+
 ### Zmienione (deklarowany silnik sandboxa musi odpowiadać rzeczywistości)
 
 - **`security.sandbox.engine` nie sterował NICZYM.** `build_tools` zawsze buduje executor
