@@ -34,7 +34,7 @@ Kolejność jest rekomendacją, nie zobowiązaniem.
 | # | Pozycja | Obszar | Blokada | Koszt |
 |---|---|---|---|---|
 | 1 | ~~`husarz audit verify`~~ — **zrobione** (Etap 18e) | Launcher | ✅ | S |
-| 2 | Kubełek limitu tempa per `principal` | Bezpieczeństwo | 🟢 | M |
+| 2 | ~~Kubełek limitu tempa per `principal`~~ — **zrobione** (Etap 18f) | Bezpieczeństwo | ✅ | M |
 | 3 | Routing świadomy zdrowia modelu (wyłącznik bezpiecznikowy) | Router | 🟢 | M |
 | 4 | ~~Rotacja klucza HMAC audytu~~ — **zrobione** (Etap 18a) | Bezpieczeństwo | ✅ | M |
 | 5 | Równoległa delegacja niezależnych kroków planu | Orkiestrator | 🟢 | L |

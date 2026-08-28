@@ -886,13 +886,54 @@ class DiagnosticsConfig(_StrictModel):
     wywołań na minutę to jedno na dziesięć sekund — swobodnie wystarcza operatorowi, który
     coś poprawił i chce zobaczyć skutek, a nie pozwala robić z endpointu generatora ruchu.
 
+    **Limit globalny nie chroni użytkowników przed sobą.** Do Etapu 18f kubełek był jeden
+    na całą instalację, więc konto odpytujące w pętli potrafiło odebrać diagnozę
+    operatorowi — dokładnie w trakcie awarii, czyli wtedy, gdy jest ona potrzebna. ROADMAP
+    zapisała kubełek per wywołujący jako TWARDY WARUNEK WSTĘPNY rozszerzenia uprawnienia
+    ``diagnostics:read`` poza administratora; ten warunek jest teraz spełniony.
+
     Attributes:
-        max_requests_per_minute: Ile wywołań ``GET /api/doctor`` na minutę. ``None``
-            wyłącza limit — dopuszczalne świadomie (np. instalacja jednoosobowa na
-            loopbacku), ale to REZYGNACJA z zabezpieczenia, nie jego brak.
+        max_requests_per_minute: Ile wywołań ``GET /api/doctor`` na minutę w CAŁEJ
+            instalacji. ``None`` wyłącza limit — dopuszczalne świadomie (np. instalacja
+            jednoosobowa na loopbacku), ale to REZYGNACJA z zabezpieczenia, nie jego brak.
+        max_requests_per_minute_per_principal: Ile wywołań na minutę przypada na
+            POJEDYNCZEGO wywołującego. Musi być MNIEJSZE od limitu globalnego — przy
+            wartości równej albo większej kubełek globalny wyczerpywałby się pierwszy,
+            więc pole byłoby ozdobą bez skutku (to ta klasa wady, którą usuwał Etap 17m).
+            ``None`` wyłącza ten poziom i przywraca zachowanie sprzed Etapu 18f.
     """
 
     max_requests_per_minute: int | None = Field(default=6, ge=1)
+    max_requests_per_minute_per_principal: int | None = Field(default=3, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_limity(self) -> DiagnosticsConfig:
+        """Pilnuje, żeby limit per wywołujący miał w ogóle szansę zadziałać.
+
+        Raises:
+            ValueError: Gdy limit per wywołujący jest ustawiony bez limitu globalnego albo
+                nie jest od niego mniejszy.
+        """
+        na_osobe = self.max_requests_per_minute_per_principal
+        if na_osobe is None:
+            return self
+        globalny = self.max_requests_per_minute
+        if globalny is None:
+            raise ValueError(
+                "security.diagnostics.max_requests_per_minute_per_principal wymaga "
+                "ustawionego max_requests_per_minute. Limit per wywołujący bez limitu "
+                "globalnego chroni użytkowników przed sobą, ale nie chroni silników: "
+                "dziesięć kont po sześć żądań to nadal sześćdziesiąt zapytań."
+            )
+        if na_osobe >= globalny:
+            raise ValueError(
+                f"security.diagnostics.max_requests_per_minute_per_principal ({na_osobe}) "
+                f"musi być MNIEJSZE od max_requests_per_minute ({globalny}). Przy wartości "
+                f"równej albo większej kubełek globalny wyczerpuje się pierwszy, więc limit "
+                f"per wywołujący nie zmienia niczego — a pole wyglądające na działające "
+                f"i niedziałające jest gorsze od jego braku."
+            )
+        return self
 
 
 class SecurityConfig(_StrictModel):

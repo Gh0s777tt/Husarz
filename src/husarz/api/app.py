@@ -102,7 +102,7 @@ from husarz.router.errors import (
     RateLimitExceededError,
     RouterError,
 )
-from husarz.router.rate_limit import RateLimiter
+from husarz.router.rate_limit import RateLimiterPerPrincipal
 from husarz.router.selection import resolve_agent_model
 from husarz.runs import build_run_store_from_config
 from husarz.security.audit import AuditLog, build_audit_log
@@ -501,7 +501,10 @@ def create_app(
     # `POST /api/config/runtime` zerowałaby kubełek, więc nadpisanie konfiguracji stałoby się
     # sposobem na obejście limitu. `None` = operator świadomie zrezygnował.
     _limit_diagnozy = (
-        RateLimiter(config.security.diagnostics.max_requests_per_minute)
+        RateLimiterPerPrincipal(
+            config.security.diagnostics.max_requests_per_minute,
+            per_principal=config.security.diagnostics.max_requests_per_minute_per_principal,
+        )
         if config.security.diagnostics.max_requests_per_minute is not None
         else None
     )
@@ -718,7 +721,10 @@ def create_app(
         if _limit_diagnozy is not None:
             with _mutex_diagnozy:
                 try:
-                    _limit_diagnozy.acquire()
+                    # Etykieta wywołującego rozdziela kubełki. Przy wyłączonym
+                    # uwierzytelnianiu jest pusta i wszyscy dzielą jeden — poprawnie,
+                    # bo nie ma ich wtedy jak rozróżnić.
+                    _limit_diagnozy.acquire(_principal_ref(principal))
                 except RateLimitExceededError as exc:
                     raise HTTPException(
                         status_code=429,

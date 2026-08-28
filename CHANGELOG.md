@@ -54,6 +54,36 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18f — limit tempa diagnozy per wywołujący)
+
+- **`security.diagnostics.max_requests_per_minute_per_principal`** — osobny kubełek dla
+  każdego wywołującego obok wspólnego kubełka instalacji. Domyka warunek zapisany w ROADMAP
+  jako **twardy warunek wstępny** rozszerzenia uprawnienia `diagnostics:read` poza
+  administratora: do tej pory konto odpytujące w pętli odbierało diagnozę operatorowi —
+  w trakcie awarii, czyli dokładnie wtedy, gdy jest potrzebna.
+- **Oba poziomy są konieczne, żaden nie wystarcza sam.** Globalny chroni silniki, ale nie
+  chroni użytkowników przed sobą; per wywołujący chroni ich nawzajem, ale dziesięć kont po
+  sześć żądań to nadal sześćdziesiąt zapytań do silników.
+- **Kolejność sprawdzania jest mechanizmem**: najpierw kubełek wywołującego, potem globalny —
+  dzięki temu odmowy nadużywającego konta nie zjadają tokenów wspólnych. Przy odwrotnej
+  kolejności mechanizm broniłby wyłącznie na papierze.
+- Wartość per wywołujący **musi być mniejsza od globalnej**; odrzucają to dwie niezależne
+  kontrole. Dostarczona konfiguracja: 6/3 — żadne konto nie zabierze więcej niż połowy puli.
+- Komunikat 429 mówi, KTÓRY limit zadziałał — dla wywołującego to różnica między „poczekaj"
+  a „to nie ty".
+- Mapa kubełków ma twardy limit rozmiaru z usuwaniem najdawniej używanego (najbliższego
+  pełnemu), więc nie rośnie bez końca.
+- **Przy wyłączonym uwierzytelnianiu poziom per wywołujący jest pomijany.** Wszyscy są wtedy
+  dla systemu jedną osobą, więc kubełek nie daje żadnej izolacji, a obniżałby efektywny limit
+  instalacji jednoosobowej z 6 na 3. Wykryte uruchomieniem: sześć wywołań na loopbacku dawało
+  `200 200 200 429 429 429`.
+
+### Naprawione (wykryte przy okazji Etapu 18f)
+
+- **Test warstwy bezpieczeństwa budował konfigurację przez `model_copy(update=...)`**, który
+  OMIJA walidację — i tworzył stan niemożliwy w produkcji (limit globalny 1 przy per osobę 3).
+  To drugi raz, gdy ta konstrukcja ukryła w tym projekcie niepoprawną konfigurację.
+
 ### Dodane (Etap 18e — `husarz audit verify`)
 
 - **Weryfikacja dziennika audytu z wiersza poleceń.** Odpowiada nie na pytanie „czy coś jest

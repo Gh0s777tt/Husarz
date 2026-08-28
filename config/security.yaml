@@ -50,13 +50,32 @@ mtls:
 #
 # Domyślne 6/min to jedno wywołanie na dziesięć sekund: swobodnie wystarcza człowiekowi
 # klikającemu „Sprawdź ponownie", a nie pozwala robić z endpointu generatora ruchu.
-# UWAGA: limit jest GLOBALNY dla instalacji, nie per konto — konto odpytujące w pętli
-# potrafi odebrać diagnozę operatorowi w trakcie awarii.
 #
-# `null` wyłącza limit. To świadoma REZYGNACJA z zabezpieczenia (sensowna np. przy
-# instalacji jednoosobowej na loopbacku), nie jego brak.
+# Limit jest DWUPOZIOMOWY (Etap 18f) i oba poziomy są potrzebne:
+#
+#   max_requests_per_minute              — cała instalacja. Chroni silniki, do których
+#                                          Husarz się odzywa. Sam nie chroni użytkowników
+#                                          PRZED SOBĄ: do Etapu 18f konto odpytujące
+#                                          w pętli odbierało diagnozę operatorowi —
+#                                          dokładnie w trakcie awarii, czyli wtedy, gdy
+#                                          jest ona potrzebna.
+#   max_requests_per_minute_per_principal — pojedynczy wywołujący. Sam z kolei niczego nie
+#                                          chroni, gdy kont jest wiele: dziesięć kont po
+#                                          sześć żądań to nadal sześćdziesiąt zapytań.
+#
+# Wartość per wywołujący MUSI być mniejsza od globalnej — przy równej albo większej kubełek
+# globalny wyczerpuje się pierwszy, więc pole nie zmieniałoby nic. Walidacja to odrzuca.
+#
+# Ustawienie 6/3 znaczy: żadne pojedyncze konto nie zabierze więcej niż połowy budżetu
+# instalacji. To jest twardy warunek wstępny rozszerzenia uprawnienia `diagnostics:read`
+# poza administratora (patrz ROADMAP i docs/BEZPIECZENSTWO.md).
+#
+# `null` w pierwszym polu wyłącza limit CAŁKOWICIE — świadoma REZYGNACJA z zabezpieczenia
+# (sensowna np. przy instalacji jednoosobowej na loopbacku), nie jego brak.
+# `null` w drugim przywraca zachowanie sprzed Etapu 18f (jeden kubełek dla wszystkich).
 diagnostics:
   max_requests_per_minute: 6
+  max_requests_per_minute_per_principal: 3
 
 auth:
   oidc_enabled: false        # włącz w prod (pełny przepływ tożsamości — Etap 6)

@@ -359,11 +359,18 @@ Pozycja przechodzi stamtąd tutaj w chwili podjęcia decyzji o realizacji.
 - ✅ **Waga ustalenia widoczna w obu nośnikach** — terminal: `[!!]` blokujący, `[! ]`
   ostrzeżenie; konsola: czerwone ✕ zarezerwowane dla blokującego, bursztynowe `!` dla
   ostrzeżenia. Poprawione NARAZ, z testem pilnującym, że oba odróżniają te same przypadki.
-- ⬜ **Kubełek limitu per `principal` — TWARDY WARUNEK WSTĘPNY dla rozszerzenia
-  `diagnostics:read`.** Limit jest dziś globalny, więc konto podglądowe odpytujące w pętli
-  odbiera diagnozę operatorowi w trakcie awarii. Wymaga też rezerwy (albo osobnego, wyższego
-  limitu) dla `operator`/`admin`. Ustalone panelem oceniającym decyzję o rolach —
-  patrz `docs/BEZPIECZENSTWO.md`, Etap 17l.
+- ✅ **Kubełek limitu per `principal`** (Etap 18f) — `security.diagnostics`
+  `.max_requests_per_minute_per_principal`, sprawdzany PRZED globalnym, żeby odmowy
+  nadużywającego konta nie zjadały tokenów wspólnych. Dostarczona konfiguracja 6/3.
+  Weryfikacja: `docs/BEZPIECZENSTWO.md`, Etap 18f.
+- ⬜ **Rezerwa limitu dla ról `operator`/`admin`** — pozostała część powyższej pozycji, NIE
+  zrealizowana. Dziś wszyscy wywołujący mają identyczny przydział; przy komplecie kont
+  podglądowych odpytujących równolegle operator nadal konkuruje z nimi o kubełek GLOBALNY.
+  Wymaga limitu zależnego od roli, czyli decyzji, o ile role uprzywilejowane mają być
+  „ważniejsze" — a to jest osobne rozstrzygnięcie, nie szczegół implementacyjny.
+- ⬜ **Sama decyzja o rozszerzeniu `diagnostics:read`** poza administratora pozostaje
+  otwarta. Warunek wstępny jest spełniony, ale panel z Etapu 17l odrzucił rozszerzenie
+  z KILKU powodów, nie tylko z powodu limitu.
 - ⬜ **Zawężenie ładunku odpowiedzi `GET /api/doctor`** (nie CLI): pełne endpointy i ścieżki
   bezwzględne są potrzebne w terminalu, ale w odpowiedzi HTTP mogłyby być skracane (sam host,
   logiczna nazwa katalogu). Obniżyłoby stawkę dyskusji o rolach i uczyniło przyszłą rolę

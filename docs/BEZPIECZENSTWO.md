@@ -2291,9 +2291,11 @@ pierwszym uruchomieniu, bo porównywał pozycję z PIERWSZYM wystąpieniem `<p c
 które należy do zupełnie innej gałęzi (błąd sieci na górze funkcji) — zawężony do właściwego
 bloku.
 
-**Ograniczenie — wprost.** Limit jest GLOBALNY dla instalacji, nie per wywołujący. Przy
-kilku operatorach jeden może wyczerpać pulę drugiemu. Limit per konto wymagałby wiązania
-kubełka z `principal`, co ma sens dopiero przy instalacji wieloosobowej — zapisane w ROADMAP.
+**Ograniczenie — wprost.** *(Nieaktualne od Etapu 18f — patrz niżej. Zdanie zostaje, bo
+notatka weryfikacyjna opisuje stan z chwili badania, a nie stan bieżący.)* Limit jest
+GLOBALNY dla instalacji, nie per wywołujący. Przy kilku operatorach jeden może wyczerpać
+pulę drugiemu. Limit per konto wymagałby wiązania kubełka z `principal`, co ma sens dopiero
+przy instalacji wieloosobowej — zapisane w ROADMAP.
 
 ## Etap 17l — sprostowanie: limit tempa NIE był przesłanką do rozszerzenia kręgu ról
 
@@ -2900,3 +2902,57 @@ podejście i każda wskazywała na inny błąd w TEŚCIE, nie w kodzie:
 
 Mutacja usuwająca limit czasu blokady **zawiesiła** przebieg testów — co jest najdobitniejszą
 możliwą czerwienią, bo zawieszenie jest dokładnie tym, przed czym limit broni.
+
+## Etap 18f — limit tempa diagnozy per wywołujący
+
+**Co domyka.** Panel sędziowski z Etapu 17l ocenił rozszerzenie uprawnienia
+`diagnostics:read` poza administratora na 4,7/10 i uznał je za NIEBEZPIECZNE, wskazując
+konkretną przyczynę: kubełek limitu był jeden na całą instalację. Konto odpytujące w pętli
+odbierało więc diagnozę operatorowi — w trakcie awarii, czyli dokładnie wtedy, gdy jest
+potrzebna. ROADMAP zapisała kubełek per wywołujący jako **twardy warunek wstępny**. Warunek
+jest spełniony; sama decyzja o rozszerzeniu roli pozostaje otwarta i osobna.
+
+**Dlaczego oba poziomy, a nie jeden.** To nie jest nadmiarowość — każdy poziom broni przed
+czymś innym, a każdy z osobna ma dziurę:
+
+| Poziom | Chroni przed | Czego NIE daje sam |
+|---|---|---|
+| globalny (`max_requests_per_minute`) | zalaniem silników, do których Husarz się odzywa | jedno konto nadal zabiera pulę wszystkim |
+| per wywołujący (`..._per_principal`) | odebraniem diagnozy przez jedno konto | dziesięć kont po sześć żądań to nadal sześćdziesiąt zapytań |
+
+**Kolejność sprawdzania jest mechanizmem, nie kosmetyką.** Najpierw kubełek wywołującego,
+potem globalny. Dzięki temu żądania konta, które przekroczyło swój przydział, NIE zjadają
+tokenów wspólnych. Przy odwrotnej kolejności nadużywające konto odbierałoby budżet reszcie
+mimo własnych odmów — mechanizm broniłby wyłącznie na papierze. Sprawdzone mutacją:
+odwrócenie kolejności czerwieni test.
+
+**Wartość per wywołujący musi być MNIEJSZA od globalnej.** Przy równej albo większej kubełek
+globalny wyczerpuje się pierwszy, więc pole nie zmienia niczego. Odrzucają to dwie niezależne
+kontrole (walidator schematu i konstruktor ogranicznika), bo pole wyglądające na działające
+i niedziałające jest tą klasą wady, którą usuwał Etap 17m. Dostarczona konfiguracja: 6/3 —
+żadne pojedyncze konto nie zabierze więcej niż połowy budżetu instalacji.
+
+**Ograniczenie pamięci.** Mapa wywołujący → kubełek ma twardy limit rozmiaru (1024). Po jego
+przekroczeniu usuwany jest kubełek najdawniej używany, czyli najbliższy pełnemu — jego
+usunięcie zmienia zachowanie najmniej. Osłabia to limit dla jednego wywołującego, ale nie
+pozwala mapie rosnąć bez końca.
+
+**Wykryte uruchomieniem, nie rozumowaniem.** Pierwsza wersja stosowała kubełek per
+wywołujący ZAWSZE. Na instalacji bez uwierzytelniania sześć kolejnych wywołań
+`GET /api/doctor` dało `200 200 200 429 429 429` — czyli efektywny limit spadł z 6 na 3,
+choć izolacji nie przybyło ani trochę: bez uwierzytelnienia wszyscy wywołujący są dla
+systemu jedną osobą. Pusta etykieta pomija więc ten poziom. To czysta strata zamieniona
+w brak zmiany, a nie kompromis.
+
+**Czego NIE zweryfikowano.** Zachowania przy uwierzytelnianiu OIDC — dziś odrzucanym przy
+starcie (Etap 6). Etykieta wywołującego pochodzi z `_principal_ref`, więc mechanizm nie
+zależy od sposobu uwierzytelnienia, ale ścieżka OIDC nie była uruchomiona.
+
+**Nośność.** Sześć mutacji, wszystkie czerwienią testy: wyłączenie kubełka per osobę,
+ignorowanie etykiety (wszyscy w jednym kubełku), odwrócenie kolejności, brak limitu rozmiaru
+mapy oraz obie kontrole odrzucające limit per osobę większy od globalnego.
+
+**Wykryte przy okazji.** Test warstwy bezpieczeństwa (`test_doctor_api.py`) budował
+konfigurację przez `model_copy(update=...)`, który OMIJA walidację — i produkował stan
+niemożliwy w produkcji (limit globalny 1 przy per osobę 3). Poprawiony na budowę wprost.
+To już drugi raz, gdy `model_copy(update=...)` w tym projekcie ukrył niepoprawną konfigurację.

@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 
 from husarz.api import create_app
 from husarz.config import load_config
+from husarz.config.schema import DiagnosticsConfig
 from husarz.security import AuditLog
 
 pytestmark = pytest.mark.security
@@ -245,19 +246,34 @@ class _SondaLiczaca(_SondaZObiemaRolami):
         return super().modele_u_dostawcy(endpoint)
 
 
-def _app_z_limitem(config_dir: Path, limit: int | None, sonda: object) -> object:
+def _app_z_limitem(
+    config_dir: Path, limit: int | None, sonda: object, *, na_osobe: int | None = None
+) -> object:
+    """Buduje aplikację z podanym limitem tempa diagnozy.
+
+    `DiagnosticsConfig` budujemy WPROST, a nie przez `model_copy(update=...)`, bo ten
+    drugi omija walidację. Kosztowało to już raz: gdy limit per wywołujący dostał wartość
+    domyślną, helper produkował konfigurację (globalny 1, per osobę 3), której walidator
+    nie dopuszcza — i wywracał się dopiero w konstruktorze ogranicznika. Test warstwy
+    bezpieczeństwa nie powinien tworzyć stanów niemożliwych w produkcji.
+
+    Args:
+        config_dir: Katalog konfiguracji.
+        limit: Limit globalny; ``None`` wyłącza ograniczanie.
+        sonda: Podstawiona sonda diagnozy.
+        na_osobe: Limit per wywołujący; ``None`` wyłącza ten poziom.
+
+    Returns:
+        Gotowa aplikacja.
+    """
     config = load_config(config_dir)
+    diagnostyka = DiagnosticsConfig(
+        max_requests_per_minute=limit,
+        max_requests_per_minute_per_principal=na_osobe,
+    )
     return create_app(
         config.model_copy(
-            update={
-                "security": config.security.model_copy(
-                    update={
-                        "diagnostics": config.security.diagnostics.model_copy(
-                            update={"max_requests_per_minute": limit}
-                        )
-                    }
-                )
-            }
+            update={"security": config.security.model_copy(update={"diagnostics": diagnostyka})}
         ),
         config_dir=config_dir,
         audit=AuditLog(),
