@@ -489,7 +489,10 @@ def _cmd_bootstrap(args: argparse.Namespace) -> int:
 
     from husarz.security.audit import build_audit_log  # noqa: PLC0415
 
-    audyt = build_audit_log(config.security)
+    audyt = build_audit_log(
+        config.security,
+        secrets=_SchemeSecrets(magazyn_dostepny=config.security.secret_store.enabled),
+    )
 
     braki = brakujace_modele(config, sonda=SondaSystemowa(config))
     if not braki:

@@ -400,7 +400,10 @@ def create_app(
             status_code=503,
         )
 
-    audit_log = audit if audit is not None else build_audit_log(config.security)
+    # Dostawca sekretów przewleczony do audytu: bez niego `audit.hmac_key_ref` byłby
+    # nierozwiązywalny, a fabryka fail-closed odmówiłaby startu (celowo — patrz
+    # `build_audit_log`). To ta sama pomyłka, którą naprawiono w `_router_factory`.
+    audit_log = audit if audit is not None else build_audit_log(config.security, secrets=secrets)
     role = api_role if api_role is not None else config.security.auth.api_role
     authz = rbac if rbac is not None else Rbac()
 

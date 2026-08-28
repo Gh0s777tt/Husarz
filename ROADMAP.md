@@ -480,11 +480,22 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   długości. Ograniczenie zapisane: kto ma zapis do katalogu, ma go też do kotwicy —
   prawdziwym domknięciem jest `hmac_key` spoza systemu plików (pozycja niżej).
   Docs: `docs/BEZPIECZENSTWO.md`, Etap 17n.
-- ⬜ **`hmac_key` dziennika audytu jest nieosiągalny z konfiguracji** — docstring `AuditLog`
-  zaleca go w produkcji, a `AuditConfig` nie ma pola na klucz. Bez niego przekucie całego
-  łańcucha jest trywialne dla kogoś z prawem zapisu do pliku. Dodać `audit.hmac_key_ref`
-  (wyłącznie REFERENCJA), z obsługą zgodności wstecz: włączenie unieważni `verify()` na
-  dzienniku sprzed zmiany.
+- ✅ **`security.audit.hmac_key_ref`** — klucz HMAC osiągalny z konfiguracji (wyłącznie
+  referencja ZEWNĘTRZNA; `husarz:` zabroniony, bo to zamknięty krąg: klucz integralności
+  audytu nie może pochodzić z magazynu należącego do pilnowanego systemu). Zgodność wstecz
+  rozwiązana fail-closed: dziennik nieweryfikujący się kluczem blokuje start z komunikatem,
+  bo nie da się odróżnić „plik sprzed HMAC" od „ktoś przepisał historię".
+  Docs: `docs/BEZPIECZENSTWO.md`, Etap 17o.
+- ⬜ **Rotacja klucza HMAC audytu** — dziś zmiana klucza zachowuje się jak włączenie go po
+  raz pierwszy (odmowa startu, konieczna archiwizacja). Bezszwowa rotacja wymaga
+  wersjonowania klucza we wpisach.
+- ⬜ **Fail-closed przy uszkodzonym łańcuchu także BEZ klucza HMAC** — dziś uszkodzenie jest
+  widoczne (`verified: false`), ale nie blokuje startu, więc Husarz dopisuje do zepsutego
+  łańcucha. Zmiana dotknęłaby domyślnej ścieżki wszystkich instalacji, więc jest osobną
+  decyzją.
+- ⬜ **Usunięcie CAŁEGO pliku dziennika wraz z kotwicą nie zostawia śladu w samym Husarzu.**
+  Wykrycie wymaga nadzoru zewnętrznego (kopia poza maszyną, wysyłka do systemu zbierającego)
+  — a to wysyłanie danych, więc wyłącznie za zgodą operatora i poza domyślną konfiguracją.
 - ⬜ **`SandboxError` łamie kontrakt `ToolDispatcher.dispatch`** — docstring modułu deklaruje
   „NIGDY wyjątek", a źle skonfigurowany sandbox (`image: null`) wywraca pętlę narzędziową
   zamiast zwrócić `ToolResult(ok=False)`. Zachowanie jest fail-closed, ale niezgodne

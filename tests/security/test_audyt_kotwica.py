@@ -129,3 +129,116 @@ def test_build_audit_log_zaklada_kotwice_obok_dziennika(tmp_path: Path) -> None:
     assert log.anchor_path is not None
     assert log.anchor_path.is_file(), "fabryka nie założyła kotwicy"
     assert log.anchor_path.parent == sciezka.parent
+
+
+# ------------------------------------------------ klucz HMAC: domknięcie przekucia łańcucha
+
+
+class _Sekrety:
+    """Dostawca sekretów o umówionej referencji."""
+
+    def __init__(self, klucz: str | None = "tajny-klucz-audytu") -> None:
+        self._klucz = klucz
+
+    def resolve(self, ref: str) -> str | None:
+        """Zwraca klucz dla `env:KLUCZ`, w przeciwnym razie None."""
+        return self._klucz if ref == "env:KLUCZ" else None
+
+
+def _konfiguracja(sciezka: Path, *, ref: str | None = "env:KLUCZ"):  # noqa: ANN202
+    from husarz.config.schema import AuditConfig, SecurityConfig
+
+    return SecurityConfig(audit=AuditConfig(enabled=True, path=sciezka, hmac_key_ref=ref))
+
+
+def test_przekucie_calego_lancucha_bez_klucza_jest_WYKRYWANE(tmp_path: Path) -> None:
+    """Luka, której kotwica z założenia nie zamyka.
+
+    Kto ma prawo zapisu do pliku, może przeliczyć goły SHA-256 od nowa i podmienić CAŁĄ
+    historię — łańcuch będzie wtedy wewnętrznie spójny, a kotwicę wystarczy nadpisać.
+    Klucz HMAC trzymany POZA systemem plików czyni to niewykonalne.
+    """
+    from husarz.security.audit import build_audit_log
+    from husarz.security.errors import AuditError
+
+    sciezka = tmp_path / "audit.log"
+    cfg = _konfiguracja(sciezka)
+    log = build_audit_log(cfg, secrets=_Sekrety())
+    for i in range(3):
+        log.record("api", f"akcja-{i}", {"i": i})
+    assert log.verify() is True, "założenie testu"
+
+    # Napastnik BEZ klucza przepisuje dziennik i kotwicę od zera.
+    sciezka.unlink()
+    (tmp_path / "audit.log.kotwica").unlink()
+    podrobiony = AuditLog(path=sciezka, anchor_path=tmp_path / "audit.log.kotwica")
+    for i in range(3):
+        podrobiony.record("api", f"PODMIENIONE-{i}", {"i": i})
+
+    assert (
+        AuditLog.load(sciezka).verify() is True
+    ), "podrobiony łańcuch JEST wewnętrznie spójny — na tym polega ta droga ataku"
+    with pytest.raises(AuditError, match="NIE weryfikuje się kluczem"):
+        build_audit_log(cfg, secrets=_Sekrety())
+
+
+def test_brak_dostawcy_sekretow_to_ODMOWA_a_nie_cicha_praca_bez_klucza(tmp_path: Path) -> None:
+    """Cicha praca bez klucza byłaby najgorszym wyjściem.
+
+    Operator, który skonfigurował `hmac_key_ref`, ma prawo sądzić, że dziennik jest chroniony.
+    Milczące przejście w tryb bez klucza zamieniłoby zabezpieczenie w jego pozór.
+    """
+    from husarz.security.audit import build_audit_log
+    from husarz.security.errors import AuditError
+
+    with pytest.raises(AuditError, match="nie przekazano dostawcy"):
+        build_audit_log(_konfiguracja(tmp_path / "audit.log"), secrets=None)
+
+
+def test_nierozwiazywalna_referencja_to_ODMOWA(tmp_path: Path) -> None:
+    """Ta sama zasada: brak materiału pod referencją nie może degradować cicho."""
+    from husarz.security.audit import build_audit_log
+    from husarz.security.errors import AuditError
+
+    with pytest.raises(AuditError, match="Nie udało się rozwiązać klucza"):
+        build_audit_log(_konfiguracja(tmp_path / "audit.log"), secrets=_Sekrety(klucz=None))
+
+
+def test_bez_klucza_uszkodzony_lancuch_NIE_blokuje_startu(tmp_path: Path) -> None:
+    """Świadome rozróżnienie, nie przeoczenie.
+
+    Skonfigurowanie klucza jest deklaracją „integralność tego dziennika jest blokująca".
+    Bez klucza dziennik pozostaje doradczy: uszkodzenie widać jako `verified: false`
+    w `GET /api/audit`, ale start się nie wywraca. Zmiana tego byłaby osobną decyzją
+    dotykającą domyślnej ścieżki wszystkich instalacji.
+    """
+    from husarz.security.audit import build_audit_log
+
+    sciezka = tmp_path / "audit.log"
+    log = build_audit_log(_konfiguracja(sciezka, ref=None))
+    log.record("api", "a", {})
+    linie = sciezka.read_text(encoding="utf-8").splitlines()
+    sciezka.write_text(linie[0].replace('"a"', '"PODMIENIONE"') + "\n", encoding="utf-8")
+
+    odtworzony = build_audit_log(_konfiguracja(sciezka, ref=None))
+
+    assert odtworzony.verify() is False, "uszkodzenie ma być WIDOCZNE"
+
+
+def test_klucz_z_magazynu_husarza_jest_ZABRONIONY() -> None:
+    """Zamknięty krąg: klucz integralności audytu nie może pochodzić z magazynu,
+    który należy do systemu pilnowanego przez ten audyt."""
+    from husarz.config.schema import AuditConfig
+
+    with pytest.raises(ValueError, match="ZEWNĘTRZNEGO"):
+        AuditConfig(hmac_key_ref="husarz:klucz-audytu")
+
+    assert AuditConfig(hmac_key_ref="env:KLUCZ").hmac_key_ref == "env:KLUCZ"
+
+
+def test_material_klucza_w_configu_jest_ZABRONIONY() -> None:
+    """Niezmiennik projektu: konfiguracja nie zawiera materiału, tylko referencje."""
+    from husarz.config.schema import AuditConfig
+
+    with pytest.raises(ValueError, match="referencją do sekretu"):
+        AuditConfig(hmac_key_ref="to nie jest referencja")

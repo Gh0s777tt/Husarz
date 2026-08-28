@@ -77,8 +77,24 @@ auth:
 audit:
   enabled: true
   path: ./audit/audit.log
+  # Bramka PROFILU: prod/airgap nie wystartują z `false`. Nie ustawia uprawnień pliku —
+  # niemodyfikowalność jest własnością konstrukcji dziennika, nie tego przełącznika.
   immutable: true
-  hash_chain: true           # łańcuch skrótów (wykrywanie manipulacji)
+  hash_chain: true           # zaszłość: łańcuch skrótów działa ZAWSZE, pole nic nie przełącza
+  #
+  # KLUCZ HMAC — zalecany w produkcji, wyłącznie jako REFERENCJA (env:/file:/vault:/sops:).
+  # Bez niego łańcuch to goły SHA-256: kto ma prawo zapisu do pliku, może przeliczyć go od
+  # nowa i podmienić CAŁĄ historię tak, że weryfikacja niczego nie zauważy (kotwica obok
+  # dziennika podnosi poprzeczkę, ale tej drogi nie zamyka). Z kluczem trzymanym POZA
+  # systemem plików przekucie łańcucha staje się niewykonalne bez tego klucza.
+  #
+  # Schemat `husarz:` jest tu ZABRONIONY: klucz integralności audytu nie może pochodzić
+  # z magazynu należącego do systemu, którego dziennik ma pilnować.
+  #
+  # UWAGA przy włączaniu: istniejący dziennik NIE zweryfikuje się nowym kluczem, a Husarz
+  # odmówi wtedy startu — celowo, bo nie da się odróżnić „plik sprzed HMAC" od „ktoś bez
+  # klucza przepisał historię". Zarchiwizuj stary dziennik razem z jego `.kotwica`.
+  hmac_key_ref: null
 
 encryption:
   at_rest: true

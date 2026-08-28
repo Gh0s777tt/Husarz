@@ -522,12 +522,56 @@ class AuthConfig(_StrictModel):
 
 
 class AuditConfig(_StrictModel):
-    """Niemodyfikowalny dziennik audytu."""
+    """Dopisujący dziennik audytu z łańcuchem skrótów.
+
+    Nazwa „niemodyfikowalny" bywała w tym projekcie używana bez zastrzeżenia i była
+    nieprecyzyjna: dziennik jest **tamper-evident**, nie niemodyfikowalny. Edycja wpisu
+    jest wykrywana przez łańcuch, usunięcie końcówki — przez kotwicę (Etap 17n), a przed
+    kimś, kto ma prawo zapisu i chce przekuć CAŁY łańcuch, chroni dopiero ``hmac_key_ref``.
+
+    Attributes:
+        enabled: Czy dziennik działa. W profilach prod/airgap nie da się wyłączyć.
+        path: Ścieżka pliku JSONL. Obok powstaje kotwica (``<path>.kotwica``).
+        immutable: Bramka PROFILU — prod/airgap nie wystartują z ``false``. Nie ustawia
+            uprawnień pliku ani flag systemowych: niemodyfikowalność jest własnością
+            konstrukcji dziennika, nie tego przełącznika.
+        hash_chain: Łańcuch skrótów. Działa ZAWSZE — pole jest zaszłością i nic nie
+            przełącza (sprawdzone uruchomieniem).
+        hmac_key_ref: **Referencja** do klucza HMAC (nigdy sam klucz). Bez niego łańcuch
+            to goły SHA-256: każdy, kto ma prawo zapisu do pliku, może przeliczyć go od
+            nowa i podmienić historię tak, że ``verify()`` niczego nie zauważy. Z kluczem
+            trzymanym POZA systemem plików staje się to niewykonalne bez tego klucza.
+    """
 
     enabled: bool = True
     path: Path = Path("./audit/audit.log")
     immutable: bool = True
     hash_chain: bool = True  # łańcuch skrótów (tamper-evidence)
+    hmac_key_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_hmac_ref(self) -> AuditConfig:
+        """Pilnuje, żeby w konfiguracji była REFERENCJA, nie materiał klucza.
+
+        Schematy ZEWNĘTRZNE tylko: klucz integralności audytu nie może pochodzić
+        z zapisywalnego magazynu Husarza, bo ten magazyn jest częścią systemu, którego
+        dziennik ma pilnować.
+
+        Raises:
+            ValueError: Gdy podano materiał zamiast referencji albo schemat wewnętrzny.
+        """
+        if self.hmac_key_ref is None:
+            return self
+        wartosc = self.hmac_key_ref.strip()
+        if not wartosc.startswith(_EXTERNAL_REF_SCHEMES):
+            raise ValueError(
+                "security.audit.hmac_key_ref musi być referencją do sekretu ZEWNĘTRZNEGO "
+                "(env:/file:/vault:/sops:), a nie samym materiałem klucza. Schemat 'husarz:' "
+                "jest tu zabroniony: klucz integralności audytu nie może pochodzić z magazynu "
+                "należącego do systemu, którego dziennik ma pilnować."
+            )
+        object.__setattr__(self, "hmac_key_ref", wartosc)
+        return self
 
 
 class EncryptionConfig(_StrictModel):

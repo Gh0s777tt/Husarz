@@ -5,6 +5,27 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (audyt: klucz HMAC domyka przekucie łańcucha)
+
+- **`security.audit.hmac_key_ref`.** Docstring `AuditLog` zalecał klucz HMAC „w produkcji"
+  od dawna, ale `AuditConfig` nie miało pola na klucz, a `build_audit_log` go nie przekazywało
+  — **zalecenie było nieosiągalne z konfiguracji**. Rada, której nie da się wykonać, jest
+  gorsza niż jej brak.
+- Kotwica (poprzedni wpis) wykrywa usunięcie wpisów; **nie wykrywa przekucia całego łańcucha**.
+  Kto ma prawo zapisu, może przeliczyć goły SHA-256 od nowa i nadpisać kotwicę. Odtworzone:
+  podrobiony dziennik jest wewnętrznie spójny, a mimo to start z kluczem zostaje odmówiony.
+- **Wyłącznie referencja ZEWNĘTRZNA** (`env:`/`file:`/`vault:`/`sops:`). Schemat `husarz:`
+  zabroniony: klucz integralności audytu nie może pochodzić z magazynu należącego do systemu,
+  którego dziennik ma pilnować.
+- **Start fail-closed przy włączonym HMAC**: dziennik nieweryfikujący się kluczem blokuje
+  uruchomienie, bo nie da się odróżnić „plik sprzed HMAC" od „ktoś bez klucza przepisał
+  historię". Komunikat podaje wyjście: zarchiwizować stary dziennik wraz z kotwicą.
+- **Brak dostawcy sekretów albo nierozwiązywalna referencja → odmowa, nie cicha praca.**
+  Ciche przejście w tryb bez klucza zamieniłoby zabezpieczenie w jego pozór.
+- Bez klucza zachowanie BEZ ZMIAN — uszkodzenie widać jako `verified: false`, start się nie
+  wywraca. Świadome rozróżnienie: konfiguracja klucza jest deklaracją „integralność jest
+  blokująca".
+
 ### Poprawione (audyt: odcięcie ogona przestało być niewykrywalne)
 
 - **Łańcuch skrótów wykrywał EDYCJĘ wpisu, ale nie USUNIĘCIE końcówki.** Pozostały prefiks

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from husarz.config.schema import SecurityConfig
+from husarz.config.secrets import SecretsProvider
 from husarz.security.errors import AuditError
 
 GENESIS_HASH = "0" * 64
@@ -303,19 +304,54 @@ class AuditLog:
             raise AuditError(f"Nie można dopisać do audytu: {exc}") from exc
 
 
-def build_audit_log(security: SecurityConfig) -> AuditLog:
+def build_audit_log(
+    security: SecurityConfig, *, secrets: SecretsProvider | None = None
+) -> AuditLog:
     """Buduje dziennik audytu z konfiguracji (ścieżka z ``security.audit``).
 
     Gdy plik już istnieje, odtwarza z niego łańcuch — dopiski po restarcie procesu
     pozostają ciągłe (bez fałszywego genesis w środku pliku).
+
+    **Klucz HMAC (``audit.hmac_key_ref``) zmienia charakter dziennika.** Bez niego łańcuch
+    to goły SHA-256: kto ma prawo zapisu do pliku, może przeliczyć go od nowa i podmienić
+    historię tak, że ``verify()`` niczego nie zauważy — kotwica podnosi poprzeczkę, ale nie
+    zamyka tej drogi. Z kluczem trzymanym POZA systemem plików przekucie łańcucha staje się
+    niewykonalne bez tego klucza.
+
+    **Przy włączonym HMAC start jest FAIL-CLOSED.** Jeśli istniejący dziennik nie weryfikuje
+    się kluczem, odmawiamy startu. Nie da się bowiem odróżnić „plik powstał, zanim włączono
+    HMAC" od „ktoś bez klucza przepisał historię" — a milcząca degradacja do trybu bez klucza
+    zniweczyłaby cały sens jego włączania. Operator ma zarchiwizować stary dziennik i zacząć
+    nowy; komunikat mówi to wprost.
+
+    Bez klucza zachowanie pozostaje bez zmian: uszkodzony łańcuch nie blokuje startu, tylko
+    jest widoczny jako ``verified: false`` w `GET /api/audit`. To świadome rozróżnienie —
+    skonfigurowanie klucza jest deklaracją „integralność tego dziennika jest blokująca".
+
+    Args:
+        security: Konfiguracja bezpieczeństwa.
+        secrets: Dostawca sekretów do rozwiązania ``hmac_key_ref``. Wymagany, gdy referencja
+            jest ustawiona — brak dostawcy jest błędem konfiguracji, nie cichym pominięciem.
+
+    Returns:
+        Gotowy dziennik.
+
+    Raises:
+        AuditError: Gdy klucza nie da się rozwiązać albo istniejący dziennik nie weryfikuje
+            się tym kluczem.
     """
     audit = security.audit
     if not audit.enabled:
         return AuditLog(path=None)
+    hmac_key = _rozwiaz_klucz_hmac(audit.hmac_key_ref, secrets)
     path = Path(audit.path)
     # Kotwica leży obok dziennika i ma tę samą nazwę z przyrostkiem. Osobny plik, bo musi
     # przetrwać odcięcie ogona dziennika — trzymanie jej W dzienniku niczego by nie dało.
-    log = AuditLog(path=path, anchor_path=path.with_name(path.name + ".kotwica"))
+    log = AuditLog(
+        path=path,
+        hmac_key=hmac_key,
+        anchor_path=path.with_name(path.name + ".kotwica"),
+    )
     if path.exists():
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
@@ -325,4 +361,45 @@ def build_audit_log(security: SecurityConfig) -> AuditLog:
                     log._last_hash = entry.entry_hash
         except (OSError, ValueError):  # pragma: no cover - uszkodzony plik audytu
             pass
+        if hmac_key is not None and log.entries and not log.verify():
+            raise AuditError(
+                f"Dziennik audytu {path} NIE weryfikuje się kluczem z "
+                f"`security.audit.hmac_key_ref`. Dwie możliwe przyczyny i NIE DA SIĘ ich "
+                f"odróżnić: plik powstał, zanim włączono HMAC, albo ktoś bez klucza przepisał "
+                f"historię. Milczące przejście w tryb bez klucza zniweczyłoby sens jego "
+                f"włączenia, więc odmawiamy startu. Zarchiwizuj dotychczasowy dziennik "
+                f"(wraz z {path.name}.kotwica) i pozwól założyć nowy."
+            )
     return log
+
+
+def _rozwiaz_klucz_hmac(ref: str | None, secrets: SecretsProvider | None) -> bytes | None:
+    """Rozwiązuje referencję klucza HMAC. Fail-closed na każdym kroku.
+
+    Args:
+        ref: Referencja z konfiguracji albo ``None``.
+        secrets: Dostawca sekretów.
+
+    Returns:
+        Klucz albo ``None``, gdy referencji nie podano.
+
+    Raises:
+        AuditError: Gdy referencja jest, a klucza nie da się uzyskać. Cicha praca BEZ klucza
+            byłaby najgorszym wyjściem: operator myślałby, że dziennik jest chroniony.
+    """
+    if not ref:
+        return None
+    if secrets is None:
+        raise AuditError(
+            "security.audit.hmac_key_ref jest ustawione, ale nie przekazano dostawcy "
+            "sekretów — klucza nie ma jak rozwiązać. To błąd złożenia aplikacji, nie "
+            "konfiguracji operatora."
+        )
+    wartosc = secrets.resolve(ref)
+    if not wartosc or not wartosc.strip():
+        raise AuditError(
+            f"Nie udało się rozwiązać klucza HMAC audytu (`{ref}`). Dziennik działałby wtedy "
+            f"bez ochrony kluczem, a operator miałby prawo sądzić, że jest chroniony — "
+            f"dlatego odmawiamy startu."
+        )
+    return wartosc.strip().encode("utf-8")

@@ -2531,3 +2531,78 @@ w testach, a `build_audit_log` — jedyna droga produkcyjna — nie zakładałab
 2. **Dopisanie wpisów nadal nie jest wykrywalne** bez klucza HMAC: napastnik może policzyć
    poprawny łańcuch, bo nie ma w nim sekretu.
 3. Kotwica jest plikiem runtime — dopisana do `.gitignore` obok dziennika.
+
+## Etap 17o — klucz HMAC audytu: domknięcie przekucia łańcucha
+
+Notatka weryfikacyjna. Domyka ograniczenie zapisane wprost w notatce 17n jako to, czego
+kotwica z założenia nie umie. Trzeci poziom audytu.
+
+### Luka, której kotwica nie zamyka
+
+Kotwica wykrywa **usunięcie** wpisów. Nie wykrywa **przekucia całego łańcucha**: kto ma prawo
+zapisu do pliku, może przeliczyć goły SHA-256 od nowa, podmienić historię i nadpisać kotwicę.
+Odtworzone uruchomieniem — podrobiony dziennik jest wewnętrznie spójny:
+
+```
+z kluczem, verify(): True
+podrobiony łańcuch sam w sobie spójny: True      <-- na tym polega ta droga
+start z podrobionym dziennikiem: ODMÓWIONY
+```
+
+Docstring `AuditLog` zalecał `hmac_key` „w produkcji" od dawna, ale **`AuditConfig` nie miało
+pola na klucz, a `build_audit_log` go nie przekazywało** — zalecenie było więc nieosiągalne
+z konfiguracji. To ta sama klasa co „placeholder przyjmowany": rada, której nie da się
+wykonać, jest gorsza niż jej brak.
+
+### Decyzje i ich uzasadnienia
+
+**Wyłącznie REFERENCJA, i to ZEWNĘTRZNA.** Schemat `husarz:` jest zabroniony: klucz
+integralności audytu nie może pochodzić z magazynu należącego do systemu, którego dziennik
+ma pilnować. To zamknięty krąg — kto podmienia magazyn, podmienia i klucz.
+
+**Start FAIL-CLOSED przy włączonym HMAC.** Jeśli istniejący dziennik nie weryfikuje się
+kluczem, odmawiamy startu. Nie da się odróżnić „plik powstał, zanim włączono HMAC" od „ktoś
+bez klucza przepisał historię" — a milcząca degradacja do trybu bez klucza zniweczyłaby cały
+sens jego włączenia. Komunikat mówi to wprost i podaje wyjście: zarchiwizować stary dziennik
+wraz z kotwicą.
+
+**Brak dostawcy sekretów albo nierozwiązywalna referencja → ODMOWA, nie cicha praca.**
+Operator, który skonfigurował `hmac_key_ref`, ma prawo sądzić, że dziennik jest chroniony.
+Ciche przejście w tryb bez klucza zamieniłoby zabezpieczenie w jego pozór — to najgorsze
+z możliwych zachowań i ma osobny test.
+
+**Bez klucza zachowanie BEZ ZMIAN.** Uszkodzony łańcuch nie blokuje startu, tylko jest
+widoczny jako `verified: false`. To świadome rozróżnienie, nie przeoczenie: skonfigurowanie
+klucza jest deklaracją „integralność tego dziennika jest blokująca". Rozszerzenie fail-closed
+na ścieżkę domyślną dotknęłoby wszystkich instalacji i jest osobną decyzją — zapisane w ROADMAP.
+
+### Warstwy ochrony dziennika — stan po tej zmianie
+
+| Atak | Łańcuch | Kotwica | HMAC |
+|---|---|---|---|
+| edycja wpisu w miejscu | **wykrywa** | — | wykrywa |
+| usunięcie końcówki | nie wykrywa | **wykrywa** | wykrywa (przez kotwicę) |
+| przepisanie końcówki, ta sama długość | nie wykrywa | **wykrywa** | wykrywa |
+| przekucie CAŁEGO łańcucha + kotwicy | nie wykrywa | nie wykrywa | **wykrywa** |
+| dopisanie wpisów na końcu | nie wykrywa | nie wykrywa | **wykrywa** |
+
+Trzy mechanizmy, trzy różne zakresy. Żaden nie zastępuje pozostałych.
+
+### Nośność
+
+**5 mutacji, 5 czerwonych.** Najciekawsza: „klucz rozwiązany, ale NIE przekazany do
+dziennika". Bez tego testu cała ścieżka rozwiązywania klucza mogłaby działać poprawnie,
+a dziennik i tak liczyłby goły SHA-256 — czyli zabezpieczenie istniałoby na papierze.
+
+### Ograniczenia — wprost
+
+1. **Klucz chroni przed przekuciem, nie przed usunięciem CAŁEGO pliku.** Kto skasuje dziennik
+   i kotwicę, ten nie zostawi śladu w samym Husarzu. Wykrycie tego wymaga zewnętrznego
+   nadzoru (kopia poza maszyną, wysyłka wpisów do systemu zbierającego) — poza zakresem
+   projektu, który ma nie wysyłać niczego bez zgody.
+2. **Rotacja klucza nie jest obsłużona.** Zmiana `hmac_key_ref` na nowy klucz zachowa się
+   dokładnie jak włączenie HMAC po raz pierwszy: odmowa startu i konieczność archiwizacji.
+   Świadome — bezszwowa rotacja wymagałaby wersjonowania klucza we wpisach, co jest osobną
+   funkcją. Zapisane w ROADMAP.
+3. **Domyślnie wyłączone.** Dostarczona konfiguracja ma `hmac_key_ref: null`, bo włączenie
+   wymaga decyzji operatora o tym, gdzie klucz mieszka.
