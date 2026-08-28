@@ -806,6 +806,49 @@ def _cmd_roe_sign(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_config_explain(args: argparse.Namespace) -> int:
+    """Wypisuje, która warstwa konfiguracji dostarcza wartość spod wskazanej ścieżki.
+
+    Wartości będące REFERENCJAMI do sekretów pokazujemy dokładnie takie, jakie stoją
+    w konfiguracji — nigdy rozwiązane. Narzędzie, które by je rozwijało, byłoby wygodnym
+    sposobem odczytania sekretu przez kogoś z dostępem do powłoki, ale nie do magazynu.
+
+    Args:
+        args: Argumenty wiersza poleceń (``sciezka``, ``--config``).
+
+    Returns:
+        0 — wypisano wyjaśnienie; 2 — błąd konfiguracji albo ścieżki.
+    """
+    from husarz.config.wyjasnienie import BRAK, wyjasnij  # noqa: PLC0415
+
+    try:
+        wynik = wyjasnij(args.sciezka, config_dir=args.config)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    print(f"Ścieżka:  {wynik.sciezka}", flush=True)
+    for warstwa in wynik.warstwy:
+        znacznik = "<-- obowiązuje" if warstwa.nazwa == wynik.obowiazujaca else ""
+        pokazana = "(nie ustawia)" if not warstwa.ustawia else repr(warstwa.wartosc)
+        zrodlo = f"  [{warstwa.zrodlo}]" if warstwa.zrodlo else ""
+        print(f"  {warstwa.nazwa:<18} {pokazana:<28}{znacznik}{zrodlo}", flush=True)
+
+    if wynik.wartosc is BRAK:
+        print(
+            "\nŻadna warstwa nie ustawia tej ścieżki — obowiązuje wartość DOMYŚLNA ze "
+            "schematu. To nie znaczy, że pola nie ma: znaczy, że nikt go nie nadpisał.",
+            flush=True,
+        )
+    if wynik.jest_referencja:
+        print(
+            "\nTo jest REFERENCJA do sekretu, nie sam sekret. Rozwiązywana jest dopiero "
+            "w miejscu użycia i to polecenie jej NIE rozwija — celowo.",
+            flush=True,
+        )
+    return 0
+
+
 def _cmd_audit_verify(args: argparse.Namespace) -> int:
     """Sprawdza integralność dziennika audytu i raportuje WYNIK ORAZ MIEJSCE.
 
@@ -1038,6 +1081,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Otwórz konsolę w przeglądarce po starcie (UX launchera; tylko loopback).",
     )
     p_up.set_defaults(func=_cmd_up)
+
+    p_config = sub.add_parser("config", help="Operacje na konfiguracji.")
+    config_sub = p_config.add_subparsers(dest="config_command", required=True)
+
+    p_config_explain = config_sub.add_parser(
+        "explain", help="Pokaż, z której warstwy pochodzi wartość spod danej ścieżki."
+    )
+    p_config_explain.add_argument("sciezka", help="Ścieżka kropkowa, np. security.audit.path.")
+    p_config_explain.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_config_explain.set_defaults(func=_cmd_config_explain)
 
     p_audit = sub.add_parser("audit", help="Operacje na dzienniku audytu.")
     audit_sub = p_audit.add_subparsers(dest="audit_command", required=True)

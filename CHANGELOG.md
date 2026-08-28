@@ -54,6 +54,28 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18i — `husarz config explain`)
+
+- **Polecenie odpowiadające na pytanie „skąd ta wartość".** Wypisuje WSZYSTKIE warstwy
+  (`defaults → config/*.yaml → ENV → runtime`) wraz z tym, co każda mówi, i zaznacza
+  obowiązującą. Sedno leży w RÓŻNICY: pokazanie samej wartości obowiązującej nie
+  rozwiązywałoby problemu, dla którego polecenie powstało — operator musi zobaczyć, że plik
+  mówi co innego, i KTÓRA warstwa go przebiła.
+- **Warstwy milczące też są wypisane**, z podpowiedzią nazwy zmiennej środowiskowej. Warstwa
+  pominięta w wydruku jest dla operatora warstwą nieistniejącą, a to właśnie ona bywa
+  miejscem, w którym trzeba coś ustawić.
+- **Referencje do sekretów NIE są rozwijane** — to warunek, nie ograniczenie. Narzędzie
+  diagnostyczne rozwijające referencje byłoby wygodnym sposobem odczytania sekretu przez
+  kogoś z dostępem do powłoki, ale nie do magazynu. Raport dopisuje ostrzeżenie.
+- **`null` jest odróżniane od braku wpisu**, bo w YAML-u bywa wartością znaczącą (np.
+  wyłączeniem limitu tempa). Służy do tego osobny wartownik, nie `None`.
+
+### Naprawione (wykryte przy pisaniu testów Etapu 18i)
+
+- **Segment ścieżki złożony z samych spacji** przechodził przez filtr jako niepusty i dawał
+  ścieżkę nieistniejącą nigdzie — czyli odpowiedź „obowiązuje wartość domyślna" na pytanie,
+  które w ogóle nie było pytaniem.
+
 ### Dodane (Etap 18h — dobór modelu po koszcie i opóźnieniu)
 
 - **`ModelSpec` zyskał `cost_per_1m_input`, `cost_per_1m_output` i `latency_p50_ms`.**

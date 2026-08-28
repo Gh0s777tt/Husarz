@@ -399,3 +399,44 @@ i referencje kont, a raport bywa wklejany do zgłoszeń.
 - Bogatszy desktop (Tauri, auto-update, tray, ikona) — przyszły krok.
 
 Decyzje: [ADR-0012](adr/0012-pobierany-launcher.md).
+
+## Skąd ta wartość: `husarz config explain`
+
+Hierarchia nadpisań to `defaults (kod) → config/*.yaml → ENV (HUSARZ_*) → sekrety →
+runtime (panel)`. Na stanowisku deweloperskim odpowiedź „dlaczego ta wartość jest taka" jest
+zwykle oczywista, bo warstwa jest jedna. We wdrożeniu kontenerowym już nie:
+`deploy/k8s/configmap.yaml` nadpisuje konfigurację zmiennymi środowiskowymi, więc plik
+w repozytorium mówi jedno, a działająca instancja robi drugie — a operator patrzy na plik.
+
+```bash
+python -m husarz.launcher.cli config explain security.audit.integrity --config ./config
+```
+
+```
+Ścieżka:  security.audit.integrity
+  defaults (kod)     (nie ustawia)                 [schemat Pydantic]
+  config/*.yaml      'blocking'                    [security.yaml]
+  ENV (HUSARZ_*)     'warn'                      <-- obowiązuje  [HUSARZ_SECURITY__AUDIT__INTEGRITY]
+  runtime (panel)    (nie ustawia)
+```
+
+Wypisujemy **wszystkie** warstwy, także te, które nic nie wnoszą — z dwóch powodów. Po
+pierwsze, sedno pytania leży w RÓŻNICY: gdyby raport pokazywał samą wartość obowiązującą,
+nie rozwiązywałby problemu, dla którego polecenie powstało. Po drugie, warstwa pominięta
+w wydruku jest dla operatora warstwą nieistniejącą, a to właśnie ona bywa miejscem, w którym
+trzeba coś ustawić — stąd podpowiedź z nazwą zmiennej środowiskowej nawet wtedy, gdy ENV
+dziś milczy.
+
+### Trzy rozróżnienia, które łatwo zgubić
+
+- **„Nikt tego nie ustawia" to nie „tego nie ma".** Gdy żadna warstwa się nie wypowiada,
+  obowiązuje wartość domyślna ze schematu i raport mówi to wprost.
+- **`null` to nie brak wpisu.** W YAML-u `null` bywa wartością znaczącą (np. wyłączeniem
+  limitu tempa), więc jest odróżniane od nieustawienia.
+- **Referencja do sekretu NIE jest rozwijana** — i to jest warunek, nie ograniczenie.
+  Konfiguracja przechowuje wyłącznie referencje (`env:`/`file:`/`vault:`/`sops:`/`husarz:`),
+  a narzędzie diagnostyczne, które by je rozwinęło, byłoby wygodnym sposobem odczytania
+  sekretu przez kogoś z dostępem do powłoki, ale nie do magazynu. Raport pokazuje referencję
+  dokładnie taką, jaka stoi w konfiguracji, i dopisuje ostrzeżenie.
+
+Kody wyjścia: **0** — wypisano wyjaśnienie, **2** — błąd konfiguracji albo ścieżki.

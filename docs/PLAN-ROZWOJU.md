@@ -38,7 +38,7 @@ Kolejność jest rekomendacją, nie zobowiązaniem.
 | 3 | Routing świadomy zdrowia modelu (wyłącznik bezpiecznikowy) | Router | 🟢 | M |
 | 4 | ~~Rotacja klucza HMAC audytu~~ — **zrobione** (Etap 18a) | Bezpieczeństwo | ✅ | M |
 | 5 | Równoległa delegacja niezależnych kroków planu | Orkiestrator | 🟢 | L |
-| 6 | `husarz config explain` — z której warstwy pochodzi wartość | Launcher | 🟢 | S |
+| 6 | ~~`husarz config explain`~~ — **zrobione** (Etap 18i) | Launcher | ✅ | S |
 | 7 | Strumieniowanie odpowiedzi (WebSocket) | API + konsola | 🟢 | L |
 | 8 | Chunkowanie dokumentów w RAG | Pamięć | 🟢 | L |
 | 9 | ~~`mkdocs --strict` i `black scripts` w CI~~ — **zrobione** (Etap 18) | Operacje | ✅ | S |
@@ -78,13 +78,13 @@ narzędziem do zacierania śladu odcięcia ogona — i to podpisanym przez sam p
 rotacja pliku dziennika ma być wspierana, musi to być operacja, która STARY dziennik
 zachowuje i wiąże z nowym, a nie taka, która przestawia licznik.
 
-### 🟢 `husarz config explain <ścieżka>` (S)
+### ✅ `husarz config explain <ścieżka>` (S) — ZREALIZOWANE (Etap 18i)
 
-Hierarchia to `defaults → config/*.yaml → ENV (HUSARZ_*) → sekrety → runtime`. Przy
-wdrożeniu na Kubernetesie `deploy/k8s/configmap.yaml` nadpisuje konfigurację zmiennymi
-środowiskowymi, więc pytanie „dlaczego ta wartość jest taka" bywa realnie trudne.
-Komenda wypisująca dla wskazanego pola wartość końcową i warstwę, która ją ustawiła,
-kosztuje niewiele, a oszczędza godziny zgadywania.
+Zrealizowane szerzej, niż zapowiadała pozycja. Zapis mówił o wskazaniu warstwy; przy pisaniu
+okazało się, że sama warstwa nie wystarcza — sedno pytania leży w RÓŻNICY między warstwami,
+więc raport pokazuje, co mówi KAŻDA z nich, także milcząca. Doszły dwa rozróżnienia, których
+pozycja nie przewidywała: `null` odróżniony od braku wpisu (w YAML-u bywa wartością znaczącą)
+oraz jawna odmowa rozwijania referencji do sekretów. Opis: [LAUNCHER](LAUNCHER.md).
 
 ### 🟢 `husarz secrets set|list|rm` (M)
 
