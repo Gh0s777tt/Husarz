@@ -2606,3 +2606,56 @@ a dziennik i tak liczyłby goły SHA-256 — czyli zabezpieczenie istniałoby na
    funkcją. Zapisane w ROADMAP.
 3. **Domyślnie wyłączone.** Dostarczona konfiguracja ma `hmac_key_ref: null`, bo włączenie
    wymaga decyzji operatora o tym, gdzie klucz mieszka.
+
+
+## Etap 17p — bazowa linia profili: obietnica bez ani jednego testu
+
+Notatka weryfikacyjna. Domyka ostatnią pozycję z przeszukania (17m): „testy asercjonujące
+WARTOŚĆ pola configu zamiast skutku".
+
+### Przeszukanie wypadło w większości NEGATYWNIE — i to też jest wynik
+
+Podejrzenie brzmiało: skoro `test_sandbox_has_no_network_by_default` asercjonował martwe pole
+`workspace_only`, to podobnych „papierowych" testów jest więcej. Sprawdziłem każdy z osobna.
+**Cztery z pięciu podejrzanych mają test SKUTKU gdzie indziej:**
+
+| Niezmiennik | Gdzie stoi dowód SKUTKU |
+|---|---|
+| brak telemetrii | `test_config_schema.py::test_telemetry_is_forbidden` (odrzucenie `true`) |
+| sandbox bez sieci | `test_tools_sandbox.py` (argv) + `test_sandbox_real.py` (**silnik**, nie deklaracja) |
+| szyfrowanie at-rest | `test_memory_isolation.py::test_sqlite_at_rest_no_plaintext_on_disk` |
+| Puszkarz wymaga ROE | flaga egzekwowana w TRZECH miejscach; pokrywają `test_roe_runtime.py`, `test_tool_loop_security.py` |
+
+Asercje o wartościach w `test_security_invariants.py` zostają — mówią coś prawdziwego
+o DOSTARCZONEJ konfiguracji. Dopisano im natomiast w docstringach, gdzie stoi dowód skutku,
+żeby macierz w tym dokumencie nie odsyłała do najsłabszego dowodu, jaki istnieje.
+
+### Jedna luka, za to poważna
+
+**Bazowa linia bezpieczeństwa profili `prod` i `airgap` nie miała ANI JEDNEGO testu.**
+`docs/ARCHITEKTURA.md` obiecuje: „sandbox włączony, audyt włączony i niemodyfikowalny,
+szyfrowanie at-rest — **nie można ich cicho wyłączyć**". Walidacja krzyżowa faktycznie tego
+pilnuje. Nie pilnował tego nikt.
+
+Konsekwencja praktyczna: gdyby ktoś przy refaktorze usunął ten blok `_cross_validate`, cały
+zestaw pozostałby zielony, a obietnica z dokumentacji zamieniłaby się w nieprawdę bez żadnego
+sygnału. To dokładnie ten układ, przed którym ostrzega CLAUDE.md: zielony zestaw testów mówi
+tylko tyle, że nikt nie napisał asercji, która by tę zmianę złapała.
+
+### Co dopisano
+
+Testy SKUTKU (czy konfiguracja daje się wczytać), parametryzowane po czterech wymaganiach
+i obu profilach. Parametryzacja jest tu istotna: jeden test na „bazową linię" przechodziłby
+dalej, gdyby ktoś usunął trzy z czterech warunków, a zostawił jeden.
+
+Do tego dwie kontrole nośności w drugą stronę:
+
+* **profil `dev` zostawia elastyczność** — bez tego walidator odrzucający wszystko wszędzie
+  przeszedłby cztery testy wyżej i wyglądał na poprawny, a uniemożliwiłby pracę;
+* **dostarczona konfiguracja przechodzi bazę `prod`** — inaczej „profil produkcyjny" byłby
+  czymś, czego operator nie może włączyć bez ręcznego dostrajania plików.
+
+### Nośność
+
+**5 mutacji, 5 czerwonych**: cała bazowa linia usunięta; każdy z trzech wymagań zdjęty
+osobno; oraz rozciągnięcie bazy na `dev`.

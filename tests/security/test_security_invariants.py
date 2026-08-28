@@ -23,13 +23,21 @@ def test_default_egress_is_deny(repo_config_dir: Path) -> None:
 
 
 def test_no_telemetry(repo_config_dir: Path) -> None:
-    """Zero telemetrii w domyślnej konfiguracji."""
+    """Zero telemetrii w DOSTARCZONEJ konfiguracji.
+
+    To asercja o pliku, nie o zachowaniu — i tak ma zostać. Egzekwowanie (odrzucenie
+    `telemetry_enabled: true`) sprawdza `test_config_schema.py::test_telemetry_is_forbidden`.
+    """
     config = load_config(repo_config_dir)
     assert config.platform.telemetry_enabled is False
 
 
 def test_sandbox_has_no_network_by_default(repo_config_dir: Path) -> None:
-    """Sandbox narzędzi domyślnie bez sieci."""
+    """Sandbox narzędzi domyślnie bez sieci — asercja o DOSTARCZONEJ konfiguracji.
+
+    Skutek sprawdzają osobno: `test_tools_sandbox.py` (argv zawiera `--network none`)
+    oraz `test_sandbox_real.py` (egzekwowane przez SILNIK, nie deklarowane).
+    """
     config = load_config(repo_config_dir)
     assert config.security.sandbox.network is False
 
@@ -65,20 +73,34 @@ def test_kontener_dostaje_DOKLADNIE_JEDEN_montaz_i_jest_nim_workspace(
 
 
 def test_audit_log_enabled_and_immutable(repo_config_dir: Path) -> None:
-    """Audit log włączony i oznaczony jako niemodyfikowalny."""
+    """Audyt włączony i oznaczony jako niemodyfikowalny — asercja o DOSTARCZONEJ konfiguracji.
+
+    Egzekwowanie sprawdza `test_bazowa_linia_profili.py`: w profilach prod/airgap
+    konfiguracja z `immutable: false` NIE WCZYTA się. Do tej pory nie sprawdzał tego
+    żaden test — pilnowała tego wyłącznie czyjaś pamięć.
+    """
     config = load_config(repo_config_dir)
     assert config.security.audit.enabled is True
     assert config.security.audit.immutable is True
 
 
 def test_encryption_at_rest_enabled(repo_config_dir: Path) -> None:
-    """Szyfrowanie at-rest włączone."""
+    """Szyfrowanie at-rest włączone — asercja o DOSTARCZONEJ konfiguracji.
+
+    Skutek sprawdza `test_memory_isolation.py::test_sqlite_at_rest_no_plaintext_on_disk`
+    (brak jawnego tekstu na dysku); egzekwowanie w profilach — `test_bazowa_linia_profili.py`.
+    """
     config = load_config(repo_config_dir)
     assert config.security.encryption.at_rest is True
 
 
 def test_puszkarz_requires_roe(repo_config_dir: Path) -> None:
-    """Puszkarz ma twardo wymagane ROE (roe_required=True)."""
+    """Puszkarz ma twardo wymagane ROE — asercja o DOSTARCZONEJ konfiguracji.
+
+    Flaga jest EGZEKWOWANA w trzech miejscach (sprawdzone): orkiestrator pomija agenta
+    bez runtime'u ROE, pętla narzędziowa wyklucza go na poziomie L0, a `roe_runtime`
+    bramkuje delegację. Skutek pokrywają `test_roe_runtime.py` i `test_tool_loop_security.py`.
+    """
     config = load_config(repo_config_dir)
     assert config.agents["puszkarz"].roe_required is True
 

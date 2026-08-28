@@ -5,6 +5,27 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Dodane (bazowa linia profili prod/airgap — obietnica bez ani jednego testu)
+
+- **`docs/ARCHITEKTURA.md` obiecuje, że w profilach `prod` i `airgap` sandboxa, audytu
+  i szyfrowania „nie można cicho wyłączyć". Walidacja tego pilnuje — nie pilnował tego
+  ŻADEN test.** Gdyby ktoś przy refaktorze usunął ten blok, cały zestaw pozostałby zielony,
+  a obietnica zamieniłaby się w nieprawdę bez sygnału.
+- Dopisane testy SKUTKU (czy konfiguracja daje się wczytać), parametryzowane po czterech
+  wymaganiach i obu profilach — jeden test na „bazową linię" przechodziłby dalej, gdyby ktoś
+  usunął trzy z czterech warunków.
+- Dwie kontrole w drugą stronę: profil `dev` zachowuje elastyczność (inaczej walidator
+  odrzucający wszystko wyglądałby na poprawny) oraz dostarczona konfiguracja daje się
+  podnieść do `prod` bez zmian w plikach.
+
+### Poprawione (przegląd testów „wartość zamiast skutku" — wynik w większości negatywny)
+
+- Podejrzenie z Etapu 17m sprawdzone co do jednego. **Cztery z pięciu podejrzanych testów
+  mają dowód SKUTKU gdzie indziej** (telemetria, sandbox bez sieci, szyfrowanie at-rest,
+  ROE Puszkarza). Asercje o wartościach zostają — mówią coś prawdziwego o DOSTARCZONEJ
+  konfiguracji — ale dostały w docstringach odnośnik do miejsca, gdzie stoi dowód skutku,
+  żeby macierz w `docs/BEZPIECZENSTWO.md` nie odsyłała do najsłabszego dowodu.
+
 ### Dodane (audyt: klucz HMAC domyka przekucie łańcucha)
 
 - **`security.audit.hmac_key_ref`.** Docstring `AuditLog` zalecał klucz HMAC „w produkcji"

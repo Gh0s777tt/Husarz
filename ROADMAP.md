@@ -508,10 +508,12 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
   `audit.hash_chain` i `audit.immutable` (martwe przełączniki nad zachowaniem bezwarunkowo
   bezpiecznym — łańcuch skrótów działa ZAWSZE, sprawdzone). Do rozważenia przy okazji
   Etapu 6.
-- ⬜ **Testy asercjonujące WARTOŚĆ pola configu zamiast skutku** — wzorzec ten sam, co
-  w naprawionym `test_sandbox_has_no_network_by_default`. Podejrzane:
-  `test_encryption_at_rest_enabled`, `test_puszkarz_requires_roe`, `test_no_telemetry`.
-  Sprawdzić, czy za każdym stoi test skutku, czy tylko ✅ w macierzy.
+- ✅ **Testy asercjonujące WARTOŚĆ pola configu zamiast skutku** — sprawdzone. Wynik
+  w większości NEGATYWNY: cztery z pięciu podejrzanych mają test skutku gdzie indziej
+  (odnośniki dopisane w docstringach). Znalazła się natomiast luka poważniejsza: **bazowa
+  linia bezpieczeństwa profili prod/airgap nie miała ani jednego testu**, mimo że
+  ARCHITEKTURA obiecuje „nie można ich cicho wyłączyć". Dopisane w
+  `tests/security/test_bazowa_linia_profili.py`. Docs: `docs/BEZPIECZENSTWO.md`, Etap 17p.
 
 ## Pozostałe ustalenia
 - Modele (GLM-5.2, Bielik v3, Hermes) pobierane lokalnie do `models/` (gitignored)
