@@ -51,16 +51,46 @@ class Stan(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class Zasob:
+    """Plik dołączony do wydania.
+
+    Attributes:
+        nazwa: Nazwa pliku u dostawcy (np. ``husarz-app-linux``).
+        url: Adres pobrania.
+    """
+
+    nazwa: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
 class Wydanie:
     """Wydanie znalezione u dostawcy.
 
     Attributes:
         wersja: Numer wersji tak, jak podał go serwer (np. ``v0.15.0``).
         strona: Adres strony wydania — do POKAZANIA operatorowi, nie do pobierania.
+        zasoby: Pliki dołączone do wydania (binarki i ich podpisy).
     """
 
     wersja: str
     strona: str
+    zasoby: tuple[Zasob, ...] = ()
+
+    def zasob(self, nazwa: str) -> Zasob | None:
+        """Zwraca zasób o dokładnie tej nazwie albo ``None``.
+
+        Dopasowanie jest ŚCISŁE, nie „zawiera": nazwa artefaktu decyduje o tym, co zostanie
+        uruchomione na maszynie operatora, więc dopasowanie przybliżone byłoby zaproszeniem
+        do podstawienia innego pliku.
+
+        Args:
+            nazwa: Oczekiwana nazwa pliku.
+
+        Returns:
+            Zasób albo ``None``.
+        """
+        return next((z for z in self.zasoby if z.nazwa == nazwa), None)
 
 
 @runtime_checkable
@@ -247,4 +277,19 @@ class ZrodloGitHub:
         if not isinstance(tag, str) or not tag:
             return None, "odpowiedź serwera wydań nie zawiera numeru wersji"
         strona = dane.get("html_url")
-        return Wydanie(wersja=tag, strona=strona if isinstance(strona, str) else ""), ""
+        zasoby: list[Zasob] = []
+        for pozycja in dane.get("assets") or []:
+            if not isinstance(pozycja, dict):
+                continue
+            nazwa = pozycja.get("name")
+            adres = pozycja.get("browser_download_url")
+            if isinstance(nazwa, str) and isinstance(adres, str) and nazwa and adres:
+                zasoby.append(Zasob(nazwa=nazwa, url=adres))
+        return (
+            Wydanie(
+                wersja=tag,
+                strona=strona if isinstance(strona, str) else "",
+                zasoby=tuple(zasoby),
+            ),
+            "",
+        )

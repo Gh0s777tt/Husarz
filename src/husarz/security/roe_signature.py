@@ -46,6 +46,7 @@ import json
 from typing import Any
 
 from husarz.config.schema import RoeConfig
+from husarz.security.ed25519 import Ed25519Error, wczytaj_klucz_publiczny
 from husarz.security.errors import SecurityError
 
 # Etykieta separacji domen — zmiana formatu payloadu MUSI podnieść wersję (stare podpisy
@@ -166,38 +167,31 @@ def sign_ed25519(roe: RoeConfig, private_key_pem: str) -> str:
 
 
 def _load_ed25519_public_key(key: str) -> Any:
-    """Wczytuje klucz publiczny Ed25519 z PEM albo z base64 surowych 32 bajtów.
+    """Wczytuje klucz publiczny Ed25519 — cienka obwoluta na wspólny moduł.
+
+    Implementacja mieszka w :mod:`husarz.security.ed25519`, bo tę samą weryfikację wykonuje
+    mechanizm aktualizacji. Weryfikacja podpisu jest bramką bezpieczeństwa, a dwie kopie
+    takiego kodu rozjeżdżają się przy pierwszej poprawce jednej z nich — i wtedy jedna droga
+    przyjmuje to, co druga odrzuca.
+
+    Obwoluta zostaje, żeby kontrakt tego modułu się nie zmienił: wołający łapie
+    ``RoeSignatureError`` i nie ma powodu wiedzieć, skąd wzięto prymityw. Przy okazji
+    wydzielenia doszła obsługa formatu OpenSSH (``ssh-ed25519 AAAA…``), więc klucz
+    wygenerowany poleceniem ``ssh-keygen`` jest teraz przyjmowany także dla ROE.
+
+    Args:
+        key: Materiał klucza publicznego (PEM, OpenSSH albo base64 32 bajtów).
+
+    Returns:
+        Obiekt klucza publicznego.
 
     Raises:
-        RoeSignatureError: brak pakietu ``cryptography`` albo nieczytelny klucz.
+        RoeSignatureError: Gdy klucza nie da się wczytać.
     """
     try:
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: PLC0415
-            Ed25519PublicKey,
-        )
-        from cryptography.hazmat.primitives.serialization import (  # noqa: PLC0415
-            load_pem_public_key,
-        )
-    except ImportError as exc:  # pragma: no cover - zależność opcjonalna
-        raise RoeSignatureError(
-            "Weryfikacja ed25519 wymaga pakietu 'cryptography' (extra: husarz[roe])."
-        ) from exc
-
-    material = key.strip()
-    if "BEGIN PUBLIC KEY" in material:
-        try:
-            loaded = load_pem_public_key(material.encode("utf-8"))
-        except (ValueError, TypeError) as exc:
-            raise RoeSignatureError("Klucz publiczny ROE (PEM) jest nieczytelny.") from exc
-        if not isinstance(loaded, Ed25519PublicKey):
-            raise RoeSignatureError("Klucz publiczny ROE nie jest kluczem Ed25519.")
-        return loaded
-    try:
-        return Ed25519PublicKey.from_public_bytes(base64.b64decode(material, validate=True))
-    except (binascii.Error, ValueError) as exc:
-        raise RoeSignatureError(
-            "Klucz publiczny ROE musi być PEM albo base64 32 surowych bajtów Ed25519."
-        ) from exc
+        return wczytaj_klucz_publiczny(key)
+    except Ed25519Error as exc:
+        raise RoeSignatureError(str(exc)) from exc
 
 
 def verify(roe: RoeConfig, *, algorithm: str, key: str) -> bool:

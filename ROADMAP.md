@@ -339,15 +339,16 @@ Pozycja przechodzi stamtąd tutaj w chwili podjęcia decyzji o realizacji.
 - ✅ **Powiadomienie o aktualizacji** (Etap 18o) — `husarz update check` + komunikat przy
   starcie. Domyślnie wyłączone (zapytanie o wersję to połączenie wychodzące), własna
   allowlista, odrzucane w airgapie, trójstan z osobnym kodem wyjścia dla „nie wiadomo".
-- ⬜ **Pobranie i podmiana nowej wersji przy restarcie** — druga połowa mechanizmu, o którą
-  prosił operator. Kolejność jest tu warunkiem bezpieczeństwa, nie wygodą: aktualizator,
-  który pobiera i WYKONUJE kod, jest powierzchnią ataku na łańcuch dostaw, więc nie powstanie
-  przed weryfikacją podpisu. Zakres: wydzielenie weryfikacji ed25519 z `roe_signature` do
-  wspólnego modułu, pole `update.verify_key_ref` (klucz publiczny jako REFERENCJA), pobranie
-  binarki z wydania wraz z podpisem odłączonym, weryfikacja PRZED zapisaniem na docelową
-  ścieżkę, staging (`<binarka>.new`) i podmiana przy najbliższym starcie.
-  **Warunek wstępny po stronie operatora**: wygenerowanie klucza podpisującego i podpisywanie
-  wydań. Bez tego mechanizm ma ODMÓWIĆ instalacji, a nie ostrzec.
+- ✅ **Pobranie i podmiana nowej wersji przy restarcie** (Etap 18p) — `husarz update apply`
+  z obowiązkową weryfikacją podpisu Ed25519, stagingiem i podmianą przy starcie. Pipeline
+  wydań podpisuje binarki. Notatka: `docs/BEZPIECZENSTWO.md`, Etap 18p.
+- ⬜ **Cała droga aktualizacji NIE jest zweryfikowana na żywo.** Pobranie, weryfikacja
+  i podmiana są pokryte testami z prawdziwą kryptografią (klucze generowane w teście, w tym
+  przez `ssh-keygen`), ale nie przebiegiem end-to-end z prawdziwym, podpisanym wydaniem —
+  bo takiego jeszcze nie ma. Do tego czasu mechanizm pozostaje niezweryfikowany w boju.
+- ⬜ **Operator musi dodać sekret `HUSARZ_RELEASE_SIGNING_KEY`** w repozytorium i wskazać
+  klucz publiczny w `update.verify_key_ref`. Bez tego wydania powstają bez podpisu, a
+  `husarz update apply` odmawia — poprawnie, ale bezużytecznie.
 - ⬜ **GitHub Release jeszcze nie istnieje.** Sprawdzenie na żywo zwraca „repozytorium nie ma
   wydań": tag `v0.14.0` jest, ale `release.yml` buduje binarki dopiero na uruchomionym
   runnerze, a Actions stoi w kolejce (rozliczenie). Do tego czasu mechanizm będzie meldował

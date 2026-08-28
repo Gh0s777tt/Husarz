@@ -20,3 +20,25 @@ repository: Gh0s777tt/Husarz
 # wtyczkom MCP ani agentom. Dwie listy = dwie różne decyzje operatora.
 sources:
   - api.github.com
+
+# Klucz PUBLICZNY Ed25519, którym weryfikujemy podpis pobranej binarki — jako REFERENCJA
+# do sekretu (env:/file:/vault:/sops:), nigdy sam materiał. Klucz publiczny nie jest tajny,
+# ale trzymamy go poza plikiem konfiguracji tak samo jak przy ROE: żeby jego wymiana nie
+# wymagała edycji configu. Schemat `husarz:` jest tu ZABRONIONY — klucz, którym sprawdzamy
+# autentyczność nowego KODU, nie może pochodzić z magazynu należącego do systemu, który ten
+# kod ma zastąpić.
+#
+# Przyjmowane postacie klucza: PEM, OpenSSH (`ssh-ed25519 AAAA…`) oraz base64 32 surowych
+# bajtów. Klucz wygenerujesz poleceniem:
+#
+#   ssh-keygen -t ed25519 -f husarz-release -N "" -C "podpis wydan Husarza"
+#
+# Publiczny (`husarz-release.pub`) wskaż tutaj, np. `file:husarz-release.pub`.
+# PRYWATNY (`husarz-release`) zostaje u Ciebie i trafia WYŁĄCZNIE do sekretu repozytorium
+# `HUSARZ_RELEASE_SIGNING_KEY`, którym pipeline wydań podpisuje binarki. Do repozytorium
+# nie trafia nigdy.
+#
+# `null` znaczy: sprawdzanie wersji działa, ale `husarz update apply` ODMÓWI instalacji.
+# Nie jest to ostrzeżenie do zignorowania — bez weryfikacji podpisu przejęcie kanału wydań
+# daje przejęcie tej maszyny, więc nie ma trybu „zainstaluj mimo wszystko".
+verify_key_ref: null

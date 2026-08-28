@@ -712,6 +712,11 @@ def _cmd_up(args: argparse.Namespace) -> int:
         for linia in sformatuj(warte_uwagi):
             print(linia, flush=True)
         print("", flush=True)
+    # PODMIANA oczekującej wersji — przed powiadomieniem, bo jeśli właśnie się dokonała,
+    # operator ma zobaczyć JĄ, a nie komunikat o dostępnej aktualizacji, którą już ma.
+    komunikat = _zastosuj_oczekujaca_aktualizacje(config)
+    if komunikat:
+        print(komunikat, flush=True)
     # Powiadomienie o aktualizacji — PO diagnozie, bo diagnoza mówi o tym, co nie działa
     # TERAZ, a aktualizacja o tym, co można poprawić. Odwrotna kolejność zepchnęłaby
     # problem blokujący pod komunikat informacyjny.
@@ -814,6 +819,41 @@ def _cmd_roe_sign(args: argparse.Namespace) -> int:
     return 0
 
 
+def _zastosuj_oczekujaca_aktualizacje(config: HusarzConfig) -> str:
+    """Instaluje przygotowaną wcześniej wersję, jeśli taka czeka.
+
+    Wołane przy starcie `husarz up` — to jest ten „restart", po którym operator ma nową
+    wersję. Weryfikacja podpisu powtarza się TUTAJ, mimo że plik był już sprawdzony przy
+    pobraniu: między jednym a drugim mija restart, a plik leży przez ten czas na dysku.
+
+    Niepowodzenie jest GŁOŚNE, ale nie zatrzymuje startu: operator ma dalej dostać działającą
+    platformę na starej wersji, a nie instalację, która przestała wstawać przez aktualizację.
+    Cisza byłaby natomiast najgorsza — operator sądziłby, że pracuje na nowej wersji.
+
+    Args:
+        config: Wczytana konfiguracja.
+
+    Returns:
+        Komunikat do wypisania; pusty napis, gdy nic nie czekało albo mechanizm wyłączony.
+    """
+    from husarz.launcher.instalacja import (  # noqa: PLC0415
+        BladInstalacji,
+        sciezka_binarki,
+        zastosuj_oczekujaca,
+    )
+
+    if not config.update.enabled or config.update.verify_key_ref is None:
+        return ""
+    binarka = sciezka_binarki()
+    if binarka is None:
+        return ""
+    try:
+        klucz = _resolve_secret_ref(config.update.verify_key_ref, "update.verify_key_ref")
+        return zastosuj_oczekujaca(binarka, klucz)
+    except (BladInstalacji, ConfigError) as exc:
+        return f"[!!] Nie zainstalowano oczekującej aktualizacji: {exc}"
+
+
 def _sprawdz_aktualizacje(config: HusarzConfig) -> object:
     """Sprawdza aktualizacje, nie pozwalając awarii przewrócić startu platformy.
 
@@ -908,6 +948,113 @@ def _cmd_update_check(args: argparse.Namespace) -> int:
         print(f"Masz najnowszą wersję ({wynik.biezaca}).", flush=True)
         return 0
     return 1 if wynik.stan is Stan.DOSTEPNA else 3
+
+
+def _cmd_update_apply(args: argparse.Namespace) -> int:
+    """Pobiera nowe wydanie, WERYFIKUJE PODPIS i przygotowuje je do podmiany przy starcie.
+
+    Odmawia we wszystkich przypadkach, w których nie da się zagwarantować, że instalujemy
+    kod od posiadacza klucza podpisującego. Nie ma trybu „zainstaluj mimo wszystko":
+    aktualizator bez weryfikacji podpisu oznacza, że przejęcie kanału wydań daje przejęcie
+    tej maszyny.
+
+    Args:
+        args: Argumenty wiersza poleceń (``--config``).
+
+    Returns:
+        0 — przygotowano do podmiany albo nie ma nowszej wersji; 2 — odmowa (konfiguracja,
+        brak klucza, instalacja ze źródeł); 3 — nie dało się sprawdzić albo pobrać.
+    """
+    from husarz import __version__  # noqa: PLC0415
+    from husarz.launcher.aktualizacja import Stan, sprawdz  # noqa: PLC0415
+    from husarz.launcher.instalacja import (  # noqa: PLC0415
+        LIMIT_BINARKI,
+        BladInstalacji,
+        nazwa_zasobu,
+        pobierz,
+        przygotuj,
+        sciezka_binarki,
+        zweryfikuj_podpis,
+    )
+
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if not config.update.enabled:
+        print(
+            "Aktualizacje są WYŁĄCZONE (`update.enabled: false`) — patrz config/update.yaml.",
+            file=sys.stderr,
+        )
+        return 2
+    if config.update.verify_key_ref is None:
+        print(
+            "ODMOWA: brak `update.verify_key_ref`. Instalacja bez weryfikacji podpisu "
+            "znaczy, że przejęcie kanału wydań daje przejęcie tej maszyny — dlatego nie ma "
+            'trybu "zainstaluj mimo wszystko". Wskaż referencję do klucza PUBLICZNEGO '
+            "Ed25519, np. `env:HUSARZ_UPDATE_KEY`.",
+            file=sys.stderr,
+        )
+        return 2
+
+    binarka = sciezka_binarki()
+    if binarka is None:
+        print(
+            "ODMOWA: Husarz nie działa jako binarka, więc nie ma czego podmieniać. "
+            "Instalację ze źródeł aktualizuj przez `git pull` + `pip install -e .`, "
+            "a kontener przez `docker pull`.",
+            file=sys.stderr,
+        )
+        return 2
+    nazwa = nazwa_zasobu()
+    if nazwa is None:
+        print(f"ODMOWA: dla systemu '{sys.platform}' nie budujemy wydań.", file=sys.stderr)
+        return 2
+
+    klucz = _resolve_secret_ref(config.update.verify_key_ref, "update.verify_key_ref")
+
+    wynik = sprawdz(config, __version__)
+    if wynik.stan is Stan.NIEZNANY:
+        print(f"Nie udało się sprawdzić aktualizacji: {wynik.powod}", file=sys.stderr)
+        return 3
+    if wynik.stan is not Stan.DOSTEPNA:
+        print(f"Masz najnowszą wersję ({wynik.biezaca}) — nie ma czego instalować.")
+        return 0
+
+    from husarz.launcher.aktualizacja import ZrodloGitHub  # noqa: PLC0415
+
+    wydanie, powod = ZrodloGitHub(config).najnowsze()
+    if wydanie is None:  # pragma: no cover - `sprawdz` wyżej już by to wychwyciło
+        print(f"Nie udało się odczytać wydania: {powod}", file=sys.stderr)
+        return 3
+    zasob = wydanie.zasob(nazwa)
+    podpis_zasob = wydanie.zasob(f"{nazwa}.sig")
+    if zasob is None or podpis_zasob is None:
+        print(
+            f"ODMOWA: wydanie {wydanie.wersja} nie zawiera pliku '{nazwa}' wraz z podpisem "
+            f"'{nazwa}.sig'. Wydanie bez podpisu jest dla tego mechanizmu nieinstalowalne.",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(f"Pobieram {nazwa} z wydania {wydanie.wersja}…", flush=True)
+    try:
+        dane = pobierz(zasob.url, config=config, limit=LIMIT_BINARKI)
+        podpis = pobierz(podpis_zasob.url, config=config, limit=4096).decode("utf-8")
+        zweryfikuj_podpis(dane, podpis, klucz)
+        oczekujaca = przygotuj(dane, podpis, binarka)
+    except BladInstalacji as exc:
+        print(f"[!!] {exc}", file=sys.stderr)
+        return 3
+
+    print(
+        f"Podpis zweryfikowany. Nowa wersja czeka jako {oczekujaca.name}.\n"
+        f"URUCHOM HUSARZA PONOWNIE, żeby ją zainstalować.",
+        flush=True,
+    )
+    return 0
 
 
 def _cmd_config_explain(args: argparse.Namespace) -> int:
@@ -1194,6 +1341,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_update_check.add_argument("--config", default=None, help="Katalog konfiguracji.")
     p_update_check.set_defaults(func=_cmd_update_check)
+
+    p_update_apply = update_sub.add_parser(
+        "apply",
+        help="Pobierz i zweryfikuj nowe wydanie; podmiana nastąpi przy najbliższym starcie.",
+    )
+    p_update_apply.add_argument("--config", default=None, help="Katalog konfiguracji.")
+    p_update_apply.set_defaults(func=_cmd_update_apply)
 
     p_config = sub.add_parser("config", help="Operacje na konfiguracji.")
     config_sub = p_config.add_subparsers(dest="config_command", required=True)

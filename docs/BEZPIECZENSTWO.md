@@ -3078,3 +3078,55 @@ repozytorium, a operator odtworzyłby pułapkę u siebie i tak samo jej nie zauw
 wygenerować, a nie tyle, ile model faktycznie wygeneruje. Przy oknie 8192 i limicie 2048
 tracimy więc czwartą część okna na każdą rozmowę. Rozwiązaniem byłoby traktowanie limitu
 kosztowego jako sufitu, a nie prognozy — pozycja zapisana w ROADMAP.
+
+## Etap 18p — aktualizator: kod, który doprowadza do wykonania cudzego kodu
+
+**Dlaczego ta notatka jest osobna.** Aktualizator jest najwrażliwszym mechanizmem
+w projekcie. Nie chodzi o dane, lecz o to, że pobiera plik, który system operacyjny potem
+URUCHOMI. Bez weryfikacji podpisu przejęcie kanału wydań — albo samego konta u dostawcy —
+dawałoby przejęcie każdej instalacji naraz, jednym ruchem, bez dotykania żadnej z nich.
+
+**Podpis jest warunkiem, nie ostrzeżeniem.** Nie ma trybu „zainstaluj mimo wszystko".
+Odmowa następuje przy braku klucza, braku pliku `.sig` w wydaniu, niezgodnym podpisie oraz
+przy instalacji ze źródeł (nie ma czego podmieniać).
+
+**Cztery własności konstrukcji.**
+
+| Własność | Przed czym broni |
+|---|---|
+| weryfikacja PRZED zapisem na ścieżkę docelową | plik bez ważnego podpisu nigdy nie leży pod nazwą, którą system uruchamia |
+| PONOWNA weryfikacja przed podmianą | podmiana pliku między pobraniem a restartem |
+| każdy skok przekierowania sprawdzany osobno | 302 jako droga poza allowlistę i poza pin IP |
+| poprzednia wersja zachowana jako `.old` | nowa wersja, która nie wstaje |
+
+**Przekierowania to wyjątek wymagający uzasadnienia.** Cały projekt ustawia
+`follow_redirects=False`, bo przekierowanie omija walidację i pin IP (ADR-0020). Serwer
+wydań kieruje jednak na magazyn plików, więc przekierowanie jest nieuniknione. Obsługujemy
+je RĘCZNIE: każdy hop przechodzi allowlistę `update.sources`, kontrolę anty-SSRF i pin IP,
+a liczba skoków jest ograniczona. Skok bez tego byłby dziurą dokładnie w tym miejscu,
+w którym boli najbardziej.
+
+**Klucz weryfikujący nie może pochodzić z magazynu Husarza.** `update.verify_key_ref`
+odrzuca schemat `husarz:` z tego samego powodu, co klucz HMAC audytu: klucz, którym
+sprawdzamy autentyczność nowego KODU, nie może pochodzić z magazynu należącego do systemu,
+który ten kod ma zastąpić.
+
+**Wykryte przy wydzielaniu weryfikacji.** Dokumentacja podawała operatorowi polecenie
+`ssh-keygen -t ed25519`, a istniejący kod czytał wyłącznie PEM i surowy base64 — klucz
+wygenerowany zgodnie z własną instrukcją projektu byłby ODRZUCONY, i to z komunikatem
+sugerującym, że jest zły. Dodano obsługę formatu OpenSSH, wraz ze sprawdzeniem etykiety typu
+WEWNĄTRZ blobu: klucz innego algorytmu opisany słowem `ssh-ed25519` musi zostać odrzucony,
+a nie przyjęty jako Ed25519.
+
+**Nośność.** Dziesięć mutacji, wszystkie czerwienią testy — w tym przepuszczenie złego
+podpisu, brak powtórnej weryfikacji przed podmianą, zapis wprost pod nazwę uruchamialną
+i zignorowanie allowlisty przy pobieraniu. Dwie przeżyły pierwsze podejście i obie wskazały
+słabość TESTÓW, nie kodu: brak sprawdzenia treści komunikatu (pusty podpis odpadał później,
+z mylącym alarmem o niezgodności) oraz brak przypadku klucza mylnie opisanego jako Ed25519.
+
+**Czego NIE zweryfikowano — wprost.** Całej drogi na żywo: repozytorium nie ma jeszcze
+żadnego GitHub Release, a pipeline wydań dopiero od tej zmiany podpisuje artefakty. Pobranie,
+weryfikacja i podmiana są sprawdzone testami z prawdziwą kryptografią (klucze generowane
+w teście, w tym przez `ssh-keygen`), ale nie przebiegiem end-to-end z prawdziwym wydaniem.
+Do czasu pierwszego podpisanego wydania mechanizm pozostaje niezweryfikowany w boju
+i tak jest odnotowany w ROADMAP.

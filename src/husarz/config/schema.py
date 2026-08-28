@@ -1596,11 +1596,19 @@ class UpdateConfig(_StrictModel):
         repository: Repozytorium wydań w postaci ``wlasciciel/nazwa``. ``None`` przy
             wyłączonym mechanizmie; wymagane, gdy włączony — bez niego nie ma czego pytać.
         sources: Allowlista hostów dla zapytania o wydania. Pusta = nic nie wolno.
+        verify_key_ref: **Referencja** do klucza PUBLICZNego Ed25519, którym weryfikujemy
+            podpis pobranej binarki. Klucz publiczny nie jest tajny, ale i tak trzymamy go
+            poza plikiem konfiguracji — dokładnie jak przy ROE — żeby wymiana klucza nie
+            wymagała edycji configu. ``None`` znaczy: sprawdzanie wersji działa, ale
+            ``husarz update apply`` ODMÓWI. Nie jest to ostrzeżenie do zignorowania:
+            instalacja bez weryfikacji podpisu oznacza, że przejęcie kanału wydań daje
+            przejęcie tej maszyny.
     """
 
     enabled: bool = False
     repository: str | None = None
     sources: list[str] = Field(default_factory=list)
+    verify_key_ref: str | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> UpdateConfig:
@@ -1650,6 +1658,17 @@ class UpdateConfig(_StrictModel):
                 "update.enabled=true wymaga niepustej `update.sources` — bez allowlisty "
                 "zapytanie o wersję i tak zostanie zablokowane przez bramkę egress."
             )
+        if self.verify_key_ref is not None:
+            wartosc = self.verify_key_ref.strip()
+            if not wartosc.startswith(_EXTERNAL_REF_SCHEMES):
+                raise ValueError(
+                    "update.verify_key_ref musi być referencją do sekretu ZEWNĘTRZNEGO "
+                    "(env:/file:/vault:/sops:), a nie samym materiałem klucza. Schemat "
+                    "'husarz:' jest tu zabroniony: klucz, którym sprawdzamy autentyczność "
+                    "nowego KODU, nie może pochodzić z magazynu należącego do systemu, "
+                    "który ten kod ma zastąpić."
+                )
+            object.__setattr__(self, "verify_key_ref", wartosc)
         return self
 
 

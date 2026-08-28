@@ -54,6 +54,39 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18p — instalacja aktualizacji z weryfikacją podpisu)
+
+- **`husarz update apply`** — pobiera wydanie, WERYFIKUJE PODPIS Ed25519 i przygotowuje je
+  do podmiany; sama podmiana następuje przy najbliższym starcie. To domyka przepływ, o który
+  prosił operator: powiadomienie → `apply` → restart → nowa wersja.
+- **Podpis jest WARUNKIEM, nie ostrzeżeniem.** Nie ma trybu „zainstaluj mimo wszystko".
+  Odmowa przy braku klucza, braku pliku `.sig` w wydaniu, niezgodnym podpisie oraz przy
+  instalacji ze źródeł (nie ma czego podmieniać — wtedy `git pull` albo `docker pull`).
+- **Weryfikacja poprzedza zapis na ścieżkę docelową**, a przed samą podmianą następuje
+  PONOWNIE: między pobraniem a restartem plik leży na dysku.
+- **Każdy skok przekierowania sprawdzany osobno** (allowlista + anty-SSRF + pin IP). Reszta
+  projektu ustawia `follow_redirects=False`; tu przekierowanie jest nieuniknione, więc
+  obsługujemy je ręcznie, hop po hopie.
+- **Poprzednia wersja zachowana jako `.old`** do następnego udanego startu.
+- `update.verify_key_ref` przyjmuje wyłącznie REFERENCJĘ do sekretu zewnętrznego; schemat
+  `husarz:` jest zabroniony — klucz sprawdzający autentyczność nowego KODU nie może pochodzić
+  z magazynu należącego do systemu, który ten kod ma zastąpić.
+- **Pipeline wydań podpisuje binarki** (sekret `HUSARZ_RELEASE_SIGNING_KEY`). Krok jest
+  świadomie nieobowiązkowy: bez sekretu wydanie powstaje bez podpisu i jest nieinstalowalne
+  automatycznie, ale build nie pada — twarda porażka blokowałaby wydania każdemu, kto
+  klonuje projekt bez własnego klucza.
+
+### Naprawione (wykryte przy wydzielaniu weryfikacji podpisu)
+
+- **Dokumentacja podawała polecenie `ssh-keygen -t ed25519`, a kod NIE czytał tego formatu.**
+  Klucz wygenerowany zgodnie z własną instrukcją projektu byłby odrzucony — i to z komunikatem
+  sugerującym, że jest zły. Dodana obsługa formatu OpenSSH, wraz ze sprawdzeniem etykiety typu
+  WEWNĄTRZ blobu: klucz innego algorytmu opisany słowem `ssh-ed25519` musi zostać odrzucony.
+  Dotyczy to także weryfikacji podpisu ROE, która korzysta teraz z tego samego kodu.
+- **Weryfikacja Ed25519 była przywiązana do ROE.** Wydzielona do
+  `husarz.security.ed25519` — dwie kopie bramki bezpieczeństwa rozjeżdżają się przy pierwszej
+  poprawce jednej z nich, a wtedy jedna droga przyjmuje to, co druga odrzuca.
+
 ### Dodane (Etap 18o — powiadomienie o aktualizacji)
 
 - **`husarz update check`** oraz powiadomienie przy starcie `husarz up`. Nowa sekcja

@@ -483,9 +483,56 @@ wychodząca.
 W profilu **airgap** mechanizm jest odrzucany przy starcie: instalacja odcięta od sieci nie
 ma jak sprawdzić wersji, a pole, które „istnieje, ale nie działa", jest gorsze niż jego brak.
 
-### Czego jeszcze NIE ma
+## Instalacja aktualizacji: `husarz update apply`
 
-Na tym etapie Husarz **wyłącznie powiadamia**. Pobierania nowej wersji, weryfikacji podpisu
-i podmiany przy restarcie jeszcze nie ma — to osobny krok, opisany w ROADMAP. Powód
-kolejności jest zasadniczy: aktualizator, który pobiera i **wykonuje kod**, jest powierzchnią
-ataku na łańcuch dostaw, więc nie powstanie przed weryfikacją podpisu ed25519.
+Pobiera wydanie, **weryfikuje podpis** i przygotowuje je do podmiany. Sama podmiana
+następuje przy **najbliższym starcie** — dokładnie ten przepływ, o który chodzi:
+powiadomienie → `apply` → restart → nowa wersja.
+
+```bash
+python -m husarz.launcher.cli update apply --config ./config
+# → Podpis zweryfikowany. Nowa wersja czeka jako husarz-app.new.
+#   URUCHOM HUSARZA PONOWNIE, żeby ją zainstalować.
+```
+
+### Podpis jest WARUNKIEM, nie ostrzeżeniem
+
+Aktualizator doprowadza do **wykonania cudzego kodu** na Twojej maszynie. Bez weryfikacji
+podpisu przejęcie kanału wydań — albo samego konta u dostawcy — dawałoby przejęcie każdej
+instalacji naraz. Dlatego **nie ma trybu „zainstaluj mimo wszystko"**. Komenda odmawia, gdy:
+
+| Sytuacja | Dlaczego odmowa |
+|---|---|
+| brak `update.verify_key_ref` | nie ma czym sprawdzić autentyczności |
+| wydanie bez pliku `.sig` | to samo, tylko po stronie dostawcy |
+| podpis się nie zgadza | plik nie pochodzi od posiadacza klucza albo został zmieniony |
+| Husarz nie jest binarką | nie ma czego podmieniać (źródła → `git pull`, kontener → `docker pull`) |
+
+### Cztery własności, które to zabezpieczają
+
+1. **Weryfikacja poprzedza zapis na ścieżkę docelową.** Pobrane bajty żyją w pliku
+   tymczasowym, dopóki podpis się nie zgodzi; plik oczekujący nigdy nie leży pod nazwą,
+   którą system uruchamia.
+2. **Weryfikujemy DWA razy** — przy pobraniu i ponownie tuż przed podmianą. Między jednym
+   a drugim mija restart, a przez ten czas plik leży na dysku.
+3. **Każdy skok przekierowania jest sprawdzany osobno** (allowlista + pin IP). Reszta
+   projektu ustawia `follow_redirects=False`; tutaj przekierowanie jest nieuniknione (serwer
+   wydań kieruje na magazyn plików), więc obsługujemy je ręcznie, hop po hopie.
+4. **Poprzednia wersja zostaje jako `.old`** do następnego udanego startu — gdyby nowa nie
+   wstała, jest do czego wrócić.
+
+### Co musi zrobić operator
+
+```bash
+ssh-keygen -t ed25519 -f husarz-release -N "" -C "podpis wydan Husarza"
+```
+
+- **publiczny** (`husarz-release.pub`) → `update.verify_key_ref`, np. `file:husarz-release.pub`
+- **prywatny** (`husarz-release`) → sekret repozytorium `HUSARZ_RELEASE_SIGNING_KEY`;
+  do repozytorium **nigdy** nie trafia
+
+Przyjmowane postacie klucza publicznego: PEM, OpenSSH (`ssh-ed25519 AAAA…`) i base64
+32 surowych bajtów. Bez skonfigurowanego sekretu pipeline wydań buduje binarki **bez
+podpisu** — wydanie powstanie, ale będzie nieinstalowalne automatycznie. Krok podpisu nie
+przerywa builda celowo: twarda porażka blokowałaby wydania każdemu, kto klonuje ten projekt
+i nie ma własnego klucza.

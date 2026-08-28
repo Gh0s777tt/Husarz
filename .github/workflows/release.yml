@@ -37,7 +37,8 @@ jobs:
       - name: Instalacja pakietu + PyInstaller
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[package]"
+          # `roe` dokłada `cryptography` — potrzebne krokowi PODPISU binarki niżej.
+          pip install -e ".[package,roe]"
 
       - name: Budowa binarki
         run: pyinstaller packaging/husarz.spec --noconfirm
@@ -46,11 +47,41 @@ jobs:
         shell: bash
         run: mv "${{ matrix.built }}" "dist/${{ matrix.asset }}"
 
+      # PODPIS binarki (Ed25519). Bez niego `husarz update apply` ODMÓWI instalacji —
+      # aktualizator, który doprowadza do wykonania cudzego kodu, nie może opierać się na
+      # samym zaufaniu do TLS i dostawcy. Klucz PRYWATNY jest sekretem repozytorium
+      # (`HUSARZ_RELEASE_SIGNING_KEY`), a operator trzyma jego odpowiednik publiczny
+      # w `update.verify_key_ref`.
+      #
+      # Krok jest ŚWIADOMIE nieobowiązkowy: bez skonfigurowanego sekretu wydanie powstaje
+      # bez podpisu i jest po prostu nieinstalowalne automatycznie. Twarda porażka builda
+      # zablokowałaby wydania każdemu, kto klonuje ten projekt i nie ma własnego klucza.
+      - name: Podpis binarki (Ed25519)
+        if: ${{ env.KLUCZ != '' }}
+        env:
+          KLUCZ: ${{ secrets.HUSARZ_RELEASE_SIGNING_KEY }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, os, pathlib
+          from cryptography.hazmat.primitives import serialization
+
+          klucz = serialization.load_ssh_private_key(
+              os.environ["KLUCZ"].encode("utf-8"), password=None
+          )
+          plik = pathlib.Path("dist/${{ matrix.asset }}")
+          podpis = base64.b64encode(klucz.sign(plik.read_bytes())).decode("ascii")
+          plik.with_name(plik.name + ".sig").write_text(podpis, encoding="utf-8")
+          print(f"podpisano {plik.name} ({len(podpis)} znaków base64)")
+          PY
+
       - name: Publikacja artefaktu
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
+          path: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sig
           if-no-files-found: error
 
   # Osobny, sekwencyjny job Release: jedno wywołanie gh-release z WSZYSTKIMI binarkami
