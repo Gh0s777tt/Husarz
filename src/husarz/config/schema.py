@@ -138,8 +138,34 @@ class RunsConfig(_StrictModel):
     path: Path | None = None
 
 
+class OrchestratorConfig(_StrictModel):
+    """Zachowanie orkiestratora (Chorągiew).
+
+    Attributes:
+        max_parallel_delegations: Ile kroków planu wykonywać RÓWNOLEGLE. ``1`` (domyślne)
+            zachowuje wykonanie sekwencyjne, bit w bit jak przed Etapem 18k.
+
+            **Dlaczego domyślnie 1, skoro równoległość jest szybsza.** Bo nie zawsze jest.
+            Kroki planu trafiają często do TEGO SAMEGO silnika lokalnego — a jedna karta
+            graficzna wykonuje je i tak po kolei, tyle że przy większym zużyciu pamięci
+            i ryzyku, że model zostanie wyładowany w połowie. Zysk pojawia się dopiero, gdy
+            agenci korzystają z RÓŻNYCH endpointów. Włączenie tego bez zrozumienia układu
+            sprzętowego potrafi więc pogorszyć czas odpowiedzi zamiast go poprawić, dlatego
+            jest to decyzja operatora, a nie wartość domyślna.
+
+            Kroki planu są niezależne (każdy dostaje ``context=None``), więc zrównoleglenie
+            nie zmienia SEMANTYKI — kolejność obserwacji pozostaje planowa, nie „kto
+            pierwszy". Zmienia natomiast przeplot skutków ubocznych: wpisy audytu i
+            wywołania narzędzi mieszają się między krokami.
+    """
+
+    max_parallel_delegations: int = Field(default=1, ge=1, le=32)
+
+
 class PlatformConfig(_StrictModel):
     """Ustawienia globalne platformy."""
+
+    orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
 
     profile: Profile = Profile.DEV
     log_level: LogLevel = LogLevel.INFO

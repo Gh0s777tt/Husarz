@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -63,13 +64,19 @@ class ToolCallBudget:
     """
 
     remaining: int
+    # Zamek, bo od Etapu 18k delegacje mogą biec RÓWNOLEGLE. `try_spend` to
+    # read-modify-write: bez niego dwa wątki widzące `remaining == 1` zużyłyby oba,
+    # a budżet ma być twardym ograniczeniem amplifikacji (spawny kontenerów), nie
+    # przybliżeniem. Wykluczony z porównań i reprezentacji dataclass.
+    _zamek: threading.Lock = field(default_factory=threading.Lock, compare=False, repr=False)
 
     def try_spend(self) -> bool:
         """Zużywa jeden token budżetu; ``False`` gdy wyczerpany (fail-closed)."""
-        if self.remaining <= 0:
-            return False
-        self.remaining -= 1
-        return True
+        with self._zamek:
+            if self.remaining <= 0:
+                return False
+            self.remaining -= 1
+            return True
 
 
 def _sha12(text: str) -> str:

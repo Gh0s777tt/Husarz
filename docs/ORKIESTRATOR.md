@@ -72,3 +72,49 @@ for obs in result.observations:
 > Do pracy bez sieci użyj modeli `backend: mock` lub wstrzyknij skryptowany router.
 
 Decyzje projektowe: [ADR-0004](adr/0004-orkiestrator-agenci.md).
+
+## Równoległa delegacja kroków planu
+
+`platform.orchestrator.max_parallel_delegations` decyduje, ile kroków planu wykonywać
+naraz. Wartość domyślna to **1** — wykonanie sekwencyjne, bit w bit jak przed Etapem 18k.
+
+### Dlaczego to jest bezpieczne
+
+Kroki jednej rundy są **niezależne**: każdy dostaje ten sam `context` — w pierwszej rundzie
+`None`, w rundach refleksji podsumowanie policzone RAZ przed pętlą. Żaden krok nie widzi
+wyniku innego, więc wykonanie równoległe nie zmienia semantyki.
+
+To nie jest założenie, lecz własność odczytana z kodu i **utrwalona testem**
+(`test_kroki_planu_NIE_widza_sie_nawzajem`). Gdyby ktoś zaczął przekazywać krokom wyniki
+poprzedników, zrównoleglanie przestałoby być poprawne — i test to zatrzyma.
+
+### Kolejność wyniku pozostaje planowa
+
+Obserwacje wracają w kolejności **kroków planu**, nie zakończenia. To nie jest kosmetyka:
+wchodzą one do refleksji i syntezy, a rekord pomiarowy (`husarz.runs`) ma być porównywalny
+między przebiegami. Kolejność zależna od wyścigu uczyniłaby oba nieporównywalnymi.
+
+### Dlaczego domyślnie wyłączone
+
+Zrównoleglenie nie zawsze przyspiesza. Kroki planu trafiają często do **tego samego** silnika
+lokalnego, a jedna karta graficzna wykona je i tak po kolei — tyle że przy większym zużyciu
+pamięci i ryzyku, że model zostanie wyładowany w połowie. Zysk pojawia się dopiero wtedy, gdy
+agenci korzystają z **różnych** endpointów.
+
+Włączenie tego bez zrozumienia własnego układu sprzętowego potrafi więc pogorszyć czas
+odpowiedzi zamiast go poprawić. Stąd decyzja operatora, nie wartość domyślna.
+
+### Co się zmienia po włączeniu
+
+Przeplot **skutków ubocznych**: wpisy audytu i wywołania narzędzi z różnych kroków mieszają
+się ze sobą, więc dziennik czyta się trudniej. Liczniki, na których opierają się limity, są
+od Etapu 18k chronione zamkami:
+
+| Licznik | Co ogranicza | Skutek zgubionego przyrostu |
+|---|---|---|
+| `ToolCallBudget` | amplifikację wywołań narzędzi (spawny kontenerów) | przekroczenie twardego budżetu |
+| `UsageMeter` | limit tokenów konta | przepuszczenie żądania ponad przydział |
+| `_Tally` | pomiar jakości planu | zafałszowany rekord `husarz.runs` |
+
+Bramka ROE jest niemutowalna po konstrukcji, a dziennik audytu ma własny zamek — obie były
+bezpieczne wcześniej.

@@ -3002,3 +3002,40 @@ wtedy, gdyby zawężania nie było wcale).
 POSIX i Windows, niewpięcie go w endpoint oraz uczynienie go ZA OSTRYM (ucięcie hosta).
 Ostatnia jest istotna osobno — pilnuje granicy w drugą stronę, czyli tego, żeby zawężanie
 nie odebrało diagnozie sensu.
+
+## Etap 18k — liczniki limitów pod współbieżnością
+
+**Co sprawdzano.** Zrównoleglenie delegacji (Etap 18k) wprowadza współbieżny dostęp do
+liczników, na których opierają się LIMITY. Pytanie brzmiało nie „czy to szybsze", lecz „co
+przestaje obowiązywać, gdy dwa kroki biegną naraz".
+
+**Wynik: trzy liczniki nie były bezpieczne wątkowo**, a dwa z nich są bramkami bezpieczeństwa.
+
+| Licznik | Co ogranicza | Skutek wyścigu |
+|---|---|---|
+| `ToolCallBudget.try_spend` | amplifikację wywołań narzędzi (spawny kontenerów) | przekroczenie twardego budżetu |
+| `UsageMeter.add` | limit tokenów konta | przepuszczenie żądania ponad przydział |
+| `_Tally` | pomiar jakości planu | zafałszowany rekord `husarz.runs` |
+
+Wyścig na budżecie odtworzono POMIAREM, nie rozumowaniem: osiem wątków przy budżecie 100
+wydawało 105 tokenów, a `remaining` schodziło do −5.
+
+**Bezpieczne były**: `RoeRuntime` (niemutowalny po konstrukcji) oraz `AuditLog.record`
+(własny zamek od Etapu 13b). Sprawdzone przeglądem, nie założone.
+
+**Lekcja o metodzie: wyścigu „sprawdź i zmień" nie da się wykryć pewnie testem
+czarnoskrzynkowym.** Kontrola nośności pokazała, że mutacja usuwająca zamek czerwieniła test
+nacisku współbieżnego w **4 na 5** przebiegach. Zwiększenie nacisku (16 wątków zamiast 8, 100
+iteracji zamiast 50) podniosło to do **7 na 8** — czyli nadal nie do pewności. Test migoczący
+jest gorszy niż jego brak, bo uczy operatora ignorować czerwień.
+
+Rozwiązaniem nie było dalsze zwiększanie nacisku, lecz zmiana rodzaju sprawdzenia: test
+**trzyma zamek jawnie** i wymaga, by chroniona operacja się na nim zatrzymała. Jest to
+rozstrzygające w obie strony — bez zamka operacja przechodzi natychmiast. Test nacisku
+współbieżnego zostaje obok jako słabszy strażnik regresji, z docstringiem mówiącym wprost,
+czego nie dowodzi.
+
+**Czego NIE zweryfikowano.** Zachowania przy równoległości większej niż 3 na realnych
+silnikach — testy używają routera skryptowego, bez sieci. Zysk (albo strata) czasu przy
+wielu endpointach to pomiar, którego nie da się zrobić bez tego sprzętu; dlatego wartością
+domyślną jest wykonanie sekwencyjne.

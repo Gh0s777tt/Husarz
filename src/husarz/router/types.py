@@ -6,6 +6,7 @@ Kształt odpowiada standardowi OpenAI-compat (chat/completions).
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -76,16 +77,24 @@ class UsageMeter:
     # Czy KTÓRYKOLWIEK backend zgłosił zużycie. Bez tego nie odróżnilibyśmy „zero tokenów"
     # od „backend nie raportuje" — a to różnica między naliczeniem 0 a brakiem danych.
     reported: bool = False
+    _zamek: threading.Lock = field(default_factory=threading.Lock, compare=False, repr=False)
 
     def add(self, usage: Usage | None) -> None:
-        """Dolicza zużycie z jednej odpowiedzi modelu (``None`` i pola ``None`` pomijane)."""
+        """Dolicza zużycie z jednej odpowiedzi modelu (``None`` i pola ``None`` pomijane).
+
+        Pod zamkiem, bo od Etapu 18k delegacje mogą biec RÓWNOLEGLE, a każde dodanie to
+        read-modify-write na trzech licznikach. Zgubiony przyrost nie byłby tu drobiazgiem
+        sprawozdawczym: na tym sumatorze opiera się limit tokenów konta, więc niedoliczenie
+        znaczy przepuszczenie żądania ponad przydział.
+        """
         if usage is None:
             return
-        for field_name in ("prompt_tokens", "completion_tokens", "total_tokens"):
-            value = getattr(usage, field_name)
-            if value is not None:
-                setattr(self, field_name, getattr(self, field_name) + int(value))
-                self.reported = True
+        with self._zamek:
+            for field_name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                value = getattr(usage, field_name)
+                if value is not None:
+                    setattr(self, field_name, getattr(self, field_name) + int(value))
+                    self.reported = True
 
     def snapshot(self) -> Usage | None:
         """Zwraca sumę jako ``Usage`` albo ``None``, gdy żaden backend nic nie zgłosił."""

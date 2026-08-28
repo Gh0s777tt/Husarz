@@ -7,7 +7,9 @@ delegowane do agentów-specjalistów. Wszystko sterowane konfiguracją i prompta
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
@@ -56,6 +58,20 @@ class _Tally:
     skipped_unknown_agent: int = 0
     skipped_roe: int = 0
     roe_denied: int = 0
+    # Zamek: od Etapu 18k delegacje mogą biec równolegle, a te liczniki trafiają do
+    # rekordu pomiarowego. Zgubiony przyrost zafałszowałby pomiar jakości planu — czyli
+    # dokładnie to, po co licznik powstał.
+    _zamek: threading.Lock = field(default_factory=threading.Lock, compare=False, repr=False)
+
+    def dolicz(self, **przyrosty: int) -> None:
+        """Zwiększa wskazane liczniki atomowo.
+
+        Args:
+            przyrosty: Nazwa licznika → wartość przyrostu.
+        """
+        with self._zamek:
+            for nazwa, ile in przyrosty.items():
+                setattr(self, nazwa, getattr(self, nazwa) + ile)
 
 
 class OrchestratorError(Exception):
@@ -99,6 +115,7 @@ class Orchestrator:
         isolate_untrusted: bool = True,
         tool_loop: ToolLoop | None = None,
         max_plan_steps: int = 20,
+        max_parallel: int = 1,
         roe_runtime: RoeRuntime | None = None,
         runs: RunStore | None = None,
     ) -> None:
@@ -115,6 +132,7 @@ class Orchestrator:
         # Pętla narzędziowa (opcjonalna). Bez niej — zachowanie sprzed Etapu 13.
         self._tool_loop = tool_loop
         self._max_plan_steps = max_plan_steps
+        self._max_parallel = max_parallel
         # Runtime ROE (opcjonalny). Bez niego agenci `roe_required` są pomijani jak dotąd —
         # fail-closed: brak wpiętej bramki NIE może oznaczać zgody na delegację.
         self._roe = roe_runtime
@@ -158,15 +176,15 @@ class Orchestrator:
         from_plan: bool = False,
     ) -> Observation:
         if tally is not None:
-            tally.delegations += 1
+            tally.dolicz(delegations=1)
         agent = self._agents.get(step.agent)
         if agent is None or step.agent == self._orchestrator_name:
             if tally is not None:
-                tally.skipped_unknown_agent += 1
+                tally.dolicz(skipped_unknown_agent=1)
                 if from_plan:
                     # Jakość PLANU liczymy tylko po krokach planu — kroki z refleksji
                     # powstają w innej fazie i zacierałyby to, co chcemy zmierzyć.
-                    tally.plan_unknown_agent += 1
+                    tally.dolicz(plan_unknown_agent=1)
             return Observation(step.agent, step.task, SKIPPED_UNKNOWN_AGENT, "")
         # Bramka ROE na poziomie orkiestracji (ADR-0006/0021, Etap 4c): agent wymagający
         # ROE jest delegowany WYŁĄCZNIE pod zleceniem, które ma zgodę, ważny KRYPTOGRAFICZNIE
@@ -176,12 +194,12 @@ class Orchestrator:
         if agent.config.roe_required:
             if self._roe is None:
                 if tally is not None:
-                    tally.skipped_roe += 1
+                    tally.dolicz(skipped_roe=1)
                 return Observation(step.agent, step.task, SKIPPED_ROE, "")
             decision = self._roe.authorize_delegation(step.task, principal=principal)
             if not decision.allowed:
                 if tally is not None:
-                    tally.roe_denied += 1
+                    tally.dolicz(roe_denied=1)
                 message = f"[odmowa ROE: {decision.reason}]"
                 if decision.alternative:
                     message = f"{message} {decision.alternative}"
@@ -206,6 +224,66 @@ class Orchestrator:
         return Observation(
             agent=result.agent, task=step.task, output=result.output, model=result.model
         )
+
+    def _deleguj_wiele(
+        self,
+        steps: list[PlanStep],
+        *,
+        context: str | None = None,
+        budget: ToolCallBudget | None = None,
+        meter: UsageMeter | None = None,
+        principal: str = "",
+        run_id: str = "",
+        tally: _Tally | None = None,
+        from_plan: bool = False,
+    ) -> list[Observation]:
+        """Wykonuje kroki planu — sekwencyjnie albo równolegle — ZAWSZE w kolejności planu.
+
+        **Dlaczego zrównoleglenie jest tu bezpieczne.** Kroki jednej rundy są NIEZALEŻNE:
+        każdy dostaje ten sam ``context`` (w pierwszej rundzie ``None``, w rundach refleksji
+        podsumowanie policzone RAZ przed pętlą), więc żaden nie widzi wyniku innego. Wykonanie
+        równoległe nie zmienia zatem semantyki — zmienia wyłącznie przeplot skutków ubocznych.
+
+        **Kolejność wyniku pozostaje PLANOWA, nie „kto pierwszy".** To nie jest kosmetyka:
+        obserwacje wchodzą do refleksji i syntezy, a rekord pomiarowy ma być porównywalny
+        między przebiegami. Kolejność zależna od wyścigu uczyniłaby oba nieporównywalnymi.
+
+        Przy ``max_parallel_delegations == 1`` nie zakładamy w ogóle puli wątków — ścieżka
+        sekwencyjna zostaje dokładnie taka, jaka była, więc domyślna konfiguracja nie płaci
+        za mechanizm, z którego nie korzysta.
+
+        Args:
+            steps: Kroki do wykonania.
+            context: Kontekst przekazywany KAŻDEMU krokowi (jednakowy — patrz wyżej).
+            budget: Globalny budżet wywołań narzędzi.
+            meter: Sumator zużycia tokenów.
+            principal: Referencja wywołującego.
+            run_id: Identyfikator orkiestracji.
+            tally: Licznik zdarzeń delegacji.
+            from_plan: Czy kroki pochodzą z planu (a nie z refleksji).
+
+        Returns:
+            Obserwacje w kolejności odpowiadającej ``steps``.
+        """
+
+        def wykonaj(step: PlanStep) -> Observation:
+            return self._delegate(
+                step,
+                context=context,
+                budget=budget,
+                meter=meter,
+                principal=principal,
+                run_id=run_id,
+                tally=tally,
+                from_plan=from_plan,
+            )
+
+        rownolegle = min(self._max_parallel, len(steps))
+        if rownolegle <= 1:
+            return [wykonaj(step) for step in steps]
+        with ThreadPoolExecutor(max_workers=rownolegle) as pula:
+            # `map` zachowuje kolejność WEJŚCIA niezależnie od kolejności zakończenia.
+            return list(pula.map(wykonaj, steps))
 
     def _summary(self, observations: list[Observation]) -> str:
         return "\n".join(f"- {o.agent}: {o.output}" for o in observations) or "(brak)"
@@ -255,18 +333,15 @@ class Orchestrator:
         # Globalny budżet wywołań narzędzi na CAŁĄ orkiestrację (świeży per run — nie
         # współdzielony między żądaniami/wątkami). None, gdy pętla nieaktywna.
         budget = self._tool_loop.new_budget() if self._tool_loop is not None else None
-        observations: list[Observation] = [
-            self._delegate(
-                step,
-                budget=budget,
-                meter=meter,
-                principal=principal,
-                run_id=run_id,
-                tally=tally,
-                from_plan=True,
-            )
-            for step in plan.steps
-        ]
+        observations: list[Observation] = self._deleguj_wiele(
+            plan.steps,
+            budget=budget,
+            meter=meter,
+            principal=principal,
+            run_id=run_id,
+            tally=tally,
+            from_plan=True,
+        )
 
         rounds = 0
         while rounds < self._max_extra_rounds:
@@ -278,8 +353,8 @@ class Orchestrator:
             context = self._summary(observations)
             extra_steps = reflection.additional_steps[: self._max_plan_steps]
             observations.extend(
-                self._delegate(
-                    step,
+                self._deleguj_wiele(
+                    extra_steps,
                     context=context,
                     budget=budget,
                     meter=meter,
@@ -287,7 +362,6 @@ class Orchestrator:
                     run_id=run_id,
                     tally=tally,
                 )
-                for step in extra_steps
             )
             rounds += 1
 
@@ -347,6 +421,7 @@ def build_orchestrator(
         isolate_untrusted=config.security.prompt_injection_filters,
         tool_loop=tool_loop,
         max_plan_steps=config.security.tool_loop.max_plan_steps,
+        max_parallel=config.platform.orchestrator.max_parallel_delegations,
         roe_runtime=roe_runtime,
         runs=runs,
     )

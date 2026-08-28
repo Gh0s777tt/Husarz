@@ -37,7 +37,7 @@ Kolejność jest rekomendacją, nie zobowiązaniem.
 | 2 | ~~Kubełek limitu tempa per `principal`~~ — **zrobione** (Etap 18f) | Bezpieczeństwo | ✅ | M |
 | 3 | ~~Routing świadomy zdrowia modelu~~ — **zrobione** (Etap 18j) | Router | ✅ | M |
 | 4 | ~~Rotacja klucza HMAC audytu~~ — **zrobione** (Etap 18a) | Bezpieczeństwo | ✅ | M |
-| 5 | Równoległa delegacja niezależnych kroków planu | Orkiestrator | 🟢 | L |
+| 5 | ~~Równoległa delegacja niezależnych kroków planu~~ — **zrobione** (Etap 18k) | Orkiestrator | ✅ | L |
 | 6 | ~~`husarz config explain`~~ — **zrobione** (Etap 18i) | Launcher | ✅ | S |
 | 7 | Strumieniowanie odpowiedzi (WebSocket) | API + konsola | 🟢 | L |
 | 8 | Chunkowanie dokumentów w RAG | Pamięć | 🟢 | L |

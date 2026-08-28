@@ -21,3 +21,25 @@ language_default: pl
 
 # Zero telemetrii — twardy wymóg. Musi pozostać false.
 telemetry_enabled: false
+
+# --- Orkiestrator (Chorągiew) -----------------------------------------------
+#
+# Ile kroków planu wykonywać RÓWNOLEGLE. `1` (domyślne) to wykonanie sekwencyjne,
+# bit w bit jak przed Etapem 18k.
+#
+# DLACZEGO DOMYŚLNIE 1, SKORO RÓWNOLEGŁOŚĆ JEST SZYBSZA. Bo nie zawsze jest. Kroki
+# planu trafiają często do TEGO SAMEGO silnika lokalnego — a jedna karta graficzna
+# wykona je i tak po kolei, tyle że przy większym zużyciu pamięci i ryzyku, że model
+# zostanie wyładowany w połowie. Zysk pojawia się dopiero wtedy, gdy agenci korzystają
+# z RÓŻNYCH endpointów (np. część na vLLM, część na Ollamie). Włączenie tego bez
+# zrozumienia własnego układu sprzętowego potrafi pogorszyć czas odpowiedzi zamiast go
+# poprawić — dlatego jest to świadoma decyzja operatora, a nie wartość domyślna.
+#
+# CO SIĘ NIE ZMIENIA: kolejność obserwacji pozostaje PLANOWA, nie „kto pierwszy skończył".
+# Kroki jednej rundy są niezależne (żaden nie widzi wyniku innego), więc zrównoleglenie
+# nie zmienia semantyki.
+#
+# CO SIĘ ZMIENIA: przeplot skutków ubocznych. Wpisy audytu i wywołania narzędzi z różnych
+# kroków mieszają się ze sobą, więc dziennik czyta się trudniej.
+orchestrator:
+  max_parallel_delegations: 1

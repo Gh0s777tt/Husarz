@@ -54,6 +54,39 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18k — równoległa delegacja kroków planu)
+
+- **`platform.orchestrator.max_parallel_delegations`** — ile kroków planu wykonywać naraz.
+  Domyślnie `1`, czyli wykonanie sekwencyjne bit w bit jak wcześniej.
+- **Zrównoleglenie jest semantycznie neutralne**, bo kroki jednej rundy są niezależne: każdy
+  dostaje ten sam `context` (w pierwszej rundzie `None`, w refleksji podsumowanie policzone
+  RAZ przed pętlą). Własność utrwalona testem — gdyby ktoś zaczął przekazywać krokom wyniki
+  poprzedników, zrównoleglanie przestałoby być poprawne i test to zatrzyma.
+- **Kolejność obserwacji pozostaje PLANOWA, nie „kto pierwszy skończył".** Obserwacje wchodzą
+  do refleksji i syntezy, a rekord pomiarowy ma być porównywalny między przebiegami.
+- **Domyślnie wyłączone, i to nie z ostrożności.** Kroki planu trafiają często do TEGO SAMEGO
+  silnika lokalnego — jedna karta graficzna wykona je i tak po kolei, tyle że przy większym
+  zużyciu pamięci. Zysk pojawia się dopiero przy RÓŻNYCH endpointach, więc włączenie bez
+  zrozumienia własnego sprzętu potrafi pogorszyć czas odpowiedzi.
+
+### Naprawione (warunek poprawności zrównoleglenia)
+
+- **`ToolCallBudget.try_spend` nie był bezpieczny wątkowo** — a to twarde ograniczenie
+  amplifikacji wywołań narzędzi (spawny kontenerów). Odtworzone pomiarem: 8 wątków przy
+  budżecie 100 wydawało 105 tokenów, a licznik schodził poniżej zera.
+- **`UsageMeter.add` nie był bezpieczny wątkowo** — na tym sumatorze opiera się limit tokenów
+  konta, więc zgubiony przyrost znaczy przepuszczenie żądania ponad przydział.
+- **`_Tally` nie był bezpieczny wątkowo** — zafałszowałby pomiar jakości planu, czyli
+  dokładnie to, po co licznik powstał.
+
+### Zmienione (metoda testowania wyścigów)
+
+- **Wyścigu „sprawdź i zmień" nie da się wykryć pewnie testem czarnoskrzynkowym.** Pomiar:
+  mutacja usuwająca zamek czerwieniła test nacisku współbieżnego w 4 na 5 przebiegach,
+  a po zwiększeniu nacisku w 7 na 8. Test migoczący jest gorszy niż jego brak, bo uczy
+  ignorować czerwień. Zastąpiony sprawdzeniem DETERMINISTYCZNYM: test trzyma zamek jawnie
+  i wymaga, by operacja się na nim zatrzymała — rozstrzygające w obie strony.
+
 ### Dodane (Etap 18j — wyłącznik bezpiecznikowy routera)
 
 - **`routing.health`** — model po `failures_to_open` KOLEJNYCH awariach trafia na koniec
