@@ -128,11 +128,21 @@ Pozycja przechodzi stamtąd tutaj w chwili podjęcia decyzji o realizacji.
 - 🚧 Uwierzytelnienie + przypisanie ról: **token Bearer + RBAC wpięte w API (Etap 5)**;
   pełny **OIDC** i **mTLS** — Etap 6.
 - ⬜ Runtime egress deny-all na warstwie sieci + izolacja sandboxa (Etap 6).
-- ⬜ Aktywować strategie routingu `cost`/`latency`. Od teraz konfiguracja ich **nie
-  przyjmuje** (walidacja odrzuca z komunikatem) — wcześniej były przyjmowane i po cichu
-  dawały zachowanie `tags`, czyli operator konfigurował politykę, której nie było.
-  Implementacja wymaga NAJPIERW danych w `models.registry`: ceny za token i zmierzonego
-  opóźnienia. Bez nich nie ma czym routować i to jest właściwy powód opóźnienia.
+- ✅ **Strategie routingu `cost`/`latency`** (Etap 18h) — `ModelSpec` ma
+  `cost_per_1m_input`, `cost_per_1m_output` i `latency_p50_ms`, a `selection.py` porządkuje
+  nimi pulę dopasowaną tagami. Kolejność naprawy wynikała wprost z lekcji Etapu 17m: NAJPIERW
+  dane, potem czytelnik — pola bez strategii, która je czyta, byłyby tą samą wadą przeniesioną
+  o poziom niżej. Opis: [docs/ROUTER.md](docs/ROUTER.md).
+- ⬜ **`cost_controls.max_cost_per_task` nadal NIE jest egzekwowane** — i przyczyna zmieniła
+  się w Etapie 18h. Cena modelu już JEST w konfiguracji; przeszkodą jest `UsageMeter`, który
+  sumuje zużycie całej orkiestracji w jednej parze liczników, choć orkiestracja korzysta
+  z różnych modeli o różnych cenach. Wymaga atrybucji tokenów per model. Osobno:
+  `UsageMeter.reported` bywa `False`, gdy backend nie raportuje zużycia — trzeba rozstrzygnąć,
+  czy limit ma wtedy przepuszczać, czy blokować.
+- ⬜ **Kalibracja realnych wartości ceny i opóźnienia** dla dostarczonej konfiguracji.
+  Dostarczony `config/models.yaml` ma pola WYKOMENTOWANE, bo wpisanie zmyślonych liczb byłoby
+  gorsze niż ich brak: router podejmowałby realne decyzje na podstawie danych, których nikt
+  nie sprawdził. Wymaga pomiaru na sprzęcie operatora.
 
 ## ✅ Etap 5 — API + Launcher + Web
 - ✅ REST API rdzenia (FastAPI): health, config, agents, models, tools, audit,

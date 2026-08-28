@@ -7,7 +7,9 @@ fallbacku. Logika jest czysta (bez sieci), więc w pełni testowalna.
 
 from __future__ import annotations
 
-from husarz.config.schema import HusarzConfig
+from collections.abc import Callable
+
+from husarz.config.schema import HusarzConfig, ModelSpec, RoutingStrategy
 
 
 def resolve_agent_model(config: HusarzConfig, agent: str) -> str | None:
@@ -78,16 +80,68 @@ def select_candidates(
             for rule in routing.rules:
                 if rule.match_tags and set(rule.match_tags) <= required_tags:
                     ordered.extend(rule.prefer)
-            # (4) modele posiadające wszystkie wymagane tagi
-            for model_id, spec in registry.items():
-                if required_tags <= set(spec.tags):
-                    ordered.append(model_id)
+            # (4) modele posiadające wszystkie wymagane tagi, uporządkowane STRATEGIĄ
+            pasujace = [
+                (model_id, spec)
+                for model_id, spec in registry.items()
+                if required_tags <= set(spec.tags)
+            ]
+            ordered.extend(_uporzadkuj_strategia(pasujace, routing.strategy))
 
         # (5) domyślny model, gdy nic nie wskazano
         if not ordered:
             ordered.append(config.models.default)
 
     return _expand(ordered, config)
+
+
+#: Wartość zastępcza dla modelu bez danych — trafia na KONIEC porządku, nigdy na początek.
+#: Walidacja krzyżowa nie dopuszcza takiego modelu wśród WŁĄCZONYCH i otagowanych, więc
+#: w praktyce dotyczy to wyłącznie modeli wyłączonych (te i tak odpadają w ``_expand``).
+#: „Brak danych" nie może jednak wyglądać jak „najtańszy" — to ta sama zasada, co przy
+#: diagnozie: nieznane nigdy nie zaokrągla się na korzyść.
+_BRAK_DANYCH = float("inf")
+
+
+def _uporzadkuj_strategia(
+    pasujace: list[tuple[str, ModelSpec]], strategy: RoutingStrategy
+) -> list[str]:
+    """Porządkuje modele dopasowane po TAGACH zgodnie ze strategią routingu.
+
+    **Zakres strategii jest węższy, niż sugeruje jej nazwa, i to jest świadome.** Strategia
+    porządkuje WYŁĄCZNIE pulę z punktu (4) — modele pasujące tagami. NIE rusza modelu
+    wskazanego wprost, przypisania z ``routing.agent_models`` ani kolejności w
+    ``routing.rules[].prefer``, bo to są jawne decyzje operatora. Gdyby ``strategy: cost``
+    je nadpisywało, przypisanie agenta do konkretnego modelu przestałoby cokolwiek znaczyć —
+    a operator, który je wpisał, ma prawo oczekiwać, że obowiązuje.
+
+    Sortowanie jest STABILNE, więc przy równych kosztach zachowana zostaje kolejność
+    rejestru — czyli zachowanie strategii ``tags``.
+
+    Args:
+        pasujace: Pary (identyfikator, specyfikacja) w kolejności rejestru.
+        strategy: Strategia z ``routing.strategy``.
+
+    Returns:
+        Identyfikatory w kolejności wynikającej ze strategii.
+    """
+
+    def po_koszcie(para: tuple[str, ModelSpec]) -> float:
+        laczny = para[1].koszt_laczny
+        return laczny if laczny is not None else _BRAK_DANYCH
+
+    def po_opoznieniu(para: tuple[str, ModelSpec]) -> float:
+        opoznienie = para[1].latency_p50_ms
+        return float(opoznienie) if opoznienie is not None else _BRAK_DANYCH
+
+    klucze: dict[RoutingStrategy, Callable[[tuple[str, ModelSpec]], float]] = {
+        RoutingStrategy.COST: po_koszcie,
+        RoutingStrategy.LATENCY: po_opoznieniu,
+    }
+    klucz = klucze.get(strategy)
+    if klucz is None:
+        return [model_id for model_id, _ in pasujace]
+    return [model_id for model_id, _ in sorted(pasujace, key=klucz)]
 
 
 def _expand(ordered: list[str], config: HusarzConfig) -> list[str]:

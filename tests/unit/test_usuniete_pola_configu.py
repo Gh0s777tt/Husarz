@@ -58,22 +58,22 @@ def test_dostarczona_konfiguracja_nie_uzywa_usunietego_pola(
 # ------------------------------- ustawienia, które NIE ROBIĄ nic, są odrzucane
 
 
-def test_niezaimplementowana_strategia_routingu_jest_ODRZUCANA() -> None:
-    """`routing.strategy: cost` nie robiło NIC — router nie czyta tego pola ani razu.
+def test_strategie_cost_i_latency_SĄ_juz_przyjmowane() -> None:
+    """SPROSTOWANIE: odmowa z Etapu 17m przestała być prawdziwa i została zdjęta.
 
-    Operator ustawiał politykę doboru modelu po koszcie i dostawał po cichu zachowanie
-    `tags`. Ta sama klasa co `weights_path`, tylko gorsza: nazwa obiecuje POLITYKĘ, a nie
-    ścieżkę. Dokumentacja mówiła o tym uczciwie („placeholdery na kolejne etapy") — ale
-    dokumentacja to najsłabsza z możliwych kontroli, bo nie czyta jej ten, kto edytuje YAML.
+    Stało tu wcześniej `test_niezaimplementowana_strategia_routingu_jest_ODRZUCANA`,
+    a odmowa miała konkretną przesłankę: `models.registry` nie przechowywał ceny ani
+    opóźnienia, więc strategia nie miała czym routować i po cichu zachowywała się jak
+    `tags`. W Etapie 18h dane doszły, a `selection.py` faktycznie je czyta — przesłanka
+    zniknęła, więc odmowa musiała zniknąć razem z nią. Zostawienie jej byłoby odmową,
+    która stała się nieprawdziwa: dokładnie tym, przed czym ostrzegał sąsiedni test.
+
+    Sam mechanizm odrzucania NIE zniknął — pilnuje czwartej wartości, gdyby kiedyś doszła.
     """
-    from husarz.config.schema import RoutingConfig
+    from husarz.config.schema import RoutingConfig, RoutingStrategy
 
-    for niedziałająca in ["cost", "latency"]:
-        with pytest.raises(ValueError) as exc:
-            RoutingConfig(strategy=niedziałająca)
-        tresc = str(exc.value)
-        assert "NIE jest jeszcze zaimplementowane" in tresc, niedziałająca
-        assert "tags" in tresc, "komunikat musi podać wartość, która DZIAŁA"
+    for strategia in RoutingStrategy:
+        assert RoutingConfig(strategy=strategia).strategy is strategia
 
 
 def test_dzialajaca_strategia_przechodzi() -> None:
@@ -105,20 +105,26 @@ def test_kazda_wartosc_enuma_ma_ROZSTRZYGNIETY_status() -> None:
                 RoutingConfig(strategy=wartosc)
 
 
-def test_router_faktycznie_NIE_czyta_pola_strategy() -> None:
-    """Kontrola ŹRÓDŁA potwierdzająca przesłankę całej tej odmowy.
+def test_router_faktycznie_CZYTA_pole_strategy() -> None:
+    """Ten test zadziałał dokładnie tak, jak został zaprojektowany — i dlatego się odwrócił.
 
-    Gdyby ktoś kiedyś wpiął `strategy` w `selection.py`, ten test zaczerwieni się i zmusi
-    do przemyślenia walidatora — zamiast zostawić odmowę, która stała się nieprawdziwa.
-    Świadomie słabszy niż test skutku: sprawdza brak odwołania, nie brak zachowania.
+    W Etapie 17m brzmiał `test_router_faktycznie_NIE_czyta_pola_strategy` i sprawdzał BRAK
+    odwołania do `.strategy` w `selection.py`. Jego docstring zapowiadał: „gdyby ktoś kiedyś
+    wpiął `strategy`, ten test zaczerwieni się i zmusi do przemyślenia walidatora — zamiast
+    zostawić odmowę, która stała się nieprawdziwa". W Etapie 18h zaczerwienił się i zmusił.
+
+    Teraz pilnuje warunku odwrotnego, bo to on jest przesłanką NOWEGO stanu: skoro
+    konfiguracja przyjmuje `cost`/`latency`, kod musi je czytać. Sprawdzenie jest — tak jak
+    poprzednio — świadomie SŁABSZE niż test skutku: skutek badają osobno testy doboru
+    w `tests/unit/test_routing_strategie.py`. To jest kontrola przesłanki, nie zachowania.
     """
     from pathlib import Path
 
     zrodlo = Path("src/husarz/router/selection.py").read_text(encoding="utf-8")
 
-    assert ".strategy" not in zrodlo, (
-        "selection.py zaczął czytać `routing.strategy` — zweryfikuj walidator "
-        "`_tylko_zaimplementowane_strategie`, bo jego uzasadnienie mogło przestać być prawdziwe"
+    assert "routing.strategy" in zrodlo, (
+        "selection.py przestał czytać `routing.strategy` — konfiguracja przyjmuje wtedy "
+        "politykę, której nie ma, czyli wraca wada usunięta w Etapie 17m"
     )
 
 

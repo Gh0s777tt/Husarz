@@ -187,6 +187,19 @@ class ModelSpec(_StrictModel):
     params: dict[str, Any] = Field(default_factory=dict)
     fallback: list[str] = Field(default_factory=list)
     enabled: bool = True
+    # --- Dane do doboru po koszcie i opóźnieniu (Etap 18h) -------------------------------
+    #
+    # Jednostka ceny jest UMOWNA i celowo nienazwana. Husarz jest hostowany samodzielnie,
+    # więc „cena" znaczy co innego dla modelu lokalnego (prąd, amortyzacja karty, czas
+    # zajętości) niż dla dostawcy zewnętrznego (rachunek w walucie). Router porównuje
+    # wyłącznie WZGLĘDNIE, więc wystarczy, że operator użyje jednej skali dla całego
+    # rejestru. Wartość 0 jest dopuszczalna i znaczy „model darmowy w tej skali".
+    cost_per_1m_input: float | None = Field(default=None, ge=0)
+    cost_per_1m_output: float | None = Field(default=None, ge=0)
+    # Zmierzona mediana opóźnienia odpowiedzi. POMIAR operatora, nie obietnica dostawcy —
+    # zależy od sprzętu, długości kontekstu i obciążenia, więc wpisana liczba jest ważna
+    # tylko dla TEJ instalacji.
+    latency_p50_ms: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="before")
     @classmethod
@@ -216,6 +229,43 @@ class ModelSpec(_StrictModel):
                 "wagi, decyduje sam silnik — patrz ollama/README.md."
             )
         return dane
+
+    @model_validator(mode="after")
+    def _cena_w_komplecie(self) -> ModelSpec:
+        """Obie składowe ceny muszą być podane razem albo wcale.
+
+        Dobór po koszcie porównuje SUMĘ ceny wejścia i wyjścia. Podanie jednej połowy
+        dałoby model pozornie tańszy od wszystkich, które podały obie — czyli pole
+        wprowadzałoby w błąd dokładnie w tę stronę, w którą operator najmniej chce.
+
+        Raises:
+            ValueError: Gdy podano dokładnie jedną ze składowych ceny.
+        """
+        podane = [self.cost_per_1m_input, self.cost_per_1m_output]
+        if any(w is not None for w in podane) and not all(w is not None for w in podane):
+            raise ValueError(
+                "models.registry[...] wymaga OBU pól ceny naraz: `cost_per_1m_input` "
+                "i `cost_per_1m_output`. Dobór po koszcie sumuje obie składowe, więc model "
+                "z podaną jedną wyglądałby na tańszy od modeli, które podały obie."
+            )
+        return self
+
+    @property
+    def koszt_laczny(self) -> float | None:
+        """Suma ceny wejścia i wyjścia — klucz porządkowania dla strategii ``cost``.
+
+        **Dlaczego suma, a nie ważona kombinacja.** W chwili DOBORU modelu nie wiadomo,
+        ile tokenów wyjścia wygeneruje żądanie — to rozstrzyga się dopiero po odpowiedzi.
+        Każda waga byłaby więc zgadywaniem kształtu ruchu, a suma jest przybliżeniem
+        jawnym i monotonicznym: model tańszy w obu składowych zawsze wypada wcześniej.
+        Ograniczenie jest zapisane w `docs/ROUTER.md`.
+
+        Returns:
+            Suma składowych albo ``None``, gdy ceny nie podano.
+        """
+        if self.cost_per_1m_input is None or self.cost_per_1m_output is None:
+            return None
+        return self.cost_per_1m_input + self.cost_per_1m_output
 
 
 class ModelsConfig(_StrictModel):
@@ -279,10 +329,18 @@ class CostControls(_StrictModel):
         (`max_tokens_per_request`, `max_requests_per_minute`) są egzekwowane, więc operator
         miał wszelkie podstawy sądzić, że trzecie też. Nie było.
 
-        Przyczyna jest ta sama, co przy `routing.strategy: cost`: `models.registry` nie
-        przechowuje ceny modelu, więc kosztu w walucie nie ma z czego policzyć. Odrzucamy
-        tak samo twardo jak tam — dwa różne zachowania dla jednej przyczyny byłyby
-        niespójnością, którą ktoś odziedziczy.
+        **SPROSTOWANIE uzasadnienia (Etap 18h).** Do tej pory stało tu, że przyczyną jest
+        ta sama luka, co przy `routing.strategy: cost` — brak ceny w `models.registry`. To
+        przestało być prawdą: `ModelSpec` ma `cost_per_1m_input`/`cost_per_1m_output`,
+        a strategia doboru po koszcie działa. Odmowa ZOSTAJE, ale przyczyna jest inna
+        i węższa, więc trzeba ją nazwać dokładnie, zamiast powtarzać nieaktualną.
+
+        Prawdziwa przeszkoda: ``UsageMeter`` sumuje zużycie CAŁEJ orkiestracji w jednej
+        parze liczników, a orkiestracja używa RÓŻNYCH modeli (plan hetmanem, delegacje
+        specjalistami). Bez atrybucji tokenów per model nie ma jak pomnożyć zużycia przez
+        właściwą cenę. Dochodzi drugi problem, osobny: ``UsageMeter.reported`` bywa
+        ``False``, gdy backend nie raportuje zużycia — a limit kosztu, który przy braku
+        danych milczy, byłby limitem pozornym. Obie sprawy są zapisane w ROADMAP.
 
         Raises:
             ValueError: Gdy limit kosztu jest ustawiony.
@@ -290,11 +348,13 @@ class CostControls(_StrictModel):
         if self.max_cost_per_task is not None:
             raise ValueError(
                 "routing.cost_controls.max_cost_per_task NIE JEST egzekwowane — żaden kod nie "
-                "czyta tego pola, więc limit nie obowiązywał (choć oba sąsiednie limity w tym "
-                "bloku obowiązują). Policzenie kosztu w walucie wymaga ceny modelu, której "
-                "`models.registry` nie przechowuje. Usuń pole i użyj działających limitów: "
-                "`max_tokens_per_request`, `max_requests_per_minute` oraz "
-                "`security.auth.default_token_quota` (limit tokenów per konto)."
+                "czyta tego pola, więc limit nie obowiązuje (choć oba sąsiednie limity w tym "
+                "bloku obowiązują). Cena modelu JEST już w konfiguracji "
+                "(`models.registry[...].cost_per_1m_input/output`, Etap 18h), ale nie ma jak "
+                "policzyć kosztu zadania: licznik zużycia sumuje całą orkiestrację razem, "
+                "a ta korzysta z różnych modeli o różnych cenach. Usuń pole i użyj "
+                "działających limitów: `max_tokens_per_request`, `max_requests_per_minute` "
+                "oraz `security.auth.default_token_quota` (limit tokenów per konto)."
             )
         return self
 
@@ -308,7 +368,10 @@ class CostControls(_StrictModel):
 # zachowanie `tags`, a operator miał prawo sądzić, że skonfigurował routing po koszcie.
 # Dokumentacja mówiła o tym uczciwie — ale dokumentacja to najsłabsza z możliwych kontroli:
 # nie czyta jej ten, kto edytuje YAML.
-_ZAIMPLEMENTOWANE_STRATEGIE: frozenset[RoutingStrategy] = frozenset({RoutingStrategy.TAGS})
+#: Strategie, które router NAPRAWDĘ realizuje. Od Etapu 18h są to wszystkie z enuma —
+#: zbiór zostaje, bo to on pilnuje, żeby przy dodaniu czwartej wartości nie powtórzyła się
+#: sytuacja sprzed Etapu 17m: enum przyjmował `cost`/`latency`, a router cicho robił `tags`.
+_ZAIMPLEMENTOWANE_STRATEGIE: frozenset[RoutingStrategy] = frozenset(RoutingStrategy)
 
 
 class RoutingConfig(_StrictModel):
@@ -325,9 +388,14 @@ class RoutingConfig(_StrictModel):
     def _tylko_zaimplementowane_strategie(self) -> RoutingConfig:
         """Odrzuca strategie, których router nie realizuje — zamiast cicho udawać `tags`.
 
-        Fail-closed: lepiej nie wystartować z czytelnym komunikatem, niż działać inaczej,
-        niż mówi konfiguracja. Wartości `cost`/`latency` zostają w enumie, bo są zapisanym
-        zamiarem — ale ich wybór ma boleć teraz, a nie zaskoczyć przy pierwszym rachunku.
+        Od Etapu 18h wszystkie wartości enuma są zrealizowane, więc ta kontrola nic dziś
+        nie odrzuca. Zostaje mimo to i nie jest martwym kodem: pilnuje, żeby dodanie
+        CZWARTEJ wartości nie powtórzyło sytuacji sprzed Etapu 17m, gdy enum przyjmował
+        `cost`/`latency`, a router po cichu zachowywał się jak `tags`. Koszt utrzymania
+        jest zerowy, a cena pomyłki — konfiguracja polityki, której nie ma.
+
+        Wymaganie DANYCH dla strategii `cost`/`latency` sprawdza walidacja krzyżowa
+        w :class:`HusarzConfig`, bo dopiero tam widać rejestr modeli.
 
         Raises:
             ValueError: Gdy wybrano strategię jeszcze niezaimplementowaną.
@@ -335,11 +403,9 @@ class RoutingConfig(_StrictModel):
         if self.strategy not in _ZAIMPLEMENTOWANE_STRATEGIE:
             dostepne = ", ".join(sorted(s.value for s in _ZAIMPLEMENTOWANE_STRATEGIE))
             raise ValueError(
-                f"routing.strategy='{self.strategy.value}' NIE jest jeszcze zaimplementowane — "
+                f"routing.strategy='{self.strategy.value}' NIE jest zaimplementowane — "
                 f"router nie czyta tego pola i zachowałby się jak '{RoutingStrategy.TAGS.value}'. "
-                f"Ustaw jedną z działających wartości ({dostepne}). Dobór po koszcie i opóźnieniu "
-                f"wymaga danych o modelach, których `models.registry` dziś nie przechowuje — "
-                f"pozycja jest w ROADMAP."
+                f"Ustaw jedną z działających wartości ({dostepne})."
             )
         return self
 
@@ -1633,6 +1699,37 @@ class HusarzConfig(_StrictModel):
                         f"Profil '{profile_name}' z aktywnym ROE ({zlecenia}): weryfikacja "
                         f"podpisu wymaga security.roe.key_ref (referencji do klucza)."
                     )
+
+        # 4b) Strategia doboru po koszcie/opóźnieniu wymaga DANYCH — inaczej byłaby polityką
+        #     bez podstaw. Sprawdzamy modele WŁĄCZONE i OTAGOWANE, bo dokładnie one wchodzą
+        #     do puli porządkowanej strategią (punkt 4 w `select_candidates`). Model bez
+        #     tagów nigdy tam nie trafi, więc żądanie od niego ceny byłoby rygoryzmem bez
+        #     skutku; model wyłączony odpada w `_expand`.
+        wymagane_pole = {
+            RoutingStrategy.COST: "cost_per_1m_input/cost_per_1m_output",
+            RoutingStrategy.LATENCY: "latency_p50_ms",
+        }.get(self.routing.strategy)
+        if wymagane_pole is not None:
+            brakuje = sorted(
+                model_id
+                for model_id, spec in self.models.registry.items()
+                if spec.enabled
+                and spec.tags
+                and (
+                    spec.koszt_laczny is None
+                    if self.routing.strategy is RoutingStrategy.COST
+                    else spec.latency_p50_ms is None
+                )
+            )
+            if brakuje:
+                errors.append(
+                    f"routing.strategy='{self.routing.strategy.value}' wymaga pola "
+                    f"`{wymagane_pole}` w KAŻDYM włączonym modelu, który ma tagi — to one "
+                    f"tworzą pulę porządkowaną strategią. Brakuje w: {', '.join(brakuje)}. "
+                    f"Bez danych model bez ceny wypadałby na końcu niezależnie od tego, czy "
+                    f"jest drogi, czy tani — a polityka doboru opierałaby się na luce "
+                    f"w konfiguracji, nie na rzeczywistości."
+                )
 
         # 5) Profil airgap: brak egress i brak zdalnych endpointów modeli.
         if self.platform.profile is Profile.AIRGAP:

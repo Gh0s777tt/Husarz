@@ -42,7 +42,7 @@ Kolejność jest rekomendacją, nie zobowiązaniem.
 | 7 | Strumieniowanie odpowiedzi (WebSocket) | API + konsola | 🟢 | L |
 | 8 | Chunkowanie dokumentów w RAG | Pamięć | 🟢 | L |
 | 9 | ~~`mkdocs --strict` i `black scripts` w CI~~ — **zrobione** (Etap 18) | Operacje | ✅ | S |
-| 10 | Pola kosztu i opóźnienia w `ModelSpec` | Router | 🟢 | S |
+| 10 | ~~Pola kosztu i opóźnienia w `ModelSpec`~~ + strategie — **zrobione** (Etap 18h) | Router | ✅ | S |
 
 ---
 
@@ -167,17 +167,25 @@ klasą ryzyka niż pobranie wag. Wymaga własnego ADR i decyzji operatora o mode
 
 ## 3. Router i modele
 
-### 🟢 Pola kosztu i opóźnienia w `ModelSpec` (S) + strategie `cost`/`latency` (M)
+### ✅ Pola kosztu i opóźnienia + strategie `cost`/`latency` — ZREALIZOWANE (Etap 18h)
 
-`ModelSpec` ma dziś `backend`, `model`, `endpoint`, `api_key_ref`,
-`request_timeout_seconds`, `tags`, `vision`, `context_length`, `max_tokens`, `params`,
-`fallback`, `enabled`. **Nie ma żadnego pola o koszcie ani opóźnieniu** — dlatego schemat
-odrzuca `routing.strategy` inne niż `tags`, i słusznie: strategia bez danych byłaby
-kolejnym polem, które wygląda na aktywne i nic nie robi.
+Pozycja zapowiadała kolejność: „najpierw dane w schemacie (S), potem strategia je czytająca
+(M)". Kolejność została zachowana, ale **w jednym kroku** — i to nie było przyspieszaniem
+na skróty, tylko wnioskiem z tej samej lekcji, która pozycję zrodziła. Dodanie pól ceny
+w osobnym commicie zostawiłoby na jakiś czas dokładnie tę wadę, którą Etap 17m usuwał:
+pole konfiguracji, które wygląda na działające i nic nie robi.
 
-Kolejność jest tu ważna: najpierw dane w schemacie (S), potem strategia je czytająca (M),
-a kalibracja rzeczywistych wartości to osobna sprawa 🔴 (patrz sekcja o brakujących
-zasobach).
+Zrealizowane: `cost_per_1m_input`, `cost_per_1m_output`, `latency_p50_ms` w `ModelSpec`;
+`routing.strategy: cost` i `latency` porządkujące pulę dopasowaną tagami; walidacja żądająca
+danych od modeli, które do tej puli trafiają. Opis: [ROUTER](ROUTER.md).
+
+Przy okazji wyszło, że odmowa dla `cost_controls.max_cost_per_task` powoływała się na tę samą
+brakującą cenę — więc jej uzasadnienie stało się nieprawdziwe i zostało poprawione. Samo pole
+NADAL nie jest egzekwowane, ale z innego powodu: `UsageMeter` nie prowadzi atrybucji zużycia
+per model. Pozycja przeszła do ROADMAP z nową, właściwą przyczyną.
+
+**Kalibracja realnych wartości pozostaje otwarta** 🔴 — dostarczony `config/models.yaml` ma
+pola wykomentowane, bo wpisanie zmyślonych liczb byłoby gorsze niż ich brak.
 
 ### 🟢 Routing świadomy zdrowia — wyłącznik bezpiecznikowy (M)
 

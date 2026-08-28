@@ -54,6 +54,40 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
   obietnica opierała się na buforach systemu. Trwałości NIE da się przetestować — została
   kontrola strukturalna, jawnie opisana jako słabsza (luka w `docs/BEZPIECZENSTWO.md`).
 
+### Dodane (Etap 18h — dobór modelu po koszcie i opóźnieniu)
+
+- **`ModelSpec` zyskał `cost_per_1m_input`, `cost_per_1m_output` i `latency_p50_ms`.**
+  Jednostka ceny jest umowna i celowo nienazwana: Husarz jest hostowany samodzielnie, więc
+  „cena" znaczy co innego dla modelu lokalnego (prąd, amortyzacja, czas zajętości) niż dla
+  dostawcy zewnętrznego. Router porównuje wyłącznie względnie.
+- **`routing.strategy: cost` i `latency` DZIAŁAJĄ.** Porządkują pulę modeli dopasowanych po
+  tagach: `cost` rosnąco wg sumy obu składowych ceny, `latency` rosnąco wg zmierzonej mediany.
+- **Zakres strategii jest węższy, niż sugeruje nazwa, i jest to świadome.** Nie rusza modelu
+  wskazanego wprost, przypisań z `routing.agent_models` ani kolejności w `rules[].prefer` —
+  gdyby je nadpisywała, przypisanie agenta do konkretnego modelu przestałoby cokolwiek znaczyć.
+- **Dane są WYMAGANE, inaczej start się nie powiedzie.** Walidacja żąda pól od każdego modelu
+  włączonego i otagowanego (dokładnie te tworzą porządkowaną pulę); model bez tagów i wyłączony
+  są zwolnieni, bo nigdy do niej nie trafiają. Komunikat nazywa brakujące modele.
+- Obie składowe ceny muszą być podane naraz — model z jedną wyglądałby na tańszy od tych,
+  które podały obie.
+- Sortowanie jest stabilne: przy remisie obowiązuje kolejność rejestru, czyli zachowanie `tags`.
+
+### Sprostowane (Etap 18h — twierdzenia, które przestały być prawdziwe)
+
+- **Odmowa `routing.strategy: cost`/`latency`** z Etapu 17m miała przesłankę „registry nie
+  przechowuje ceny ani opóźnienia". Dane doszły, `selection.py` je czyta — odmowa została
+  zdjęta razem z przesłanką. Zostawienie jej byłoby odmową nieprawdziwą, czyli dokładnie tym,
+  przed czym ostrzegał test-strażnik napisany w Etapie 17m. **Ten test zadziałał**: zaczerwienił
+  się, gdy `selection.py` zaczął czytać `strategy`, i wymusił przemyślenie walidatora.
+- **Komunikat odrzucający `cost_controls.max_cost_per_task`** powoływał się na ten sam brak
+  ceny. Odmowa ZOSTAJE (pola nadal nic nie egzekwuje), ale przyczyna jest inna i węższa:
+  `UsageMeter` sumuje zużycie całej orkiestracji w jednej parze liczników, a orkiestracja
+  używa RÓŻNYCH modeli o różnych cenach — bez atrybucji per model nie ma czego mnożyć.
+  Osobno: `UsageMeter.reported` bywa `False`, gdy backend nie raportuje zużycia, a limit,
+  który przy braku danych milczy, byłby limitem pozornym.
+- **`docs/ROUTER.md`** twierdził, że `strategy` przyjmuje wyłącznie `tags`. Przepisane.
+- **`config/routing.yaml`** nazywał `cost`/`latency` „placeholderami — jeszcze nieaktywnymi".
+
 ### Zmienione (Etap 18g — zawężenie ładunku `GET /api/doctor`)
 
 - **Odpowiedź HTTP niesie mniej niż terminal.** Adresy skracane do `schemat://host:port`

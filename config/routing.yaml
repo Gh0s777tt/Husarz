@@ -5,8 +5,20 @@
 # Zmiana modelu agenta = edycja tego pliku, bez zmian w kodzie.
 # ============================================================================
 
-# Strategia doboru. Aktywna jest wyłącznie 'tags' (wybór po tagach/agencie/modelu).
-# 'cost' i 'latency' to placeholdery na kolejne etapy — jeszcze nieaktywne.
+# Strategia doboru. Działają WSZYSTKIE trzy (Etap 18h):
+#
+#   tags     — kolejność rejestru (domyślna, zachowanie dotychczasowe),
+#   cost     — rosnąco wg `cost_per_1m_input + cost_per_1m_output`,
+#   latency  — rosnąco wg `latency_p50_ms`.
+#
+# UWAGA na zakres: strategia porządkuje WYŁĄCZNIE pulę modeli dopasowanych po tagach.
+# NIE rusza modelu wskazanego wprost, przypisań z `agent_models` ani kolejności w
+# `rules[].prefer` — to są jawne decyzje operatora i mają obowiązywać.
+#
+# `cost` i `latency` WYMAGAJĄ danych: przy ich ustawieniu każdy włączony model z tagami musi
+# mieć odpowiednie pola w `config/models.yaml`, inaczej start się nie powiedzie. Zostawiamy
+# `tags`, bo dostarczona konfiguracja nie zawiera zmierzonych wartości — a wpisanie
+# zmyślonych byłoby gorsze niż ich brak.
 strategy: tags
 
 # Domyślny model per agent (nazwa agenta -> id modelu z registry, lub "auto").

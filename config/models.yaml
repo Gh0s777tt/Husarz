@@ -7,6 +7,25 @@
 #
 # UWAGA: poniższe endpointy to lokalne placeholdery dla profilu dev. W profilu
 # airgap muszą pozostać lokalne (loopback/LAN); egress i tak jest deny-all.
+#
+# ---------------------------------------------------------------------------
+# DOBÓR PO KOSZCIE I OPÓŹNIENIU (Etap 18h) — pola opcjonalne:
+#
+#   cost_per_1m_input:  3.0     # cena za MILION tokenów wejścia
+#   cost_per_1m_output: 9.0     # …i wyjścia; obie naraz albo żadna
+#   latency_p50_ms:     900     # ZMIERZONA mediana opóźnienia
+#
+# Jednostka ceny jest umowna: Husarz jest hostowany samodzielnie, więc „cena" znaczy co
+# innego dla modelu lokalnego (prąd, amortyzacja, czas zajętości) niż dla dostawcy
+# zewnętrznego. Router porównuje wyłącznie WZGLĘDNIE — wystarczy jedna skala dla całego
+# rejestru. `latency_p50_ms` to POMIAR na TWOIM sprzęcie, nie obietnica dostawcy.
+#
+# Pola są tu WYKOMENTOWANE świadomie: nie zmierzyliśmy tych wartości dla dostarczonej
+# konfiguracji, a wpisanie zmyślonych byłoby gorsze niż ich brak — router podejmowałby
+# realne decyzje na podstawie liczb, których nikt nie sprawdził.
+#
+# Przy `routing.strategy: cost` albo `latency` te pola stają się WYMAGANE dla każdego
+# włączonego modelu z tagami; brak zatrzymuje start z komunikatem nazywającym modele.
 # ============================================================================
 
 # Domyślny model orkiestracji (musi istnieć w registry).

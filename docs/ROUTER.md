@@ -27,7 +27,7 @@ Kolejność preferencji (pierwszy wygrywa; reszta to fallbacki):
 1. jawny `model=...` (jeśli podany),
 2. model agenta z `routing.agent_models` (o ile nie `auto`),
 3. modele preferowane przez reguły `routing.rules`, których `match_tags` ⊆ żądane `tags`,
-4. dowolny model posiadający wszystkie żądane `tags`,
+4. dowolny model posiadający wszystkie żądane `tags`, **uporządkowany strategią**,
 5. `models.default` — gdy nic nie wybrano.
 
 Do każdego wybranego modelu dołączany jest jego łańcuch `fallback` (o ile
@@ -35,19 +35,51 @@ Do każdego wybranego modelu dołączany jest jego łańcuch `fallback` (o ile
 (`enabled: true`); model wyłączony jest pomijany, ale jego fallbacki nadal
 działają. Rozwijanie fallbacków jest odporne na cykle (każdy model odwiedzany raz).
 
-> **`routing.strategy` przyjmuje wyłącznie `tags`.** Wartości `cost`/`latency` są zapisanym
-> zamiarem na kolejne etapy — i dopóki nim są, **konfiguracja ich nie przyjmuje**: próba
-> ustawienia kończy się czytelnym błędem walidacji przy starcie.
+### Strategia doboru: `tags`, `cost`, `latency`
+
+`routing.strategy` porządkuje **wyłącznie pulę z punktu 4** — modele pasujące tagami.
+
+| Strategia | Porządek puli z punktu 4 |
+|---|---|
+| `tags` (domyślna) | kolejność rejestru |
+| `cost` | rosnąco wg `cost_per_1m_input + cost_per_1m_output` |
+| `latency` | rosnąco wg `latency_p50_ms` |
+
+**Zakres jest węższy, niż sugeruje nazwa, i to jest świadome.** Strategia NIE rusza modelu
+wskazanego wprost, przypisania z `routing.agent_models` ani kolejności w
+`routing.rules[].prefer` — to są jawne decyzje operatora. Gdyby `strategy: cost` je
+nadpisywało, przypisanie agenta do konkretnego modelu przestałoby cokolwiek znaczyć.
+
+Sortowanie jest **stabilne**: przy równych wartościach obowiązuje kolejność rejestru, czyli
+zachowanie `tags`.
+
+**Dane są wymagane, inaczej start się nie powiedzie.** Przy `cost`/`latency` walidacja
+krzyżowa żąda odpowiednich pól od KAŻDEGO modelu włączonego i otagowanego — bo dokładnie te
+tworzą porządkowaną pulę. Model bez tagów i model wyłączony są zwolnieni, bo nigdy do niej
+nie trafiają. Brak danych oznaczałby politykę opartą na luce w konfiguracji, nie na
+rzeczywistości.
+
+**Cena jest sumą obu składowych i jest to przybliżenie.** W chwili DOBORU nie wiadomo, ile
+tokenów wyjścia wygeneruje żądanie — rozstrzyga się to dopiero po odpowiedzi. Każda waga
+byłaby więc zgadywaniem kształtu ruchu; suma jest jawna i monotoniczna (model tańszy w obu
+składowych zawsze wypada wcześniej).
+
+**Jednostka ceny jest umowna i celowo nienazwana.** Husarz jest hostowany samodzielnie, więc
+„cena" znaczy co innego dla modelu lokalnego (prąd, amortyzacja, czas zajętości) niż dla
+dostawcy zewnętrznego. Router porównuje wyłącznie względnie — wystarczy jedna skala dla
+całego rejestru. `latency_p50_ms` to POMIAR operatora, nie obietnica dostawcy: zależy od
+sprzętu i obciążenia, więc wpisana liczba jest ważna tylko dla tej instalacji.
+
+> **SPROSTOWANIE (Etap 18h).** Stała tu wcześniej uwaga, że `routing.strategy` przyjmuje
+> wyłącznie `tags`, a `cost`/`latency` są odrzucane, bo „wymagają danych o modelach, których
+> `models.registry` nie przechowuje". Dane doszły (`cost_per_1m_input`, `cost_per_1m_output`,
+> `latency_p50_ms`), `selection.py` faktycznie je czyta i obie strategie działają — więc
+> tamta uwaga przestała być prawdziwa i została zdjęta.
 >
-> **SPROSTOWANIE.** Poprzednia wersja tej uwagi nazywała je „placeholderami" i na tym
-> poprzestawała. Były jednak placeholderami PRZYJMOWANYMI: `selection.py` nie czyta pola
-> `strategy` ani razu, więc `strategy: cost` dawało po cichu zachowanie `tags`, a operator
-> miał prawo sądzić, że skonfigurował dobór po koszcie. Uczciwy akapit w dokumentacji to
-> najsłabsza z możliwych kontroli — nie czyta go ten, kto edytuje YAML.
->
-> Dobór po koszcie i opóźnieniu wymaga danych o modelach, których `models.registry` dziś nie
-> przechowuje (cena za token, zmierzone opóźnienie). To jest właściwy powód, dla którego
-> strategie nie działają — nie przeoczenie w routerze.
+> Historia jest warta zapamiętania: `cost`/`latency` były wcześniej **przyjmowane** i po
+> cichu dawały zachowanie `tags`. Kolejność naprawy wynikała wprost z tej lekcji — najpierw
+> dane, potem czytelnik. Dodanie pól ceny bez strategii, która je czyta, byłoby tą samą
+> wadą przeniesioną o poziom niżej.
 
 ## Bramka egress (deny-all)
 
