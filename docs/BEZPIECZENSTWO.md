@@ -2459,3 +2459,75 @@ przyjmowanie martwych pól sandboxa, jedna dokładająca montaż hosta.
    dziennika audytu przechodzi `verify()`; `hmac_key` jest nieosiągalny z konfiguracji;
    `SandboxError` wychodzi wyjątkiem z `ToolDispatcher.dispatch` wbrew kontraktowi z jego
    własnego docstringa.
+
+## Etap 17n — kotwica dziennika audytu: odcięcie ogona przestało być niewykrywalne
+
+Notatka weryfikacyjna. Zmiana dotyczy zawartości i weryfikowalności audytu — trzeci poziom
+audytu wg tabeli w `CLAUDE.md`.
+
+### Luka, odtworzona pomiarem
+
+Łańcuch skrótów wykrywa EDYCJĘ wpisu. Nie wykrywa USUNIĘCIA końcówki: pozostały prefiks jest
+wewnętrznie spójny, więc `verify()` melduje „brak manipulacji". Zmierzone przed poprawką:
+
+```
+PEŁNY plik   -> 5 wpisów, verify(): True
+PO ODCIĘCIU  -> 3 wpisy,  verify(): True     <-- luka
+PO EDYCJI    ->            verify(): False   <-- łańcuch działa tam, gdzie działa
+```
+
+Dla dziennika, który README i ARCHITEKTURA nazywały **niemodyfikowalnym**, to luka istotna:
+najłatwiejszym sposobem zatarcia śladu jest usunięcie końcówki, nie edycja w środku.
+
+### Rozwiązanie: kotwica
+
+Plik obok dziennika (`audit.log.kotwica`) z liczbą wpisów i skrótem ostatniego. Przy
+wczytaniu porównujemy — i **skrót, nie tylko licznik**. Sam licznik dałoby się obejść:
+usunąć końcówkę i dopisać własną o tej samej długości. Ma to osobny test.
+
+Trzy rozstrzygnięcia i uzasadnienie każdego:
+
+| Stan | Werdykt | Dlaczego |
+|---|---|---|
+| mniej wpisów niż w kotwicy | **odcięcie** | wpisy zniknęły |
+| tyle samo lub więcej, ale skrót na pozycji kotwicy inny | **przepisana historia** | licznik by tego nie złapał |
+| więcej wpisów, skrót się zgadza | w porządku | dziennik wyprzedza kotwicę po przerwaniu między zapisami |
+
+**Kolejność zapisu jest częścią projektu, nie szczegółem.** Wpis najpierw, kotwica potem.
+Odwrotna zostawiałaby po zaniku zasilania kotwicę wskazującą na wpis, którego nie ma — czyli
+fałszywy alarm manipulacji po zwykłej awarii. Ma to test.
+
+**Uszkodzona kotwica NIE unieważnia dziennika.** Operator, który raz zobaczy „łańcuch
+USZKODZONY" bez powodu, przestanie temu komunikatowi wierzyć — a wtedy nie zareaguje, gdy
+komunikat będzie prawdziwy. Fałszywy alarm w mechanizmie ostrzegawczym jest kosztowny.
+
+**Błąd zapisu kotwicy nie przerywa audytu.** Wpis jest już bezpiecznie na dysku; kotwica to
+warstwa dodatkowa. Przerwanie w tym miejscu zamieniłoby ulepszenie wykrywalności w nową
+awarię ścieżki krytycznej.
+
+### Sprostowania w dokumentacji
+
+`README.md` i `docs/ARCHITEKTURA.md` mówiły „niemodyfikowalny audit log" bez zastrzeżenia.
+Poprawione na precyzyjne: **dopisujący**, z łańcuchem skrótów i kotwicą. README przy okazji
+przestał obiecywać mTLS i OIDC jako działające — od Etapu 17m są odrzucane przy starcie.
+
+### Nośność
+
+**7 mutacji, 7 czerwonych**: `verify()` ignorujące kotwicę; brak kontroli licznika; kotwica
+sprawdzająca sam licznik bez skrótu; dziennik wyprzedzający brany za manipulację; uszkodzona
+kotwica wywracająca weryfikację; zapis nieatomowy; fabryka produkcyjna nieustanawiająca
+kotwicy.
+
+Ostatnia mutacja jest tu najważniejsza: bez niej cała ochrona mogłaby istnieć wyłącznie
+w testach, a `build_audit_log` — jedyna droga produkcyjna — nie zakładałaby kotwicy wcale.
+
+### Ograniczenia — wprost
+
+1. **Kto ma prawo zapisu do katalogu dziennika, ma je też do kotwicy.** Poprzeczka rośnie
+   z „usuń linie" do „usuń linie i zaktualizuj kotwicę", ale to nadal nie jest ochrona przed
+   zmotywowanym napastnikiem. Prawdziwym domknięciem jest `hmac_key` trzymany POZA systemem
+   plików — pozycja otwarta w ROADMAP. Oba mechanizmy są komplementarne, żaden nie zastępuje
+   drugiego.
+2. **Dopisanie wpisów nadal nie jest wykrywalne** bez klucza HMAC: napastnik może policzyć
+   poprawny łańcuch, bo nie ma w nim sekretu.
+3. Kotwica jest plikiem runtime — dopisana do `.gitignore` obok dziennika.

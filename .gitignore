@@ -27,6 +27,8 @@ secrets/
 /var/
 *.log
 audit/*.log
+# Kotwica dziennika (liczba wpisów + skrót ostatniego) — dane runtime, jak sam dziennik.
+audit/*.kotwica
 
 # Python
 __pycache__/

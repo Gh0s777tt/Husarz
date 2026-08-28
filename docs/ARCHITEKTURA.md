@@ -66,7 +66,7 @@ Dokument opisuje architekturę platformy. Aktualizowany na bieżąco wraz z kode
   `run_tests`, `web`, `rag`) z konfinacją, allowlistami i sandboxem bez sieci;
   executor/fetcher/backend wstrzykiwalne. Szczegóły: [NARZEDZIA.md](NARZEDZIA.md),
   [ADR-0005](adr/0005-narzedzia-sandbox.md).
-- **Pakiet `husarz.security`** (Etap 4) — niemodyfikowalny audit log (łańcuch
+- **Pakiet `husarz.security`** (Etap 4) — dopisujący audit log (łańcuch
   skrótów), ROE-gate (twarda bramka Puszkarza, dry-run domyślnie), agent Puszkarz
   (odmowa ofensywy), RBAC oraz dostawcy sekretów File/SOPS/Vault. Od Etapu 17 także
   **zapisywalny** magazyn sekretów (`husarz.security.secret_store`) — jedyne miejsce,

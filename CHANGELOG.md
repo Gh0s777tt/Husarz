@@ -5,6 +5,27 @@ wersjonowanie: [SemVer](https://semver.org/lang/pl/).
 
 ## [Unreleased]
 
+### Poprawione (audyt: odcięcie ogona przestało być niewykrywalne)
+
+- **Łańcuch skrótów wykrywał EDYCJĘ wpisu, ale nie USUNIĘCIE końcówki.** Pozostały prefiks
+  jest wewnętrznie spójny, więc `verify()` meldowało „brak manipulacji" na dzienniku,
+  z którego wpisy zniknęły. Zmierzone: 5 wpisów → usunięto 2 → `verify(): True`. Dla
+  dziennika opisywanego jako „niemodyfikowalny" to luka istotna, bo najłatwiejszym sposobem
+  zatarcia śladu jest właśnie usunięcie końcówki.
+- **Kotwica** obok dziennika: liczba wpisów **i skrót** ostatniego. Sam licznik dałoby się
+  obejść (usunąć końcówkę i dopisać własną o tej samej długości) — ma to osobny test.
+- Kolejność zapisu jest częścią projektu: wpis najpierw, kotwica potem. Odwrotna zostawiałaby
+  po zaniku zasilania kotwicę wskazującą na wpis, którego nie ma — fałszywy alarm manipulacji
+  po zwykłej awarii.
+- **Uszkodzona kotwica NIE unieważnia dziennika**, a błąd jej zapisu nie przerywa audytu.
+  Fałszywy alarm w mechanizmie ostrzegawczym jest kosztowny: operator, który raz zobaczy
+  „łańcuch USZKODZONY" bez powodu, nie zareaguje, gdy komunikat będzie prawdziwy.
+- **SPROSTOWANIE:** `README.md` i `docs/ARCHITEKTURA.md` mówiły „niemodyfikowalny audit log"
+  bez zastrzeżenia. Poprawione na precyzyjne: dopisujący, z łańcuchem skrótów i kotwicą.
+  README przestał też obiecywać mTLS i OIDC jako działające.
+- Ograniczenie zapisane wprost: kto ma prawo zapisu do katalogu, ma je też do kotwicy.
+  Prawdziwym domknięciem jest `hmac_key` spoza systemu plików — pozycja otwarta w ROADMAP.
+
 ### Usunięte / zmienione (przeszukanie systematyczne: pola konfiguracji, które KŁAMAŁY)
 
 Trzy kolejne commity naprawiały pole „wygląda na działające, nie robi nic". CLAUDE.md nakazuje

@@ -475,10 +475,11 @@ działanie agenta. Bez tej liczby każda dalsza optymalizacja jest zgadywaniem.
 
 ## Ustalenia z przeszukania pól konfiguracji (Etap 17m)
 
-- ⬜ **Odcięcie ogona dziennika audytu przechodzi `verify()`** — nie ma kotwicy stanu
-  (`head_hash` ani licznika wpisów utrwalanego poza plikiem), więc usunięcie ostatnich linii
-  jest niewykrywalne, a `GET /api/audit` melduje `verified: true`. Wykryte przy badaniu pola
-  `audit.immutable`. Waga: bezpieczeństwo (zawartość audytu → trzeci wiersz tabeli audytu).
+- ✅ **Odcięcie ogona dziennika audytu jest wykrywane** — kotwica obok dziennika (liczba
+  wpisów + SKRÓT ostatniego, nie sam licznik). Wykrywa też przepisanie końcówki o tej samej
+  długości. Ograniczenie zapisane: kto ma zapis do katalogu, ma go też do kotwicy —
+  prawdziwym domknięciem jest `hmac_key` spoza systemu plików (pozycja niżej).
+  Docs: `docs/BEZPIECZENSTWO.md`, Etap 17n.
 - ⬜ **`hmac_key` dziennika audytu jest nieosiągalny z konfiguracji** — docstring `AuditLog`
   zaleca go w produkcji, a `AuditConfig` nie ma pola na klucz. Bez niego przekucie całego
   łańcucha jest trywialne dla kogoś z prawem zapisu do pliku. Dodać `audit.hmac_key_ref`

@@ -188,7 +188,9 @@ Twarde wymagania (patrz [SECURITY.md](SECURITY.md) i [docs/BEZPIECZENSTWO.md](do
   nie zawiera materiału" obowiązuje bez wyjątku
   ([ADR-0023](docs/adr/0023-zapisywalny-magazyn-sekretow.md)).
 - **Sandbox** narzędzi bez sieci, limity CPU/RAM/czasu, allowlisty komend i ścieżek.
-- **Szyfrowanie at-rest** i mTLS; **OIDC + RBAC**; **niemodyfikowalny audit log**.
+- **Szyfrowanie at-rest**; **RBAC**; **audit log** dopisujący, z łańcuchem skrótów
+  i kotwicą wykrywającą usunięcie wpisów (mTLS i OIDC — Etap 6, dziś odrzucane
+  przy starcie, żeby nie dawać fałszywego poczucia bezpieczeństwa).
 - **Zero telemetrii**; filtry anty-prompt-injection; izolacja treści niezaufanych.
 - **Puszkarz**: tylko autoryzowany pentest (ROE-gate, dry-run); nie tworzy exploitów.
 - **Podpis ROE**: zlecenie jest ważne dopiero z poprawnym podpisem kryptograficznym

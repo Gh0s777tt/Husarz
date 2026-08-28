@@ -86,11 +86,29 @@ class AuditLog:
     Bez ``hmac_key`` łańcuch (goły SHA-256) jest tamper-evident wobec przypadkowej
     korekty. Z ``hmac_key`` (klucz spoza logu) staje się odporny także na
     zmotywowanego edytora bez klucza — zalecane w produkcji.
+
+    **Łańcuch NIE wykrywa odcięcia OGONA.** Usunięcie ostatnich linii pliku zostawia
+    prefiks, który jest wewnętrznie spójny — ``verify()`` zwracało ``True``, choć wpisy
+    zniknęły. Odtworzone pomiarem: dziennik z pięcioma wpisami po usunięciu dwóch ostatnich
+    nadal przechodził weryfikację. Dla dziennika opisywanego jako „niemodyfikowalny" to
+    poważna luka: najłatwiejszym sposobem zatarcia śladu jest właśnie usunięcie końcówki,
+    a nie edycja w środku.
+
+    Stąd **kotwica** (``anchor_path``): plik obok dziennika, w którym trzymamy liczbę wpisów
+    i skrót ostatniego z nich. Przy wczytaniu porównujemy — brakujące wpisy albo przepisana
+    historia stają się widoczne.
+
+    Czego kotwica NIE daje (mówimy to wprost): kto ma prawo zapisu do katalogu dziennika,
+    ten ma je też do kotwicy. Podnosi to poprzeczkę z „usuń linie" do „usuń linie i zaktualizuj
+    kotwicę", i wykrywa awarie przypadkowe (urwany zapis, nieudana rotacja), ale nie zastępuje
+    ``hmac_key`` trzymanego POZA systemem plików. Te dwa mechanizmy są komplementarne.
     """
 
     path: Path | None = None
     clock: Callable[[], datetime] = _default_clock
     hmac_key: bytes | None = None
+    # Ścieżka kotwicy. ``None`` = bez kotwicy (zachowanie sprzed jej wprowadzenia).
+    anchor_path: Path | None = None
     _entries: list[AuditEntry] = field(default_factory=list)
     _last_hash: str = GENESIS_HASH
     # Serializuje dopisywanie: endpointy FastAPI (zwykłe ``def``) biegną w puli
@@ -161,10 +179,47 @@ class AuditLog:
             self._append_to_file(entry)
             self._entries.append(entry)
             self._last_hash = entry.entry_hash
+            # Kotwica PO wpisie, nie przed. Kolejność jest istotna dla awarii: przerwanie
+            # między jednym a drugim zostawia dziennik O KROK DO PRZODU względem kotwicy,
+            # co jest stanem bezpiecznym (nic nie zginęło). Odwrotna kolejność zostawiałaby
+            # kotwicę wskazującą na wpis, którego nie ma — czyli fałszywy alarm manipulacji
+            # po zwykłym zaniku zasilania.
+            self._zapisz_kotwice()
         return entry
 
+    def _zapisz_kotwice(self) -> None:
+        """Utrwala liczbę wpisów i skrót ostatniego — poza plikiem dziennika.
+
+        Błąd zapisu kotwicy NIE przerywa audytu: wpis jest już bezpiecznie na dysku,
+        a kotwica to warstwa dodatkowa. Przerwanie działania w tym miejscu zamieniłoby
+        ulepszenie wykrywalności w nową awarię ścieżki krytycznej.
+        """
+        if self.anchor_path is None:
+            return
+        try:
+            self.anchor_path.parent.mkdir(parents=True, exist_ok=True)
+            tymczasowy = self.anchor_path.with_suffix(self.anchor_path.suffix + ".tmp")
+            tymczasowy.write_text(
+                json.dumps({"wpisow": len(self._entries), "skrot": self._last_hash}),
+                encoding="utf-8",
+            )
+            # Podmiana atomowa: kotwica nigdy nie jest widziana w stanie połowicznym.
+            tymczasowy.replace(self.anchor_path)
+        except OSError:  # pragma: no cover - rzadka ścieżka I/O
+            return
+
     def verify(self) -> bool:
-        """Sprawdza integralność łańcucha skrótów. ``True`` = brak manipulacji."""
+        """Sprawdza integralność dziennika: łańcuch skrótów ORAZ kompletność wobec kotwicy.
+
+        Sam łańcuch nie wystarcza — patrz docstring klasy: odcięcie ogona zostawia prefiks
+        wewnętrznie spójny, więc do wprowadzenia kotwicy ta metoda meldowała „brak
+        manipulacji" na dzienniku, z którego usunięto wpisy.
+
+        Returns:
+            ``True``, gdy łańcuch jest spójny i nic nie zniknęło.
+        """
+        if not self._kompletny_wobec_kotwicy():
+            return False
         prev = GENESIS_HASH
         for entry in self._entries:
             if entry.prev_hash != prev:
@@ -183,11 +238,52 @@ class AuditLog:
             prev = entry.entry_hash
         return True
 
+    def _kompletny_wobec_kotwicy(self) -> bool:
+        """Czy dziennik zawiera wszystko, co kotwica widziała ostatnio.
+
+        Trzy rozstrzygnięcia, każde z uzasadnieniem:
+
+        * **mniej wpisów niż w kotwicy** → ODCIĘCIE. Wpisy zniknęły.
+        * **tyle samo lub więcej, ale skrót na pozycji kotwicy się nie zgadza** → historia
+          została PRZEPISANA. Sama liczba wpisów by tego nie złapała: napastnik mógłby
+          usunąć końcówkę i dopisać własną o tej samej długości.
+        * **więcej wpisów, skrót się zgadza** → w porządku. Dziennik wyprzedza kotwicę,
+          co zdarza się po przerwaniu między zapisem wpisu a zapisem kotwicy — nic nie zginęło.
+
+        Returns:
+            ``True``, gdy brak kotwicy albo gdy dziennik jest wobec niej kompletny.
+        """
+        if self.anchor_path is None or not self.anchor_path.is_file():
+            return True
+        try:
+            dane = json.loads(self.anchor_path.read_text(encoding="utf-8"))
+            oczekiwane = int(dane["wpisow"])
+            skrot = str(dane["skrot"])
+        except (OSError, ValueError, KeyError, TypeError):
+            # Nieczytelna kotwica NIE może unieważniać dziennika — to byłby fałszywy alarm
+            # manipulacji po zwykłym uszkodzeniu pliku pomocniczego.
+            return True
+        if len(self._entries) < oczekiwane:
+            return False
+        if oczekiwane == 0:
+            return True
+        return self._entries[oczekiwane - 1].entry_hash == skrot
+
     @classmethod
-    def load(cls, path: str | Path, *, hmac_key: bytes | None = None) -> AuditLog:
+    def load(
+        cls,
+        path: str | Path,
+        *,
+        hmac_key: bytes | None = None,
+        anchor_path: str | Path | None = None,
+    ) -> AuditLog:
         """Wczytuje dziennik z pliku JSONL i odtwarza łańcuch (do ``verify``)."""
         source = Path(path)
-        log = cls(path=None, hmac_key=hmac_key)
+        log = cls(
+            path=None,
+            hmac_key=hmac_key,
+            anchor_path=Path(anchor_path) if anchor_path is not None else None,
+        )
         for line in source.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
@@ -217,7 +313,9 @@ def build_audit_log(security: SecurityConfig) -> AuditLog:
     if not audit.enabled:
         return AuditLog(path=None)
     path = Path(audit.path)
-    log = AuditLog(path=path)
+    # Kotwica leży obok dziennika i ma tę samą nazwę z przyrostkiem. Osobny plik, bo musi
+    # przetrwać odcięcie ogona dziennika — trzymanie jej W dzienniku niczego by nie dało.
+    log = AuditLog(path=path, anchor_path=path.with_name(path.name + ".kotwica"))
     if path.exists():
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
